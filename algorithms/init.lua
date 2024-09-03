@@ -15,8 +15,8 @@ for word in list:gmatch("[^,%s]+") do
 	c_mods[word] = true
 end
 
--- Load the shared library mylibrary.so in the mod folder of the calling mod
-algorithms.load_library = function()
+-- Load the shared library mylibrary.so in the mod folder of the calling mod, or on path libpath relative to the mod folder
+algorithms.load_library = function(libpath)
 	local modname = minetest.get_current_modname()
 
 	if not c_mods[modname] then
@@ -30,7 +30,12 @@ algorithms.load_library = function()
 	already_loaded[modname] = true
 
 	local MP = minetest.get_modpath(modname)
-	local libinit, err = ie.package.loadlib(MP.."/mylibrary.so", "luaopen_mylibrary")
+	local libinit, err
+	if type(libpath) == "string" then
+		libinit, err = ie.package.loadlib(MP.."/"..libpath, "luaopen_mylibrary")
+	else
+		libinit, err = ie.package.loadlib(MP.."/mylibrary.so", "luaopen_mylibrary")
+	end
 	if not libinit and err then
 		minetest.log("["..modname.."]: Failed to load shared object file")
 		minetest.log("["..modname.."]: "..err)
@@ -42,22 +47,30 @@ algorithms.load_library = function()
 end
 algorithms.load_library()
 
+algorithms.table_contains = function(t, value)
+	if type(t) ~= "table"
+		return false
+	end
+	for _, val in ipairs(t) do
+		if val == value then
+			return true
+		end
+	end
+	return false
+end
+
 local unit_to_secs = {
 	s = 1, m = 60, h = 3600,
 	D = 86400, W = 604800, M = 2592000, Y = 31104000,
 	[""] = 1,
 }
-
 -- Convert input using time labels (s, m, h, etc) into seconds
 algorithms.parse_time = function(t)
 	if type(t) ~= "string" then
-		return nil
+		return 0
 	end
-	local secs = nil
+	local secs = 0
 	for num, unit in t:gmatch("(%d+)([smhDWMY]?)") do
-		if not secs then
-			secs = 0
-		end
 		secs = secs + (tonumber(num) * (unit_to_secs[unit] or 1))
 	end
 	return secs

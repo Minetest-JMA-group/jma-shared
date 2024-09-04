@@ -48,7 +48,7 @@ end
 algorithms.load_library()
 
 algorithms.table_contains = function(t, value)
-	if type(t) ~= "table"
+	if type(t) ~= "table" then
 		return false
 	end
 	for _, val in ipairs(t) do
@@ -211,6 +211,6 @@ algorithms.lcs = function(string1, string2)
 		i = i - 1
 		j = j - 1
 	end
-	
+
 	return utf8_simple.reverse(res)
 end

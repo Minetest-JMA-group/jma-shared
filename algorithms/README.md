@@ -12,3 +12,5 @@
 - indexed_table `algorithms.createMatrix(n: number, m: number)` -  Create a zero-filled matrix of integers with dimensions n x m
 - string `algorithms.matostr(matrix: indexed_table)` - Convert a matrix to a human-readable string, aligning columns and rows
 - string `algorithms.lcs(string1: string, string2: string)` - Find Longest Common Substring (LCS) between string1 and string2
+- customType `algorithms.getconfig(key: string, default: customType, [optional] modstorage)` - Return the object serialized under "key" in modstorage, or `default` if the object doesn't exist. modstorage is either passed as parameter, or obtained with algorithms.get_mod_storage()
+- modstorage `algorithms.get_mod_storage()` - Return a modstorage userobject and saves it inside algorithms mod so that it doesn't have to be passed as parameter later. Must be called during mod load time.

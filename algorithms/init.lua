@@ -6,6 +6,7 @@ algorithms = {}
 algorithms.countCaps = function(string) return 0 end
 algorithms.lower = function(string) return string end
 algorithms.upper = function(string) return string end
+local modstorage = {}
 local already_loaded = {}
 local c_mods = {}
 local ie = minetest.request_insecure_environment()
@@ -47,6 +48,7 @@ algorithms.load_library = function(libpath)
 end
 algorithms.load_library()
 
+-- Check whether the value `value` exists in an indexed table `t`
 algorithms.table_contains = function(t, value)
 	if type(t) ~= "table" then
 		return false
@@ -57,6 +59,28 @@ algorithms.table_contains = function(t, value)
 		end
 	end
 	return false
+end
+
+-- Return modstorage object, but also save it in modstorage[modname] for later use
+algorithms.get_mod_storage = function()
+	local modname = minetest.get_current_modname()
+	modstorage[modname] = minetest.get_mod_storage()
+	return modstorage[modname]
+end
+
+-- Deserialize and return the object stored under the key `key` in either `s` - the modstorage passed as an argument, or modstorage[modname]
+-- If there is no object referenced under the key `key` return `default`
+algorithms.getconfig = function(key, default, s)
+	local modname = minetest.get_current_modname()
+	local storage = s or modstorage[modname]
+	if type(key) ~= "string" or not s
+		return default
+	end
+	if storage:contains(key) then
+		return minetest.deserialize(storage:get_string(key))
+	else
+		return default
+	end
 end
 
 local unit_to_secs = {
@@ -82,7 +106,6 @@ local function checkPlural(timeNum, timeStr)
 	end
 	return timeStr.."s"
 end
-
 -- Convert time in seconds to rounded human-readable string
 algorithms.time_to_string = function(sec)
 	if type(sec) ~= "number" then

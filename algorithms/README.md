@@ -4,6 +4,9 @@
 
 ## API reference
 
+- number `algorithms.countCaps(string: string)` - Count capital letters in the string. Supports different scripts. (C++)
+- string `algorithms.lower(string: string)` - Turn the string to all-lowercase. Supports different scripts. (C++)
+- string `algorithms.upper(string: string)` - Turn the string to all-uppercase. Supports different scripts. (C++)
 - nil `algorithms.load_library(libpath: string)` - load library at the path libpath relative to the mod folder, or (default) mylibrary.so in the calling mod folder
 - boolean `algorithms.table_contains(t: indexed_table, value)` - return true if value exists in indexed table t, and false otherwise
 - number `algorithms.parse_time(t: string)` - convert the time expression (e.g. 5h) to seconds. return 0 for invalid input.

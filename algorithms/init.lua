@@ -73,7 +73,7 @@ end
 algorithms.getconfig = function(key, default, s)
 	local modname = minetest.get_current_modname()
 	local storage = s or modstorage[modname]
-	if type(key) ~= "string" or not s
+	if type(key) ~= "string" or not s then
 		return default
 	end
 	if storage:contains(key) then

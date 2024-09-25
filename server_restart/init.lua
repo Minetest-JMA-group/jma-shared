@@ -54,7 +54,6 @@ if not minetest.global_exists("ctf_modebase") then
 	return
 end
 
-local queue_restart = false
 local requested_by
 
 minetest.register_chatcommand("qrestart", {
@@ -63,7 +62,7 @@ minetest.register_chatcommand("qrestart", {
 	privs = {dev = true},
 	func = function(name, param)
 		requested_by = name
-		queue_restart = true
+		ctf_modebase.restart_on_next_match = true
 		return true, "Ok. The server will be restarted after the match."
 	end
 })
@@ -72,9 +71,9 @@ minetest.register_chatcommand("qcancel", {
 	description = "Cancel scheduled server restart",
 	privs = {dev = true},
 	func = function()
-		if queue_restart then
+		if ctf_modebase.restart_on_next_match then
 			requested_by = nil
-			queue_restart = false
+			ctf_modebase.restart_on_next_match = false
 			return true, "Cancelled."
 		end
 		return false, "Nothing to cancel"
@@ -82,10 +81,7 @@ minetest.register_chatcommand("qcancel", {
 })
 
 ctf_api.register_on_match_end(function()
-	if queue_restart then
-		ctf_modebase.restart_on_next_match = true
+	if ctf_modebase.restart_on_next_match then
 		server_restart.request_restart(requested_by, 0)
-		requested_by = nil
-		queue_restart = false
 	end
 end)

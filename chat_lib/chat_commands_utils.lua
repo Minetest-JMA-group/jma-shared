@@ -43,7 +43,7 @@ function chat_lib.execute_chatcommand(name, command, param, callback)
 end
 
 function chat_lib.relay_is_chatcommand_allowed(command)
-	return chat_lib.relay_allowed_chat_commands[command]
+	return chat_lib.relay_allowed_chat_commands[command] == true
 end
 
 minetest.register_chatcommand("relay_commands", {

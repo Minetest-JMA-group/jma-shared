@@ -15,7 +15,7 @@ local do_restart = function()
 end
 
 if not shell_command then
-	minetest.log("warning", "server_restart: shell command is not defined in minetest.conf (restart_command), using minetest.request_shutdown function")
+	minetest.log("warning", "server_restart: 'restart_command' parameter is not set in minetest.conf, using minetest.request_shutdown function")
 	do_restart = function()
 		minetest.request_shutdown(disconnect_msg, true)
 	end

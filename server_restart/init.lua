@@ -9,7 +9,7 @@ local disconnect_msg = "Server is restarting. Please reconnect in a couple secon
 
 local do_restart = function()
 	for _, p in ipairs(minetest.get_connected_players()) do
-		minetest.disconnect_player(p:get_player_name(), disconnect_msg)
+		minetest.disconnect_player(p:get_player_name(), disconnect_msg, true)
 	end
 	ie.os.execute(shell_command)
 end

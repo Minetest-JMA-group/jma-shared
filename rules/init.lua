@@ -59,8 +59,7 @@ function rules.show(player)
 		fs = fs .. "button_exit[1.25,10;4,0.8;yes; " .. yes .. "]button_exit[5.75,10;4,0.8;no;" .. no .. "]"
 	end
 
-	-- minetest.show_formspec(pname, "rules:rules", fs)
-	sfse.open_formspec(pname, "rules:rules", fs)
+	minetest.show_formspec(pname, "rules:rules", fs)
 end
 
 function rules.show_editor(pname)

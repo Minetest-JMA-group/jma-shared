@@ -103,6 +103,9 @@ minetest.register_on_newplayer(function(player)
 
 	minetest.after(0.3, function ()
 		if minetest.get_player_by_name(pname) then
+			local msg = "Welcome! To begin playing, please use the chat command \"/rules\" to review the server rules. Once you've read them, you'll need to accept them to play."
+			minetest.chat_send_player(pname, minetest.colorize("orange", msg))
+
 			local privs = minetest.get_player_privs(pname)
 			privs.shout = nil
 			privs.interact = nil
@@ -135,9 +138,6 @@ minetest.register_on_player_receive_fields(function(player, form, fields)
 		minetest.chat_send_player(pname, minetest.colorize("lime", "Welcome ".. pname .."! You have now permission to play!"))
 	elseif fields.no then
 		minetest.kick_player(pname, "You need to agree to the rules to play on this server. Please rejoin and confirm another time.")
-	-- elseif fields.guest then
-	-- 	local msg = "To begin playing, please use the chat command \"/rules\" to review the server rules. Once you've read them, you'll need to accept them to play."
-	-- 	minetest.chat_send_player(pname, minetest.colorize("orange", msg))
 	elseif fields.quit then
 		rules.show(player)
 	end

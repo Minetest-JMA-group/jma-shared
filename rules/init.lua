@@ -156,7 +156,7 @@ minetest.register_on_player_receive_fields(function(player, form, fields)
 			file:write(new_txt)
 			file:close()
 
-			rules.txt = minetest.formspec_escape(new_txt)
+			rules.txt = new_txt
 			minetest.chat_send_player(pname, "Rules saved")
 			return true
 		end

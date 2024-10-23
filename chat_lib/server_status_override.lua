@@ -86,7 +86,7 @@ minetest.register_chatcommand("set_motd", {
 })
 
 minetest.register_chatcommand("set_motd_color", {
-	description = "Set message of the day displayed to players connecting",
+	description = "Set MOTD color",
 	params = "<text>",
 	privs = {dev = true},
 	func = function(name, color)

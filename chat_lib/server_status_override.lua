@@ -87,7 +87,7 @@ minetest.register_chatcommand("set_motd", {
 
 minetest.register_chatcommand("set_motd_color", {
 	description = "Set MOTD color",
-	params = "<text>",
+	params = "<color string>",
 	privs = {dev = true},
 	func = function(name, color)
 		minetest.settings:set("motd_color", color)

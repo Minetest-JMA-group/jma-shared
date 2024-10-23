@@ -41,3 +41,4 @@ end
 
 
 dofile(minetest.get_modpath("chat_lib") .. "/chat_commands_utils.lua")
+dofile(minetest.get_modpath("chat_lib") .. "/server_status_override.lua")

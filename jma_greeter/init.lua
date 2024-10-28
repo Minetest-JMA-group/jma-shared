@@ -44,13 +44,12 @@ function jma_greeter.write_file(filename, content)
 end
 
 function jma_greeter.show_editor(pname, txt, title, actions)
-	if not jma_greeter.editor_context[pname] then
-		local ctx = {}
-		for key, value in pairs(actions) do
-			ctx[key] = value
-		end
-		jma_greeter.editor_context[pname] = ctx
+	local ctx = {}
+	for key, value in pairs(actions) do
+		ctx[key] = value
 	end
+	jma_greeter.editor_context[pname] = ctx
+
 	local fs = jma_greeter.get_base_formspec({
 		title  = "Editor: " .. title,
 		size = {x = 11, y = 11},

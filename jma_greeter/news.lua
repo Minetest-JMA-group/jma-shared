@@ -39,7 +39,7 @@ function jma_greeter.show_news(pname, force)
 		bar_color = "#2d42fc",
 	})
 	.. "box[0,0.7;14,9.1;#00000055]"
-	.. "hypertext[0.1,0.8;13.8,8.9;rules;" .. news_text .. "]"
+	.. "hypertext[0.1,0.8;13.8,8.9;rules;" .. minetest.formspec_escape(news_text) .. "]"
 	.. "button_exit[5,10;4,0.8;;Okay]"
 	.. "checkbox[8.8,0.35;disable_news;Don't show me this again;" .. is_news_disabled .. "]"
 	minetest.show_formspec(pname, "jma_greeter:news", fs)
@@ -91,7 +91,7 @@ minetest.register_chatcommand("news_editor", {
 				jma_greeter.editor_context[pname] = nil
 			end
 		}
-		jma_greeter.show_editor(pname, news_text, "News", actions)
+		jma_greeter.show_editor(pname, jma_greeter.load_file(filename) or "", "News", actions)
 		return true, "News editor shown"
 	end
 })

@@ -31,7 +31,7 @@ function jma_greeter.show_rules(player)
 		size = {x = 11, y = 11},
 	})
 	.. "box[0,0.7;11,9.1;#00000055]"
-	.. "hypertext[0.1,0.8;10.8,8.9;rules;" .. rules_text .. "]"
+	.. "hypertext[0.1,0.8;10.8,8.9;rules;" .. minetest.formspec_escape(rules_text) .. "]"
 
 	if not need_to_accept(pname) then
 		fs = fs .. "button_exit[3.5,10;4,0.8;ok;Okay]"
@@ -79,7 +79,7 @@ minetest.register_chatcommand("rules_editor", {
 				jma_greeter.editor_context[pname] = nil
 			end
 		}
-		jma_greeter.show_editor(pname, rules_text, "Rules", actions)
+		jma_greeter.show_editor(pname, jma_greeter.load_file(filename) or "", "Rules", actions)
 		return true, "Rules editor shown"
 	end
 })

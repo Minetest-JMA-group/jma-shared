@@ -6,6 +6,9 @@ local total = {}
 local storage = minetest.get_mod_storage()
 
 function playtime.get_current_playtime(name)
+	if not current[name] then
+		return 0
+	end
 	return os.time() - current[name]
 end
 

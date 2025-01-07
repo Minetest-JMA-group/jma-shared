@@ -29,6 +29,9 @@ if [ $(basename "$PWD") != "libs" ]; then
 	libspath="$2"
 fi
 
-g++ "$1"/*.cpp -o "$1"/../mylibrary.so -fPIC -lluajit-5.1 -lQt5Core -O2 \
--I/usr/include/aarch64-linux-gnu/qt5 -I/usr/include/aarch64-linux-gnu/qt5/QtCore -shared -I/usr/include/luajit-2.1/ -I"$libspath/StorageSrc/" \
+QtPrefix="/usr/include/aarch64-linux-gnu/qt5"
+
+g++ "$1"/*.cpp -o "$1"/../mylibrary.so -fPIC -lluajit-5.1 -lQt5Core -lQt5Network -lQt5Sql -O2 \
+-I"$QtPrefix" -I"$QtPrefix/QtCore" -I"$QtPrefix/QtNetwork" -I"$QtPrefix/QtSql" \
+-shared -I/usr/include/luajit-2.1/ -I"$libspath/StorageSrc/" \
 -Wl,-rpath,'$ORIGIN/'"$(realpath --relative-to="$1/.." "$libspath")" -L"$libspath"/ $3

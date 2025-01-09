@@ -77,7 +77,7 @@ public:
 
     void register_on_chat_message(chatmsg_sig);
     void register_on_chatcommand(chatcommand_sig);
-    void register_on_joinplayer(const QString &playername);
+    void register_on_joinplayer(joinplayer_sig);
     void register_on_shutdown(shutdown_sig);
     void dont_call_this_use_macro_reg_chatcommand(const QString &comm, const struct cmd_def &def);
 };

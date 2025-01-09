@@ -256,7 +256,7 @@ void minetest::register_on_chat_message(bool (* funcPtr)(QString&, QString&))
         lua_getglobal(L, "minetest");
         lua_getfield(L, -1, "register_on_chat_message");
 
-        lua_pushcfunction(L, this->lua_callback_wrapper_joinp);
+        lua_pushcfunction(L, this->lua_callback_wrapper_msg);
         lua_call(L, 1, 0);
 
         RESTORE_STACK

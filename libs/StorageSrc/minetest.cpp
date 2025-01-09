@@ -210,12 +210,44 @@ int minetest::lua_callback_wrapper_msg(lua_State *L)
     return 1;
 }
 
+int minetest::lua_callback_wrapper_joinp(lua_State *L)
+{
+    bool handled = false;
+    QString name = lua_tostring(L, 1);
+    QString command = lua_tostring(L, 2);
+    for (const auto &handler : registered_on_joinplayer) {
+        if (handler(name, command)) {
+            handled = true;
+            break;
+        }
+    }
+    lua_pushboolean(L, handled);
+    return 1;
+}
+
 bool minetest::first_chatcomm_handler = true;
 bool minetest::first_chatmsg_handler = true;
+bool minetest::first_joinplayer_handler = true;
 
 std::forward_list<chatmsg_sig> minetest::registered_on_chatmsg = std::forward_list<chatmsg_sig>();
 std::forward_list<chatcommand_sig> minetest::registered_on_chatcommand = std::forward_list<chatcommand_sig>();
+std::forward_list<joinplayer_sig> minetest::registered_on_joinplayer = std::forward_list<joinplayer_sig>();
+void minetest::register_on_joinplayer(bool (* funcPtr)(QString&, QString&))
+{
+    if (first_chatmsg_joinplayer) {
+        SAVE_STACK
 
+        lua_getglobal(L, "minetest");
+        lua_getfield(L, -1, "register_on_joinplayer");
+
+        lua_pushcfunction(L, this->lua_callback_wrapper_msg);
+        lua_call(L, 1, 0);
+
+        RESTORE_STACK
+        first_joinplayer_handler = false;
+    }
+    registered_on_joinplayer.push_front(funcPtr);
+}
 void minetest::register_on_chat_message(bool (* funcPtr)(QString&, QString&))
 {
     if (first_chatmsg_handler) {
@@ -224,7 +256,7 @@ void minetest::register_on_chat_message(bool (* funcPtr)(QString&, QString&))
         lua_getglobal(L, "minetest");
         lua_getfield(L, -1, "register_on_chat_message");
 
-        lua_pushcfunction(L, this->lua_callback_wrapper_msg);
+        lua_pushcfunction(L, this->lua_callback_wrapper_joinp);
         lua_call(L, 1, 0);
 
         RESTORE_STACK

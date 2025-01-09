@@ -57,6 +57,7 @@ private:
     static void create_command_deftable(lua_State *L, const struct cmd_def &def);
     static int lua_callback_wrapper_msg(lua_State *L);
     static int lua_callback_wrapper_comm(lua_State *L);
+    static int lua_callback_wrapper_joinp(lua_State *L);
     bool is_top_modstorage();
     std::forward_list<shutdown_sig> registered_on_shutdown;
 public:

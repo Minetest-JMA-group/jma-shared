@@ -14,6 +14,7 @@ SOURCES += \
     minetest.cpp \
     player.cpp \
     qlog.cpp \
+    qtinit.cpp \
     storage.cpp
 
 HEADERS += \

@@ -43,8 +43,8 @@ struct cmd_ret {
 
 struct cmd_def {
 	const QStringList& privs;
-	const QString& description;
-	const QString& params;
+	const char *description;
+	const char *params;
 	int (*func)(lua_State* L);
 };
 

@@ -262,10 +262,10 @@ void minetest::create_command_deftable(lua_State *L, const struct cmd_def &def)
 {
 	lua_newtable(L);
 
-	lua_pushstring(L, def.description.toUtf8().data());
+	lua_pushstring(L, def.description);
 	lua_setfield(L, -2, "description");
 
-	lua_pushstring(L, def.params.toUtf8().data());
+	lua_pushstring(L, def.params);
 	lua_setfield(L, -2, "params");
 
 	pushQStringList(L, def.privs);

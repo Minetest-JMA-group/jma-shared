@@ -3,7 +3,7 @@
 #include <storage.h>
 #define qLog QTextStream(stderr)
 
-lua_Integer storage::get_int(const QString &key)
+lua_Integer storage::get_int(const char *key) const
 {
 	SAVE_STACK;
 	lua_Integer res;
@@ -15,7 +15,7 @@ lua_Integer storage::get_int(const QString &key)
 		goto err;
 
 	lua_pushvalue(L, old_top);
-	lua_pushstring(L, key.toUtf8().data());
+	lua_pushstring(L, key);
 	if (lua_pcall(L, 2, 1, 0)) {
 		qLog << "Error calling storage function\n" << lua_tostring(L, -1) << "\n";
 		goto err;
@@ -32,7 +32,7 @@ err:
 }
 
 
-QByteArray storage::get_string(const QString &key)
+const char *storage::get_string(const char *key) const
 {
 	SAVE_STACK;
 	QByteArray res;
@@ -45,7 +45,7 @@ QByteArray storage::get_string(const QString &key)
 		goto err;
 
 	lua_pushvalue(L, old_top);
-	lua_pushstring(L, key.toUtf8().data());
+	lua_pushstring(L, key);
 	if (lua_pcall(L, 2, 1, 0)) {
 		qLog << "Error calling storage function\n" << lua_tostring(L, -1) << "\n";
 		goto err;
@@ -62,7 +62,7 @@ err:
 	return "";
 }
 
-bool storage::set_int(const QString &key, const lua_Integer a)
+bool storage::set_int(const char *key, const lua_Integer a) const
 {
 	SAVE_STACK;
 
@@ -75,7 +75,7 @@ bool storage::set_int(const QString &key, const lua_Integer a)
 		goto err;
 
 	lua_pushvalue(L, old_top);
-	lua_pushstring(L, key.toUtf8().data());
+	lua_pushstring(L, key);
 	lua_pushinteger(L, a);
 
 	if (lua_pcall(L, 3, 0, 0)) {
@@ -90,7 +90,7 @@ err:
 	return false;
 }
 
-bool storage::set_string(const QString &key, const QByteArray &str)
+bool storage::set_string(const char *key, const char *str) const
 {
 	SAVE_STACK;
 
@@ -103,8 +103,8 @@ bool storage::set_string(const QString &key, const QByteArray &str)
 		goto err;
 
 	lua_pushvalue(L, old_top);
-	lua_pushstring(L, key.toUtf8().data());
-	lua_pushstring(L, str.data());
+	lua_pushstring(L, key);
+	lua_pushstring(L, str);
 
 	if (lua_pcall(L, 3, 0, 0)) {
 		qLog << "Error calling storage function\n" << lua_tostring(L, -1) << "\n";

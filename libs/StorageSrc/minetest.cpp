@@ -18,7 +18,7 @@ void lua_state_class::set_state(lua_State *L)
     lua_setmetatable(L, -2);
 */
 
-QString minetest::get_current_modname()
+const char *minetest::get_current_modname() const
 {
 	SAVE_STACK;
 
@@ -26,28 +26,28 @@ QString minetest::get_current_modname()
 	lua_getfield(L, -1, "get_current_modname");
 
 	lua_call(L, 0, 1);
-	QString res = lua_tostring(L, -1);
+	const char *res = lua_tostring(L, -1);
 
 	RESTORE_STACK;
 	return res;
 }
 
-QString minetest::get_modpath(const QString &modname)
+const char *minetest::get_modpath(const char *modname) const
 {
 	SAVE_STACK;
 
 	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "get_modpath");
 
-	lua_pushstring(L, modname.toUtf8().data());
+	lua_pushstring(L, modname);
 	lua_call(L, 1, 1);
-	QString res = lua_tostring(L, -1);
+	const char *res = lua_tostring(L, -1);
 
 	RESTORE_STACK;
 	return res;
 }
 
-QString minetest::get_worldpath()
+const char *minetest::get_worldpath() const
 {
 	SAVE_STACK;
 
@@ -55,21 +55,21 @@ QString minetest::get_worldpath()
 	lua_getfield(L, -1, "get_worldpath");
 
 	lua_call(L, 0, 1);
-	QString res = lua_tostring(L, -1);
+	const char *res = lua_tostring(L, -1);
 
 	RESTORE_STACK;
 	return res;
 }
 
-void minetest::register_privilege(const QString &name, const QString &definition)
+void minetest::register_privilege(const char *name, const char *definition) const
 {
 	SAVE_STACK;
 
 	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "register_privilege");
 
-	lua_pushstring(L, name.toUtf8().data());
-	lua_pushstring(L, definition.toUtf8().data());
+	lua_pushstring(L, name);
+	lua_pushstring(L, definition);
 	lua_call(L, 2, 0);
 
 	RESTORE_STACK;
@@ -138,42 +138,42 @@ bool minetest::is_top_modstorage()
 	return *(void **)lua_touserdata(L, -1) == StorageRef;
 }
 
-void minetest::log_message(const QString &level, const QString &msg)
+void minetest::log_message(const char *level, const char *msg) const
 {
 	SAVE_STACK;
 
 	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "log");
 
-	lua_pushstring(L, level.toUtf8().data());
-	lua_pushstring(L, msg.toUtf8().data());
+	lua_pushstring(L, level);
+	lua_pushstring(L, msg);
 	lua_call(L, 2, 0);
 
 	RESTORE_STACK;
 }
 
-void minetest::chat_send_all(const QString &msg)
+void minetest::chat_send_all(const char *msg) const
 {
 	SAVE_STACK;
 
 	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "chat_send_all");
 
-	lua_pushstring(L, msg.toUtf8().data());
+	lua_pushstring(L, msg);
 	lua_call(L, 1, 0);
 
 	RESTORE_STACK;
 }
 
-void minetest::chat_send_player(const QString &playername, const QString &msg)
+void minetest::chat_send_player(const char *playername, const char *msg) const
 {
 	SAVE_STACK;
 
 	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "chat_send_player");
 
-	lua_pushstring(L, playername.toUtf8().data());
-	lua_pushstring(L, msg.toUtf8().data());
+	lua_pushstring(L, playername);
+	lua_pushstring(L, msg);
 	lua_call(L, 2, 0);
 
 	RESTORE_STACK;
@@ -275,13 +275,13 @@ void minetest::create_command_deftable(lua_State *L, const struct cmd_def &def)
 	lua_setfield(L, -2, "func");
 }
 
-void minetest::dont_call_this_use_macro_reg_chatcommand(const QString &comm, const struct cmd_def &def)
+void minetest::dont_call_this_use_macro_reg_chatcommand(const char *comm, const struct cmd_def &def) const
 {
 	SAVE_STACK;
 
 	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "register_chatcommand");
-	lua_pushstring(L, comm.toUtf8().data());
+	lua_pushstring(L, comm);
 	create_command_deftable(L, def);
 	lua_call(L, 2, 0);
 

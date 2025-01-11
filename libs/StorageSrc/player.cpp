@@ -3,7 +3,7 @@
 #include <player.h>
 #define qLog QTextStream(stderr)
 
-bool player::get_meta()
+bool player::get_meta() const
 {
 	SAVE_STACK;
 
@@ -26,7 +26,7 @@ err:
 	return false;
 }
 
-QString player::get_player_name()
+const char *player::get_player_name() const
 {
 	SAVE_STACK;
 

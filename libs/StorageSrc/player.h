@@ -8,8 +8,8 @@
 class player : public lua_state_class {
 public:
 	using lua_state_class::lua_state_class;
-	bool get_meta(); // Leaves PlayerMetaRef on the stack top, can be used with storage class
-	QString get_player_name();
+	bool get_meta() const; // Leaves PlayerMetaRef on the stack top, can be used with storage class
+	const char *get_player_name() const;
 };
 
 #endif // PLAYER_H

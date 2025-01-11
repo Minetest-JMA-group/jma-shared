@@ -2,21 +2,19 @@
 // Copyright (c) 2023 Marko Petrović
 #ifndef MINETEST_H
 #define MINETEST_H
-#include <luajit-2.1/lua.hpp>
-#include <QString>
+#include <player.h>
 #include <QStringList>
-#include <QTextStream>
 #include <forward_list>
+#include <time.h>
+
 #define INT_ERROR std::numeric_limits<lua_Integer>::min()
-
-#define SAVE_STACK	int __cur_top, __old_top = lua_gettop(L)
-
-#define RESTORE_STACK	__cur_top = lua_gettop(L);		\
-	                lua_pop(L, __cur_top-__old_top)
 
 #define chatcommand_sig bool (*)(QString&, QString&, QString&)
 #define chatmsg_sig bool (*)(QString&, QString&)
+#define joinplayer_sig void (*)(player&, time_t)
+#define prejoinplayer_sig const char* (*)(QString&, QString&)
 #define shutdown_sig void (*)()
+#define after_sig void (*)()
 
 void printLuaStack(lua_State* L);
 void printLuaTable(lua_State* L, int index);
@@ -27,14 +25,6 @@ inline bool lua_isinteger(lua_State *L, int index)
 {
 	return lua_type(L, index) == LUA_TNUMBER;
 }
-
-class lua_state_class {
-public:
-	lua_State *L = nullptr;
-	lua_state_class(lua_State *L);
-	lua_state_class();
-	void set_state(lua_State *L);
-};
 
 struct cmd_ret {
 	bool success;
@@ -52,16 +42,18 @@ struct cmd_def {
 class minetest : public lua_state_class {
 private:
 	void *StorageRef = nullptr;
-	static bool first_chatmsg_handler;
-	static bool first_chatcomm_handler;
 	static void create_command_deftable(lua_State *L, const struct cmd_def &def);
 	static int lua_callback_wrapper_msg(lua_State *L);
 	static int lua_callback_wrapper_comm(lua_State *L);
+	static int lua_callback_wrapper_joinplayer(lua_State *L);
+	static int lua_callback_wrapper_prejoinplayer(lua_State *L);
 	bool is_top_modstorage();
 	std::forward_list<shutdown_sig> registered_on_shutdown;
 public:
 	static std::forward_list<chatmsg_sig> registered_on_chatmsg;
 	static std::forward_list<chatcommand_sig> registered_on_chatcommand;
+	static std::forward_list<joinplayer_sig> registered_on_joinplayer;
+	static std::forward_list<prejoinplayer_sig> registered_on_prejoinplayer;
 	using lua_state_class::lua_state_class;
 	minetest();
 	~minetest();
@@ -83,6 +75,10 @@ public:
 	void register_on_chat_message(chatmsg_sig);
 	void register_on_chatcommand(chatcommand_sig);
 	void register_on_shutdown(shutdown_sig);
+	void register_on_joinplayer(joinplayer_sig);
+	void register_on_prejoinplayer(prejoinplayer_sig);
+	void after(after_sig);	// Both x86-64 and aarch64 use calling conventions that pass arguments in registers. lua_State pointer fits in register, so we can ignore it.
+
 	void dont_call_this_use_macro_reg_chatcommand(const char *comm, const struct cmd_def &def) const;
 	void dont_call_this_use_macro_reg_chatcommand(const QString &comm, const struct cmd_def &def) const { dont_call_this_use_macro_reg_chatcommand(comm.toUtf8().data(), def); }
 };

@@ -2,7 +2,21 @@
 // Copyright (c) 2023 Marko Petrović
 #ifndef PLAYER_H
 #define PLAYER_H
-#include <minetest.h>
+#include <luajit-2.1/lua.hpp>
+#include <QTextStream>
+
+#define SAVE_STACK	int __cur_top, __old_top = lua_gettop(L)
+
+#define RESTORE_STACK	__cur_top = lua_gettop(L);		\
+	                lua_pop(L, __cur_top-__old_top)
+
+class lua_state_class {
+public:
+	lua_State *L = nullptr;
+	lua_state_class(lua_State *L);
+	lua_state_class();
+	void set_state(lua_State *L);
+};
 
 // Assume that Player object is on the top of the stack
 class player : public lua_state_class {

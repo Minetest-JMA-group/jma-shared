@@ -5,10 +5,10 @@
 
 bool player::get_meta()
 {
-	SAVE_STACK
+	SAVE_STACK;
 
-	                if (!lua_isuserdata(L, -1))
-	                goto err;
+	if (!lua_isuserdata(L, -1))
+		goto err;
 	lua_getfield(L, -1, "get_meta"); // Assuming the Player object is at the top of the stack
 	if (!lua_isfunction(L, -1))
 		goto err;
@@ -22,16 +22,16 @@ bool player::get_meta()
 		goto err;
 	return true;
 err:
-	RESTORE_STACK
-	                return false;
+	RESTORE_STACK;
+	return false;
 }
 
 QString player::get_player_name()
 {
-	SAVE_STACK
+	SAVE_STACK;
 
-	                if (!lua_isuserdata(L, -1))
-	                goto err;
+	if (!lua_isuserdata(L, -1))
+		goto err;
 	lua_getfield(L, -1, "get_player_name"); // Assuming the Player object is at the top of the stack
 	if (!lua_isfunction(L, -1))
 		goto err;
@@ -46,6 +46,6 @@ QString player::get_player_name()
 
 	return lua_tostring(L, -1);
 err:
-	RESTORE_STACK
-	                return "";
+	RESTORE_STACK;
+	return "";
 }

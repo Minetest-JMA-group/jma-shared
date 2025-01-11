@@ -9,10 +9,10 @@
 #include <forward_list>
 #define INT_ERROR std::numeric_limits<lua_Integer>::min()
 
-#define SAVE_STACK int cur_top, old_top = lua_gettop(L);
+#define SAVE_STACK	int __cur_top, __old_top = lua_gettop(L)
 
-#define RESTORE_STACK     cur_top = lua_gettop(L);      \
-	lua_pop(L, cur_top-old_top);
+#define RESTORE_STACK	__cur_top = lua_gettop(L);		\
+	                lua_pop(L, __cur_top-__old_top)
 
 #define chatcommand_sig bool (*)(QString&, QString&, QString&)
 #define chatmsg_sig bool (*)(QString&, QString&)

@@ -5,8 +5,8 @@
 
 lua_Integer storage::get_int(const QString &key)
 {
-	SAVE_STACK
-	                lua_Integer res;
+	SAVE_STACK;
+	lua_Integer res;
 
 	if (!lua_isuserdata(L, -1))
 		goto err;
@@ -24,18 +24,18 @@ lua_Integer storage::get_int(const QString &key)
 		goto err;
 
 	res = lua_tointeger(L, -1);
-	RESTORE_STACK
-	                return res;
+	RESTORE_STACK;
+	return res;
 err:
-	RESTORE_STACK
-	                return INT_ERROR;
+	RESTORE_STACK;
+	return INT_ERROR;
 }
 
 
 QByteArray storage::get_string(const QString &key)
 {
-	SAVE_STACK
-	                QByteArray res;
+	SAVE_STACK;
+	QByteArray res;
 
 	if (!lua_isuserdata(L, -1))
 		goto err;
@@ -55,19 +55,19 @@ QByteArray storage::get_string(const QString &key)
 		goto err;
 
 	res = lua_tostring(L, -1);
-	RESTORE_STACK
-	                return res;
+	RESTORE_STACK;
+	return res;
 err:
-	RESTORE_STACK
-	                return "";
+	RESTORE_STACK;
+	return "";
 }
 
 bool storage::set_int(const QString &key, const lua_Integer a)
 {
-	SAVE_STACK
+	SAVE_STACK;
 
-	                if (!lua_isuserdata(L, -1))
-	                goto err;
+	if (!lua_isuserdata(L, -1))
+		goto err;
 
 	lua_getfield(L, -1, "set_int"); // Assuming the StorageRef object is at the top of the stack
 
@@ -83,19 +83,19 @@ bool storage::set_int(const QString &key, const lua_Integer a)
 		goto err;
 	}
 
-	RESTORE_STACK
-	                return true;
+	RESTORE_STACK;
+	return true;
 err:
-	RESTORE_STACK
-	                return false;
+	RESTORE_STACK;
+	return false;
 }
 
 bool storage::set_string(const QString &key, const QByteArray &str)
 {
-	SAVE_STACK
+	SAVE_STACK;
 
-	                if (!lua_isuserdata(L, -1))
-	                goto err;
+	if (!lua_isuserdata(L, -1))
+		goto err;
 
 	lua_getfield(L, -1, "set_string"); // Assuming 'storage' is at the top of the stack
 
@@ -111,9 +111,9 @@ bool storage::set_string(const QString &key, const QByteArray &str)
 		goto err;
 	}
 
-	RESTORE_STACK
-	                return true;
+	RESTORE_STACK;
+	return true;
 err:
-	RESTORE_STACK
-	                return false;
+	RESTORE_STACK;
+	return false;
 }

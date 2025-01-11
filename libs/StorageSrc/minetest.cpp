@@ -20,59 +20,59 @@ void lua_state_class::set_state(lua_State *L)
 
 QString minetest::get_current_modname()
 {
-	SAVE_STACK
+	SAVE_STACK;
 
-	                lua_getglobal(L, "minetest");
+	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "get_current_modname");
 
 	lua_call(L, 0, 1);
 	QString res = lua_tostring(L, -1);
 
-	RESTORE_STACK
-	                return res;
+	RESTORE_STACK;
+	return res;
 }
 
 QString minetest::get_modpath(const QString &modname)
 {
-	SAVE_STACK
+	SAVE_STACK;
 
-	                lua_getglobal(L, "minetest");
+	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "get_modpath");
 
 	lua_pushstring(L, modname.toUtf8().data());
 	lua_call(L, 1, 1);
 	QString res = lua_tostring(L, -1);
 
-	RESTORE_STACK
-	                return res;
+	RESTORE_STACK;
+	return res;
 }
 
 QString minetest::get_worldpath()
 {
-	SAVE_STACK
+	SAVE_STACK;
 
-	                lua_getglobal(L, "minetest");
+	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "get_worldpath");
 
 	lua_call(L, 0, 1);
 	QString res = lua_tostring(L, -1);
 
-	RESTORE_STACK
-	                return res;
+	RESTORE_STACK;
+	return res;
 }
 
 void minetest::register_privilege(const QString &name, const QString &definition)
 {
-	SAVE_STACK
+	SAVE_STACK;
 
-	                lua_getglobal(L, "minetest");
+	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "register_privilege");
 
 	lua_pushstring(L, name.toUtf8().data());
 	lua_pushstring(L, definition.toUtf8().data());
 	lua_call(L, 2, 0);
 
-	RESTORE_STACK
+	RESTORE_STACK;
 }
 
 void minetest::get_mod_storage()
@@ -118,11 +118,11 @@ minetest::~minetest()
 {
 	// Construct a StorageRef object WITH __gc method to collect it
 	if (StorageRef != nullptr && L != nullptr) {
-		SAVE_STACK
-		                *(void **)(lua_newuserdata(L, sizeof(void *))) = StorageRef;
+		SAVE_STACK;
+		*(void **)(lua_newuserdata(L, sizeof(void *))) = StorageRef;
 		luaL_getmetatable(L, "StorageRef");
 		lua_setmetatable(L, -2);
-		RESTORE_STACK
+		RESTORE_STACK;
 	}
 	// Call shutdown callbacks
 	for (const auto &handler : registered_on_shutdown)
@@ -140,43 +140,43 @@ bool minetest::is_top_modstorage()
 
 void minetest::log_message(const QString &level, const QString &msg)
 {
-	SAVE_STACK
+	SAVE_STACK;
 
-	                lua_getglobal(L, "minetest");
+	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "log");
 
 	lua_pushstring(L, level.toUtf8().data());
 	lua_pushstring(L, msg.toUtf8().data());
 	lua_call(L, 2, 0);
 
-	RESTORE_STACK
+	RESTORE_STACK;
 }
 
 void minetest::chat_send_all(const QString &msg)
 {
-	SAVE_STACK
+	SAVE_STACK;
 
-	                lua_getglobal(L, "minetest");
+	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "chat_send_all");
 
 	lua_pushstring(L, msg.toUtf8().data());
 	lua_call(L, 1, 0);
 
-	RESTORE_STACK
+	RESTORE_STACK;
 }
 
 void minetest::chat_send_player(const QString &playername, const QString &msg)
 {
-	SAVE_STACK
+	SAVE_STACK;
 
-	                lua_getglobal(L, "minetest");
+	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "chat_send_player");
 
 	lua_pushstring(L, playername.toUtf8().data());
 	lua_pushstring(L, msg.toUtf8().data());
 	lua_call(L, 2, 0);
 
-	RESTORE_STACK
+	RESTORE_STACK;
 }
 
 int minetest::lua_callback_wrapper_comm(lua_State *L)
@@ -219,16 +219,16 @@ std::forward_list<chatcommand_sig> minetest::registered_on_chatcommand = std::fo
 void minetest::register_on_chat_message(bool (* funcPtr)(QString&, QString&))
 {
 	if (first_chatmsg_handler) {
-		SAVE_STACK
+		SAVE_STACK;
 
-		                lua_getglobal(L, "minetest");
+		lua_getglobal(L, "minetest");
 		lua_getfield(L, -1, "register_on_chat_message");
 
 		lua_pushcfunction(L, this->lua_callback_wrapper_msg);
 		lua_call(L, 1, 0);
 
-		RESTORE_STACK
-		                first_chatmsg_handler = false;
+		RESTORE_STACK;
+		first_chatmsg_handler = false;
 	}
 	registered_on_chatmsg.push_front(funcPtr);
 }
@@ -236,16 +236,16 @@ void minetest::register_on_chat_message(bool (* funcPtr)(QString&, QString&))
 void minetest::register_on_chatcommand(bool (* funcPtr)(QString&, QString&, QString&))
 {
 	if (first_chatcomm_handler) {
-		SAVE_STACK
+		SAVE_STACK;
 
-		                lua_getglobal(L, "minetest");
+		lua_getglobal(L, "minetest");
 		lua_getfield(L, -1, "register_on_chatcommand");
 
 		lua_pushcfunction(L, this->lua_callback_wrapper_comm);
 		lua_call(L, 1, 0);
 
-		RESTORE_STACK
-		                first_chatcomm_handler = false;
+		RESTORE_STACK;
+		first_chatcomm_handler = false;
 	}
 	registered_on_chatcommand.push_front(funcPtr);
 }
@@ -277,13 +277,13 @@ void minetest::create_command_deftable(lua_State *L, const struct cmd_def &def)
 
 void minetest::dont_call_this_use_macro_reg_chatcommand(const QString &comm, const struct cmd_def &def)
 {
-	SAVE_STACK
+	SAVE_STACK;
 
-	                lua_getglobal(L, "minetest");
+	lua_getglobal(L, "minetest");
 	lua_getfield(L, -1, "register_chatcommand");
 	lua_pushstring(L, comm.toUtf8().data());
 	create_command_deftable(L, def);
 	lua_call(L, 2, 0);
 
-	RESTORE_STACK
+	RESTORE_STACK;
 }

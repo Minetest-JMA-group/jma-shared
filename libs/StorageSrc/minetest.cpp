@@ -22,7 +22,7 @@ const char *minetest::get_current_modname() const
 {
 	SAVE_STACK;
 
-	lua_getglobal(L, "minetest");
+	lua_getglobal(L, "core");
 	lua_getfield(L, -1, "get_current_modname");
 
 	lua_call(L, 0, 1);
@@ -36,7 +36,7 @@ const char *minetest::get_modpath(const char *modname) const
 {
 	SAVE_STACK;
 
-	lua_getglobal(L, "minetest");
+	lua_getglobal(L, "core");
 	lua_getfield(L, -1, "get_modpath");
 
 	lua_pushstring(L, modname);
@@ -51,7 +51,7 @@ const char *minetest::get_worldpath() const
 {
 	SAVE_STACK;
 
-	lua_getglobal(L, "minetest");
+	lua_getglobal(L, "core");
 	lua_getfield(L, -1, "get_worldpath");
 
 	lua_call(L, 0, 1);
@@ -65,7 +65,7 @@ void minetest::register_privilege(const char *name, const char *definition) cons
 {
 	SAVE_STACK;
 
-	lua_getglobal(L, "minetest");
+	lua_getglobal(L, "core");
 	lua_getfield(L, -1, "register_privilege");
 
 	lua_pushstring(L, name);
@@ -81,7 +81,7 @@ void minetest::get_mod_storage()
 		return;
 
 	if (StorageRef == nullptr) {
-		lua_getglobal(L, "minetest");
+		lua_getglobal(L, "core");
 		lua_getfield(L, -1, "get_mod_storage");
 		lua_remove(L, -2);
 		lua_call(L, 0, 1);
@@ -142,7 +142,7 @@ void minetest::log_message(const char *level, const char *msg) const
 {
 	SAVE_STACK;
 
-	lua_getglobal(L, "minetest");
+	lua_getglobal(L, "core");
 	lua_getfield(L, -1, "log");
 
 	lua_pushstring(L, level);
@@ -156,7 +156,7 @@ void minetest::chat_send_all(const char *msg) const
 {
 	SAVE_STACK;
 
-	lua_getglobal(L, "minetest");
+	lua_getglobal(L, "core");
 	lua_getfield(L, -1, "chat_send_all");
 
 	lua_pushstring(L, msg);
@@ -169,7 +169,7 @@ void minetest::chat_send_player(const char *playername, const char *msg) const
 {
 	SAVE_STACK;
 
-	lua_getglobal(L, "minetest");
+	lua_getglobal(L, "core");
 	lua_getfield(L, -1, "chat_send_player");
 
 	lua_pushstring(L, playername);
@@ -258,7 +258,7 @@ void minetest::register_on_chat_message(bool (* funcPtr)(QString&, QString&))
 	if (first_chatmsg_handler) {
 		SAVE_STACK;
 
-		lua_getglobal(L, "minetest");
+		lua_getglobal(L, "core");
 		lua_getfield(L, -1, "register_on_chat_message");
 
 		lua_pushcfunction(L, this->lua_callback_wrapper_msg);
@@ -277,7 +277,7 @@ void minetest::register_on_chatcommand(bool (* funcPtr)(QString&, QString&, QStr
 	if (first_chatcomm_handler) {
 		SAVE_STACK;
 
-		lua_getglobal(L, "minetest");
+		lua_getglobal(L, "core");
 		lua_getfield(L, -1, "register_on_chatcommand");
 
 		lua_pushcfunction(L, this->lua_callback_wrapper_comm);
@@ -296,7 +296,7 @@ void minetest::register_on_prejoinplayer(const char* (* funcPtr)(QString &, QStr
 	if (first_prejoinplayer_handler) {
 		SAVE_STACK;
 
-		lua_getglobal(L, "minetest");
+		lua_getglobal(L, "core");
 		lua_getfield(L, -1, "register_on_prejoinplayer");
 
 		lua_pushcfunction(L, this->lua_callback_wrapper_prejoinplayer);
@@ -315,7 +315,7 @@ void minetest::register_on_joinplayer(void (* funcPtr)(player &, time_t))
 	if (first_joinplayer_handler) {
 		SAVE_STACK;
 
-		lua_getglobal(L, "minetest");
+		lua_getglobal(L, "core");
 		lua_getfield(L, -1, "register_on_prejoinplayer");
 
 		lua_pushcfunction(L, this->lua_callback_wrapper_joinplayer);
@@ -331,7 +331,7 @@ void minetest::after(void (* funcPtr)())
 {
 	SAVE_STACK;
 
-	lua_getglobal(L, "minetest");
+	lua_getglobal(L, "core");
 	lua_getfield(L, -1, "after");
 
 	lua_pushcfunction(L, (lua_CFunction) funcPtr);
@@ -369,7 +369,7 @@ void minetest::dont_call_this_use_macro_reg_chatcommand(const char *comm, const 
 {
 	SAVE_STACK;
 
-	lua_getglobal(L, "minetest");
+	lua_getglobal(L, "core");
 	lua_getfield(L, -1, "register_chatcommand");
 	lua_pushstring(L, comm);
 	create_command_deftable(L, def);

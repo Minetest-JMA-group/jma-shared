@@ -13,7 +13,7 @@ bool player::get_meta()
 	if (!lua_isfunction(L, -1))
 		goto err;
 
-	lua_pushvalue(L, old_top);
+	lua_pushvalue(L, __old_top);
 	if (lua_pcall(L, 1, 1, 0)) {
 		qLog << "Error calling player function\n" << lua_tostring(L, -1) << "\n";
 		goto err;
@@ -36,7 +36,7 @@ QString player::get_player_name()
 	if (!lua_isfunction(L, -1))
 		goto err;
 
-	lua_pushvalue(L, old_top);
+	lua_pushvalue(L, __old_top);
 	if (lua_pcall(L, 1, 1, 0)) {
 		qLog << "Error calling player function\n" << lua_tostring(L, -1) << "\n";
 		goto err;

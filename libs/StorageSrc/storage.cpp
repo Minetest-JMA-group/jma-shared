@@ -14,7 +14,7 @@ lua_Integer storage::get_int(const char *key) const
 	if (!lua_isfunction(L, -1))
 		goto err;
 
-	lua_pushvalue(L, old_top);
+	lua_pushvalue(L, __old_top);
 	lua_pushstring(L, key);
 	if (lua_pcall(L, 2, 1, 0)) {
 		qLog << "Error calling storage function\n" << lua_tostring(L, -1) << "\n";
@@ -44,7 +44,7 @@ const char *storage::get_string(const char *key) const
 	if (!lua_isfunction(L, -1))
 		goto err;
 
-	lua_pushvalue(L, old_top);
+	lua_pushvalue(L, __old_top);
 	lua_pushstring(L, key);
 	if (lua_pcall(L, 2, 1, 0)) {
 		qLog << "Error calling storage function\n" << lua_tostring(L, -1) << "\n";
@@ -74,7 +74,7 @@ bool storage::set_int(const char *key, const lua_Integer a) const
 	if (!lua_isfunction(L, -1))
 		goto err;
 
-	lua_pushvalue(L, old_top);
+	lua_pushvalue(L, __old_top);
 	lua_pushstring(L, key);
 	lua_pushinteger(L, a);
 
@@ -102,7 +102,7 @@ bool storage::set_string(const char *key, const char *str) const
 	if (!lua_isfunction(L, -1))
 		goto err;
 
-	lua_pushvalue(L, old_top);
+	lua_pushvalue(L, __old_top);
 	lua_pushstring(L, key);
 	lua_pushstring(L, str);
 

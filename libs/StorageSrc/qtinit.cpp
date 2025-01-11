@@ -4,11 +4,13 @@
 #include <minetest.h>
 #include <QCoreApplication>
 #include <thread>
+#include <future>
 #include <linux/prctl.h>
 #include <sys/prctl.h>
 #include <unistd.h>
 #include <QtLogging>
 #include <QtDebug>
+#include <QTimer>
 
 std::thread *t;
 
@@ -27,7 +29,7 @@ void __attribute__((destructor)) cleanup()
 
 }
 
-void QtMainThread()
+void QtMainThread(std::promise<void> done)
 {
 	char name[] = "luanti";
 	char *argv[2] = {name, NULL};
@@ -37,11 +39,19 @@ void QtMainThread()
 		perror("prctl");
 	QCoreApplication app(argc, argv);
 	qInfo() << "Created QCoreApplication in thread" << gettid() << "\tStarting Qt event loop...";
+
+	QTimer::singleShot(0, [ done = std::move(done) ]() mutable {
+		done.set_value();
+	});
 	ret = app.exec();
 	qInfo() << "QCoreApplication exited with exit status:" << ret;
 }
 
 void __attribute__((constructor)) QCore_start()
 {
-	t = new std::thread(QtMainThread);
+	std::promise<void> promise;
+	auto future = promise.get_future();
+
+	t = new std::thread(QtMainThread, std::move(promise));
+	future.wait();	// Wait for event loop to be ready
 }

@@ -196,6 +196,20 @@ algorithms.matostr = function(matrix)
 	return pr
 end
 
+-- Check if two tables have a common key and what it is
+algorithms.hasCommonKey = function(tbl1, tbl2)
+	if type(tbl1) ~= "table" or type(tbl2) ~= "table" then
+		return false
+	end
+
+	for key, _ in pairs(tbl1) do
+		if tbl2[key] then
+			return true, key
+		end
+	end
+	return false
+end
+
 -- Longest Common Substring
 algorithms.lcs = function(string1, string2)
 	if type(string1) ~= "string" or type(string2) ~= "string" then

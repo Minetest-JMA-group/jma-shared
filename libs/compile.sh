@@ -29,7 +29,17 @@ if [ $(basename "$PWD") != "libs" ]; then
 	libspath="$2"
 fi
 
-QtPrefix="/usr/include/aarch64-linux-gnu/qt5"
+if [ -d "/usr/include/aarch64-linux-gnu/qt5" ]; then
+	QtPrefix="/usr/include/aarch64-linux-gnu/qt5"
+fi
+
+if [ -d "/usr/include/x86-64-linux-gnu/qt5" ]; then
+	QtPrefix="/usr/include/x86-64-linux-gnu/qt5"
+fi
+
+if [ -d "/usr/include/qt5" ]; then
+	QtPrefix="/usr/include/qt5"
+fi
 
 g++ "$1"/*.cpp -o "$1"/../mylibrary.so -fPIC -lluajit-5.1 -lQt5Core -lQt5Network -lQt5Sql -O2 \
 -I"$QtPrefix" -I"$QtPrefix/QtCore" -I"$QtPrefix/QtNetwork" -I"$QtPrefix/QtSql" \

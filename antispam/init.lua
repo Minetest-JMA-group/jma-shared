@@ -141,7 +141,7 @@ end)
 core.register_chatcommand("antispam", {
     description = "Configure anti-spam settings",
     params = "<setting> <value>",
-    privs = {server = true},
+    privs = {filtering = true},
     func = function(name, param)
         local option, value = param:match("^(%S+)%s+(%d+)$")
 

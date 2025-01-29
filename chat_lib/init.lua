@@ -39,6 +39,48 @@ function minetest.chat_send_player(name, message, source)
 	chat_lib.chat_send_player(name, message)
 end
 
+function chat_lib.send_message_to_privileged(message, privileges)
+	if not message or not privileges then
+		return 0
+	end
+
+	-- Convert privileges to table if it's a string
+	local priv_list = type(privileges) == "string" and {privileges} or privileges
+
+	-- Convert list of privileges to check format if needed
+	local priv_check = {}
+	for _, priv in ipairs(priv_list) do
+		if type(priv) == "string" then
+			priv_check[priv] = true
+		elseif type(priv) == "table" then
+			-- Merge privilege tables
+			for p, v in pairs(priv) do
+				priv_check[p] = v
+			end
+		end
+	end
+
+	local count = 0
+	local sent_to = {} -- Track players who already received the message
+
+	-- Get all connected players
+	for _, player in ipairs(minetest.get_connected_players()) do
+		local player_name = player:get_player_name()
+		-- Check if player has any of the required privileges and hasn't received the message yet
+		if not sent_to[player_name] then
+			for priv_name in pairs(priv_check) do
+				if minetest.check_player_privs(player_name, {[priv_name] = true}) then
+					minetest.chat_send_player(player_name, message)
+					count = count + 1
+					sent_to[player_name] = true
+					break -- Stop checking other privileges for this player
+				end
+			end
+		end
+	end
+
+	return count
+end
 
 dofile(minetest.get_modpath("chat_lib") .. "/chat_commands_utils.lua")
 dofile(minetest.get_modpath("chat_lib") .. "/server_status_override.lua")

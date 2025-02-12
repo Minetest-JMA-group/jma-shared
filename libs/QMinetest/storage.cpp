@@ -32,7 +32,7 @@ err:
 }
 
 
-const char *storage::get_string(const char *key) const
+QByteArray storage::get_string(const char *key) const
 {
 	SAVE_STACK;
 	QByteArray res;

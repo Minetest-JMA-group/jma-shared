@@ -13,7 +13,7 @@ public:
 	{
 		return get_int(key.toUtf8().data());
 	}
-	const char *get_string(const char *key) const;
+	QByteArray get_string(const char *key) const;
 	QByteArray get_string(const QString &key) const
 	{
 		return get_string(key.toUtf8().data());

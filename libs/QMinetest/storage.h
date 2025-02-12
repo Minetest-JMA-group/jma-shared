@@ -28,6 +28,11 @@ public:
 	{
 		return set_string(key.toUtf8().data(), str.constData());
 	}
+	bool contains(const char *key) const;
+	bool contains(const QString &key) const
+	{
+		return contains(key.toUtf8().data());
+	}
 };
 
 #endif // STORAGE_H

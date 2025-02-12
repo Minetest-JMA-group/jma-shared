@@ -29,19 +29,19 @@ if [ $(basename "$PWD") != "libs" ]; then
 	libspath="$2"
 fi
 
-if [ -d "/usr/include/aarch64-linux-gnu/qt5" ]; then
-	QtPrefix="/usr/include/aarch64-linux-gnu/qt5"
+if [ -d "/usr/include/aarch64-linux-gnu/qt6" ]; then
+	QtPrefix="/usr/include/aarch64-linux-gnu/qt6"
 fi
 
-if [ -d "/usr/include/x86-64-linux-gnu/qt5" ]; then
-	QtPrefix="/usr/include/x86-64-linux-gnu/qt5"
+if [ -d "/usr/include/x86-64-linux-gnu/qt6" ]; then
+	QtPrefix="/usr/include/x86-64-linux-gnu/qt6"
 fi
 
-if [ -d "/usr/include/qt5" ]; then
-	QtPrefix="/usr/include/qt5"
+if [ -d "/usr/include/qt6" ]; then
+	QtPrefix="/usr/include/qt6"
 fi
 
-g++ "$1"/*.cpp -o "$1"/../mylibrary.so -fPIC -lluajit-5.1 -lQt5Core -lQt5Network -lQt5Sql -O2 \
+g++ "$1"/*.cpp -o "$1"/../mylibrary.so -fPIC -lluajit-5.1 -lQt6Core -lQt6Network -lQt6Sql -O2 \
 -I"$QtPrefix" -I"$QtPrefix/QtCore" -I"$QtPrefix/QtNetwork" -I"$QtPrefix/QtSql" \
 -shared -I/usr/include/luajit-2.1/ -I"$libspath/QMinetest/" \
 -Wl,-rpath,'$ORIGIN/'"$(realpath --relative-to="$1/.." "$libspath")" -L"$libspath"/ $3

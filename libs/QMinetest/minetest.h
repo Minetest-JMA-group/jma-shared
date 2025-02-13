@@ -93,14 +93,19 @@ public:
 
 /* Usually one would do something like
  * #define qLog QLog(&m)
- * where m is of type minetest and then use qLog << "Text" for logging.
+ * or
+ * const char *caller = nullptr;
+ * #define qLog QLog(&m, caller)
+ * where m is of type minetest, caller is set appropriately, and QLog used like qLog << "Text" for logging.
 */
 class QLog : public QTextStream {
 private:
 	QString assembledString;
 	minetest *functions;
+	const char *caller = nullptr;
 public:
 	QLog(minetest *functions);
+	QLog(minetest *functions, const char *caller);
 	~QLog();
 };
 

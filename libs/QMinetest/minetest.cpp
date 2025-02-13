@@ -344,7 +344,7 @@ void pushQStringList(lua_State *L, const QStringList &privlist) {
 	lua_newtable(L);
 	for (const QString &priv : privlist) {
 		lua_pushboolean(L, true);
-		lua_setfield(L, -2, priv.toUtf8().data());
+		lua_setfield(L, -2, priv.toUtf8().constData());
 	}
 }
 

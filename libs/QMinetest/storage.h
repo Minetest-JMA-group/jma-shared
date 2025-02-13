@@ -11,27 +11,27 @@ public:
 	lua_Integer get_int(const char *key) const;
 	lua_Integer get_int(const QString &key) const
 	{
-		return get_int(key.toUtf8().data());
+		return get_int(key.toUtf8().constData());
 	}
 	QByteArray get_string(const char *key) const;
 	QByteArray get_string(const QString &key) const
 	{
-		return get_string(key.toUtf8().data());
+		return get_string(key.toUtf8().constData());
 	}
 	bool set_int(const char *key, const lua_Integer a) const;
 	bool set_int(const QString &key, const lua_Integer a) const
 	{
-		return set_int(key.toUtf8().data(), a);
+		return set_int(key.toUtf8().constData(), a);
 	}
 	bool set_string(const char *key, const char *str) const;
 	bool set_string(const QString &key, const QByteArray &str) const
 	{
-		return set_string(key.toUtf8().data(), str.constData());
+		return set_string(key.toUtf8().constData(), str.constData());
 	}
 	bool contains(const char *key) const;
 	bool contains(const QString &key) const
 	{
-		return contains(key.toUtf8().data());
+		return contains(key.toUtf8().constData());
 	}
 };
 

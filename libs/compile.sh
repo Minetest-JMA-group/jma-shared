@@ -41,7 +41,7 @@ if [ -d "/usr/include/qt6" ]; then
 	QtPrefix="/usr/include/qt6"
 fi
 
-g++ "$1"/*.cpp -o "$1"/../mylibrary.so -fPIC -lluajit-5.1 -lQt6Core -lQt6Network -lQt6Sql -O2 \
+g++ "$1"/*.cpp -o "$1"/../mylibrary.so -fPIC -lluajit-5.1 -std=c++23 -Wall -Wextra -lQt6Core -lQt6Network -lQt6Sql -O3 \
 -I"$QtPrefix" -I"$QtPrefix/QtCore" -I"$QtPrefix/QtNetwork" -I"$QtPrefix/QtSql" \
 -shared -I/usr/include/luajit-2.1/ -I"$libspath/QMinetest/" \
 -Wl,-rpath,'$ORIGIN/'"$(realpath --relative-to="$1/.." "$libspath")" -L"$libspath"/ $3

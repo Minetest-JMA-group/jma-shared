@@ -43,7 +43,12 @@ algorithms.load_library = function(libpath)
 		return false
 	end
 
-	libinit()
+	local ret = libinit()
+	if ret and ret ~= 0 then
+		minetest.log("["..modname.."]: Failed to load shared object file")
+		minetest.log("["..modname.."]: Exited with code: "..tostring(ret))
+		return false
+	end
 	return true
 end
 algorithms.load_library()

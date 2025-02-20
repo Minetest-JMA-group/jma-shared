@@ -31,7 +31,9 @@ end
 
 local function save_playtime(player)
 	local name = player:get_player_name()
-	storage:set_int("playtime:" .. name, total[name] + playtime.get_current_playtime(name))
+	if total[name] then
+		storage:set_int("playtime:" .. name, total[name] + playtime.get_current_playtime(name))
+	end
 	current[name] = nil
 	total[name] = nil
 end

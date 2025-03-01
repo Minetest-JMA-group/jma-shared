@@ -26,9 +26,34 @@ inline bool lua_isinteger(lua_State *L, int index)
 	return lua_type(L, index) == LUA_TNUMBER;
 }
 
+class QMyByteArray : public QByteArray {
+public:
+	QMyByteArray(const QByteArray &other) : QByteArray(other) {}
+	QMyByteArray(QByteArray &&other) : QByteArray(other) {}
+
+	QMyByteArray& operator=(QByteArray &&other) {
+		QByteArray::operator=(std::move(other));
+		return *this;
+	}
+
+	QMyByteArray& operator=(const QByteArray &other) {
+		QByteArray::operator=(other);
+		return *this;
+	}
+
+	template <size_t N>
+	QMyByteArray(const char (&str)[N]) : QByteArray(QByteArray::fromRawData(str, N - 1)) {}
+
+	template <size_t N>
+	QMyByteArray& operator=(const char (&str)[N]) {
+		QByteArray::operator=(QByteArray::fromRawData(str, N - 1));
+		return *this;
+	}
+};
+
 struct cmd_ret {
 	bool success;
-	const char *ret_msg;
+	QMyByteArray ret_msg;
 };
 
 struct cmd_def {
@@ -87,7 +112,7 @@ public:
 	dont_call_this_use_macro_reg_chatcommand(comm, cmd_def{privs, description, params, [](lua_State *L) -> int {	\
 	struct cmd_ret ret = func(lua_tostring(L, 1), lua_tostring(L, 2));						\
 	lua_pushboolean(L, ret.success);										\
-	lua_pushstring(L, ret.ret_msg);											\
+	lua_pushstring(L, ret.ret_msg.constData());									\
 	return 2;													\
 	}})
 

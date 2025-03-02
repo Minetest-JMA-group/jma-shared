@@ -15,6 +15,10 @@ muted for 1 minute. After that, their `shout` privilege is restored.
 If they leave, their `shout` privilege is still restored, but only after
 the time expires, not before.
 
+The filter can be put in "Permissive" mode, where violations are logged,
+but no action is triggered for them, or "Enforcing" mode where violations
+are punished by policy.
+
 ## API
 
 ### Callbacks

@@ -1,12 +1,14 @@
 # filter mod
 
-This mod adds a simple chat filter. There is no default word list,
-and adding words to the filter list is done through the `/filter`
-chat command. You need the `server` priv to use the chat command.
+This mod adds a chat filter for catching unwanted messages using regex.
 
-The `/filter` chat command can `add`, `remove` or `list` words. The
-words are stored in `mod_storage`, which means that this mod requires
-0.4.16 or above to function.
+The filter contains whitelist and blacklist. If a message is matched by a 
+regex in whitelist, blacklist isn't checked. Otherwise, it's blocked if
+it's matched by a regex in blacklist.
+
+The `/filter` chat command is used for all runtime configuration of the
+filter. Check `/filter help` for details. To use this chat command,
+the player needs `filtering` privilege.
 
 If a player speaks a word that is listed in the filter list, they are
 muted for 1 minute. After that, their `shout` privilege is restored.
@@ -25,9 +27,6 @@ the time expires, not before.
 	  will be skipped.
 
 ### Methods
-
-* filter.import_file(path)
-	* Input bad words from a file (`path`) where each line is a new word.
 * filter.check_message(name, message)
 	* Checks message for violation. Returns true if okay, false if bad.
 	  If it returns false, you should cancel the sending of the message and
@@ -36,3 +35,13 @@ the time expires, not before.
 	* Increments violation count, runs callbacks, and punishes the players.
 * filter.mute(name, duration)
 * filter.show_warning_formspec(name)
+* filter.is_blacklisted(message)
+	* Checks if the message matches any regex in blacklist, or is longer than max_len
+* filter.is_whitelisted(message)
+	* Checks if the message matches any regex in whitelist
+* filter.export_regex(listname)
+	* listname can be "whitelist" or "blacklist". Exports the list to a file in mod directory.
+* filter.get_mode()
+	* Return 1 or 0 (1 - Enforcing; 0 - Permissive)
+* filter.get_lastreg()
+  	* Return last blacklist regex pattern that was matched, or "" if none was matched since server startup.

@@ -180,9 +180,9 @@ int export_regex(lua_State *L)
 /* Args: token: string
  * Return: boolean
  */
-int is_blacklisted(lua_State *L)
+int is_message_too_long(lua_State *L)
 {
-	if (!check_args("is_blacklisted", L, 1, "token"))
+	if (!check_args("is_message_too_long", L, 1, "token"))
 		return 0;
 	QString token = lua_tostring(L, 1);
 	if (token.size() > max_len) {
@@ -190,6 +190,18 @@ int is_blacklisted(lua_State *L)
 		lua_pushboolean(L, true);
 		return 1;
 	}
+	lua_pushboolean(L, false);
+	return 1;
+}
+
+/* Args: token: string
+ * Return: boolean
+ */
+int is_blacklisted(lua_State *L)
+{
+	if (!check_args("is_blacklisted", L, 1, "token"))
+		return 0;
+	QString token = lua_tostring(L, 1);
 
 	bool res = false;
 	for (const QRegularExpression &reg : blacklist) {
@@ -249,6 +261,9 @@ void register_functions(lua_State* L)
 
 	lua_pushcfunction(L, is_blacklisted);
 	lua_setfield(L, -2, "is_blacklisted");
+
+	lua_pushcfunction(L, is_message_too_long);
+	lua_setfield(L, -2, "is_message_too_long");
 
 	lua_pushcfunction(L, export_regex);
 	lua_setfield(L, -2, "export_regex");

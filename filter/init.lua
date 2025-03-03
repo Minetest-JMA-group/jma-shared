@@ -4,6 +4,26 @@ local violations = {}
 local last_kicked_time = os.time()
 local last_bad_msg = ""
 
+-- Define violation types and their messages
+local violation_types = {
+    too_long = {
+        name = "message too long",
+        chat_msg = "Your message is too long. Please shorten it.",
+        kick_msg = "Please keep your messages concise!",
+        log_msg = "VIOLATION (message too long)",
+        formspec_title = "Message Too Long!",
+        formspec_image = "filter_warning.png"
+    },
+    blacklisted = {
+        name = "inappropriate content",
+        chat_msg = "Watch your language!",
+        kick_msg = "Please mind your language!",
+        log_msg = "VIOLATION (inappropriate content)",
+        formspec_title = "Please watch your language!",
+        formspec_image = "filter_warning.png"
+    }
+}
+
 if not core.registered_privileges["filtering"] then
 	core.register_privilege("filtering", "Filter manager")
 end
@@ -14,31 +34,57 @@ function filter.register_on_violation(func)
 	table.insert(filter.registered_on_violations, func)
 end
 
+-- Check if the message is too long using the C++ function
+local function is_message_too_long(message)
+	return filter.is_message_too_long(message)
+end
+
 -- Return true if message is fine. false if it should be blocked.
+-- Also returns the violation type if blocked
 function filter.check_message(message)
 	if type(message) ~= "string" then
-		return false
+		return false, "invalid_type"
 	end
-	local res = filter.is_whitelisted(message) or not filter.is_blacklisted(message)
-	if not res then
-		last_bad_msg = message
-	end
-	return res
-end
-
-function filter.mute(name, duration)
 	
-	minetest.chat_send_all(name .. " has been temporarily muted for using offensive language.")
-	minetest.chat_send_player(name, "Watch your language!")
-
-	xban.mute_player(name, "filter", os.time() + (duration*60), string.format("%s\"%s\" using blacklist regex: \"%s\"", filter.phrase, last_bad_msg, filter.get_lastreg()))
+	-- Check message length
+	if is_message_too_long(message) then
+		last_bad_msg = message
+		return false, "too_long"
+	end
+	
+	-- Check message content
+	local is_allowed = filter.is_whitelisted(message) or not filter.is_blacklisted(message)
+	if not is_allowed then
+		last_bad_msg = message
+		return false, "blacklisted"
+	end
+	
+	return true
 end
 
-function filter.show_warning_formspec(name)
-	local formspec = "size[7,3]bgcolor[#080808BB;true]" .. default.gui_bg .. default.gui_bg_img .. [[
-		image[0,0;2,2;filter_warning.png]
-		label[2.3,0.5;Please watch your language!]
-	]]
+function filter.mute(name, duration, violation_type)
+	local v_type = violation_types[violation_type] or violation_types.blacklisted
+	
+	minetest.chat_send_all(name .. " has been temporarily muted for " .. v_type.name .. ".")
+	minetest.chat_send_player(name, v_type.chat_msg)
+
+	local reason
+	if violation_type == "too_long" then
+		reason = string.format("Message too long: \"%s\" (exceeds maximum length)", last_bad_msg)
+	else
+		reason = string.format("%s\"%s\" using blacklist regex: \"%s\"", filter.phrase, last_bad_msg, filter.get_lastreg())
+	end
+
+	xban.mute_player(name, "filter", os.time() + (duration*60), reason)
+end
+
+function filter.show_warning_formspec(name, violation_type)
+	local v_type = violation_types[violation_type] or violation_types.blacklisted
+	
+	local formspec = "size[7,3]bgcolor[#080808BB;true]" .. default.gui_bg .. default.gui_bg_img .. 
+		"image[0,0;2,2;" .. v_type.formspec_image .. "]" ..
+		"label[2.3,0.5;" .. v_type.formspec_title .. "]" ..
+		"label[2.3,1.1;" .. v_type.chat_msg .. "]"
 
 	if minetest.global_exists("rules") and rules.show then
 		formspec = formspec .. [[
@@ -53,7 +99,8 @@ function filter.show_warning_formspec(name)
 	minetest.show_formspec(name, "filter:warning", formspec)
 end
 
-function filter.on_violation(name, message)
+function filter.on_violation(name, message, violation_type)
+	local v_type = violation_types[violation_type] or violation_types.blacklisted
 	violations[name] = (violations[name] or 0) + 1
 
 	local resolution
@@ -62,7 +109,7 @@ function filter.on_violation(name, message)
 	end
 
 	for _, cb in pairs(filter.registered_on_violations) do
-		if cb(name, message, violations) then
+		if cb(name, message, violations, violation_type) then
 			resolution = "custom"
 		end
 	end
@@ -70,21 +117,26 @@ function filter.on_violation(name, message)
 	if not resolution then
 		if violations[name] == 1 and minetest.get_player_by_name(name) then
 			resolution = "warned"
-			filter.show_warning_formspec(name)
+			filter.show_warning_formspec(name, violation_type)
+			minetest.chat_send_player(name, v_type.chat_msg)
 		elseif violations[name] <= 3 then
 			resolution = "muted"
-			filter.mute(name, 1)
+			filter.mute(name, 1, violation_type)
 		else
 			resolution = "kicked"
-			minetest.kick_player(name, "Please mind your language!")
+			minetest.kick_player(name, v_type.kick_msg)
 			if discord and discord.enabled and (os.time() - last_kicked_time) > discordCooldown then
-				discord.send_action_report("***filter***: Kicked %s for saying the bad message \"%s\" catched with blacklist regex \"%s\"", name, last_bad_msg, filter.get_lastreg())
+				local blacklist_info = ""
+				if violation_type == "blacklisted" then
+					blacklist_info = " caught with blacklist regex \"" .. filter.get_lastreg() .. "\""
+				end
+				discord.send_action_report("***filter***: Kicked %s for " .. v_type.name .. " \"%s\"" .. blacklist_info, name, last_bad_msg)
 				last_kicked_time = os.time()
 			end
 		end
 	end
 
-	local logmsg = "[filter] VIOLATION (" .. resolution .. "): <" .. name .. "> "..  message
+	local logmsg = "[filter] " .. v_type.log_msg .. " (" .. resolution .. "): <" .. name .. "> " .. message
 	minetest.log("action", logmsg)
 
 	local email_to = minetest.settings:get("filter.email_to")
@@ -99,8 +151,9 @@ table.insert(minetest.registered_on_chat_messages, 2, function(name, message)
 		return
 	end
 
-	if not filter.check_message(message) then
-		filter.on_violation(name, message)
+	local is_valid, violation_type = filter.check_message(message)
+	if not is_valid then
+		filter.on_violation(name, message, violation_type)
 		if filter.get_mode() == 1 then
 			return true
 		end
@@ -110,8 +163,9 @@ end)
 
 local function make_checker(old_func)
 	return function(name, param)
-		if not filter.check_message(param) then
-			filter.on_violation(name, param)
+		local is_valid, violation_type = filter.check_message(param)
+		if not is_valid then
+			filter.on_violation(name, param, violation_type)
 			if filter.get_mode() == 1 then
 				return true
 			end

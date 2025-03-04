@@ -126,11 +126,13 @@ function filter.on_violation(name, message, violation_type)
 			resolution = "kicked"
 			minetest.kick_player(name, v_type.kick_msg)
 			if discord and discord.enabled and (os.time() - last_kicked_time) > discordCooldown then
-				local blacklist_info = ""
+				local format_string = "***filter***: Kicked %s for %s \"%s\""
 				if violation_type == "blacklisted" then
-					blacklist_info = " caught with blacklist regex \"" .. filter.get_lastreg() .. "\""
+					format_string = "***filter***: Kicked %s for %s \"%s\" caught with blacklist regex \"%s\""
+					discord.send_action_report(format_string, name, v_type.name, last_bad_msg, filter.get_lastreg())
+				else
+					discord.send_action_report(format_string, name, v_type.name, last_bad_msg)
 				end
-				discord.send_action_report("***filter***: Kicked %s for " .. v_type.name .. " \"%s\"" .. blacklist_info, name, last_bad_msg)
 				last_kicked_time = os.time()
 			end
 		end

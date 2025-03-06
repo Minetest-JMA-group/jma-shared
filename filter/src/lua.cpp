@@ -20,7 +20,7 @@
 #define COMPATIBILITY
 
 static minetest m;
-static uint max_len = 20, mode = ENFORCING;
+static uint max_len = 1024, mode = ENFORCING;
 static QByteArray lastreg;
 static QString modpath, lastregwl;
 static std::forward_list<QRegularExpression> whitelist;

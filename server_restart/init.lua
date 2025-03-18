@@ -31,7 +31,7 @@ function server_restart.request_restart(playername, time, update)
     minetest.log("warning", "server_restart: " .. requestedby_msg)
 	minetest.after(time, function()
 		local msg = "The server will be restarted, and it should only take a moment. Please reconnect afterward."
-		minetest.chat_send_all(minetest.colorize("red", "# " .. msg .. "\n" .. requestedby_msg))
+		minetest.chat_send_all(minetest.colorize("red", "- " .. msg .. "\n" .. requestedby_msg))
 		for _, p in ipairs(minetest.get_connected_players()) do
 			minetest.show_formspec(p:get_player_name(), "server_restart", string.format(formspec, msg, requestedby_msg))
 		end

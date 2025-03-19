@@ -29,7 +29,8 @@ inline bool lua_isinteger(lua_State *L, int index)
 class QMyByteArray : public QByteArray {
 public:
 	QMyByteArray(const QByteArray &other) : QByteArray(other) {}
-	QMyByteArray(QByteArray &&other) : QByteArray(other) {}
+	QMyByteArray(QByteArray &&other) : QByteArray(std::move(other)) {}
+	QMyByteArray(const QString &other) : QMyByteArray(other.toUtf8()) {}
 
 	QMyByteArray& operator=(QByteArray &&other) {
 		QByteArray::operator=(std::move(other));

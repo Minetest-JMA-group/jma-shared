@@ -6,11 +6,10 @@ if [ -z "$1" ]; then
 fi
 
 if [ "$1" == "--help" ]; then
-	echo "In first argument, provide path to your project directory where .cpp files are located"
-	echo "In second argument, provide path to the libs folder. This argument is ignored if the script is running from this folder"
+	echo "In the first argument, provide path to your project directory where .cpp files are located"
 	echo "Following arguments are passed to g++"
 	echo 'The resulting object file is placed in a parent directory of the project folder and RPATH is set correctly, relative to $ORIGIN'
-	echo "Example: ./compile.sh ../algorithms/src/ . -lqminetest"
+	echo "Example: ./compile.sh ../algorithms/src/ -lqminetest"
 	exit 0
 fi
 
@@ -20,13 +19,10 @@ if [ ! -d "$1" ]; then
 	exit 1
 fi
 
-libspath="$PWD"
-if [ $(basename "$PWD") != "libs" ]; then
-	if [ -z "$2" ] || [ ! -d "$2" ] || [ "$(basename "$2")" != "libs" ]; then
-		echo "This script must be run from the 'libs' folder, or if not, the second argument must explicitly point to the 'libs' folder."
-		exit 1
-	fi
-	libspath="$2"
+libspath="$(dirname "$(realpath "$0")")"
+if [ $(basename "$libspath") != "libs" ]; then
+	echo "This script must be placed in the 'libs' folder, with rest of the custom .so files."
+	exit 1
 fi
 
 if [ -d "/usr/include/aarch64-linux-gnu/qt6" ]; then

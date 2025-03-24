@@ -352,6 +352,12 @@ out_export:
 			return {false, ""};
 		}
 		max_len = max_len_changed;
+
+		m.get_mod_storage();
+		storage s(m.L);
+		s.set_int("max_len", max_len);
+		m.pop_modstorage();
+
 		qLog << "filter: " << name << " set max_len to " << max_len;
 		return {true, "Maximum message length changed"};
 	}

@@ -51,7 +51,7 @@ unix {
 	QMAKE_RPATHDIR += $ORIGIN/$$relative_path($$LIBSPATH, ..)
 }
 
-INCLUDEPATH += $$LIBSDIR/QMinetest
+INCLUDEPATH += $$LIBSPATH/QMinetest
 LIBS += -L$$LIBSPATH -lluajit-5.1 -lQMinetest
 QMAKE_CXXFLAGS += -Wall -Wextra
 

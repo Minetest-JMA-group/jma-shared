@@ -5,9 +5,9 @@ MODFOLDER = $$clean_path($$_PRO_FILE_PWD_/..)
 TARGET = $$basename(MODFOLDER)
 
 TEMPLATE = lib
-CONFIG += c++23
+CONFIG += c++latest
 CONFIG += release
-CONFIG -= debug
+CONFIG += warn_on
 QMAKE_CXXFLAGS_RELEASE += -O3
 QMAKE_CXXFLAGS_RELEASE += -march=native
 QMAKE_CXXFLAGS_RELEASE += -mtune=native
@@ -53,7 +53,6 @@ unix {
 
 INCLUDEPATH += $$LIBSPATH/QMinetest
 LIBS += -L$$LIBSPATH -lluajit-5.1 -lQMinetest
-QMAKE_CXXFLAGS += -Wall -Wextra
 
 SOURCES += \
     lua.cpp

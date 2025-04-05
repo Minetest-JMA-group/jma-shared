@@ -30,6 +30,11 @@ end
 
 if not algorithms.load_library() then
     minetest.log("warning", "Filter mod requires corresponding mylibrary.so C++ module to work.")
+
+	function filter.check_message()
+		return true
+	end
+
     return
 end
 

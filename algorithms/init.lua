@@ -16,7 +16,7 @@ for word in list:gmatch("[^,%s]+") do
 	c_mods[word] = true
 end
 
--- Load the shared library mylibrary.so in the mod folder of the calling mod, or on path libpath relative to the mod folder
+-- Load the shared library lib<modname>.so in the mod folder of the calling mod, or on path libpath relative to the mod folder
 algorithms.load_library = function(libpath)
 	local modname = minetest.get_current_modname()
 
@@ -35,7 +35,7 @@ algorithms.load_library = function(libpath)
 	if type(libpath) == "string" then
 		libinit, err = ie.package.loadlib(MP.."/"..libpath, "luaopen_mylibrary")
 	else
-		libinit, err = ie.package.loadlib(MP.."/mylibrary.so", "luaopen_mylibrary")
+		libinit, err = ie.package.loadlib(MP.."/lib"..modname..".so", "luaopen_mylibrary")
 	end
 	if not libinit and err then
 		minetest.log("["..modname.."]: Failed to load shared object file")

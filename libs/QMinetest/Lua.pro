@@ -2,7 +2,7 @@ QT -= gui
 
 # Expect that we're in modname/src/
 MODFOLDER = $$clean_path($$_PRO_FILE_PWD_/..)
-TARGET = $$basename(MODFOLDER)
+TARGET = $$basename(_PRO_FILE_PWD_)
 
 TEMPLATE = lib
 CONFIG += c++23

@@ -28,7 +28,10 @@ if not core.registered_privileges["filtering"] then
 	core.register_privilege("filtering", "Filter manager")
 end
 
-assert(algorithms.load_library(), "Filter mod requires corresponding mylibrary.so C++ module to work.")
+if not algorithms.load_library() then
+    minetest.log("warning", "Filter mod requires corresponding mylibrary.so C++ module to work.")
+    return
+end
 
 function filter.register_on_violation(func)
 	table.insert(filter.registered_on_violations, func)
@@ -45,26 +48,26 @@ function filter.check_message(message)
 	if type(message) ~= "string" then
 		return false, "invalid_type"
 	end
-	
+
 	-- Check message length
 	if is_message_too_long(message) then
 		last_bad_msg = message
 		return false, "too_long"
 	end
-	
+
 	-- Check message content
 	local is_allowed = filter.is_whitelisted(message) or not filter.is_blacklisted(message)
 	if not is_allowed then
 		last_bad_msg = message
 		return false, "blacklisted"
 	end
-	
+
 	return true
 end
 
 function filter.mute(name, duration, violation_type)
 	local v_type = violation_types[violation_type] or violation_types.blacklisted
-	
+
 	minetest.chat_send_all(name .. " has been temporarily muted for " .. v_type.name .. ".")
 	minetest.chat_send_player(name, v_type.chat_msg)
 
@@ -80,8 +83,8 @@ end
 
 function filter.show_warning_formspec(name, violation_type)
 	local v_type = violation_types[violation_type] or violation_types.blacklisted
-	
-	local formspec = "size[7,3]bgcolor[#080808BB;true]" .. default.gui_bg .. default.gui_bg_img .. 
+
+	local formspec = "size[7,3]bgcolor[#080808BB;true]" .. default.gui_bg .. default.gui_bg_img ..
 		"image[0,0;2,2;" .. v_type.formspec_image .. "]" ..
 		"label[2.3,0.5;" .. v_type.formspec_title .. "]" ..
 		"label[2.3,1.1;" .. v_type.chat_msg .. "]"

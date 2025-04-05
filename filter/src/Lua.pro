@@ -36,8 +36,13 @@ DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs depr
 	error("LIBSPATH was not provided.")
 }
 
-# Set build directory in /tmp/qmake-TARGET
-DESTDIR = /tmp/qmake-$$TARGET
+# Set build directory to be in cwd from where qmake was ran
+release {
+	DESTDIR = $$OUT_PWD/build_release
+}
+debug {
+	DESTDIR = $$OUT_PWD/build_debug
+}
 OBJECTS_DIR = $$DESTDIR/obj
 MOC_DIR = $$DESTDIR/moc
 RCC_DIR = $$DESTDIR/rcc

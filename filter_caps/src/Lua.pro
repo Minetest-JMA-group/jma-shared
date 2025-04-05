@@ -52,7 +52,7 @@ unix {
 }
 
 INCLUDEPATH += $$LIBSDIR/QMinetest
-LIBS += -L$$LIBSPATH -lluajit-5.1 -lqminetest
+LIBS += -L$$LIBSPATH -lluajit-5.1 -lQMinetest
 QMAKE_CXXFLAGS += -Wall -Wextra
 
 SOURCES += \

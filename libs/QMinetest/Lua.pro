@@ -56,6 +56,14 @@ LIBS += -L$$LIBSPATH -lluajit-5.1
 QMAKE_CXXFLAGS += -Wall -Wextra
 
 SOURCES += \
-    lua.cpp
+    debug.cpp \
+    minetest.cpp \
+    player.cpp \
+    qlog.cpp \
+    qtinit.cpp \
+    storage.cpp
 
-HEADERS +=
+HEADERS += \
+    minetest.h \
+    player.h \
+    storage.h

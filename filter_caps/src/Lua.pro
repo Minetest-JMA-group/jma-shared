@@ -47,7 +47,9 @@ target.path = $$MODFOLDER
 INSTALLS += target
 
 # Set RPATH relative to $ORIGIN
-QMAKE_RPATHDIR += $ORIGIN/$$relative_path($$LIBSPATH, ..)
+unix {
+	QMAKE_RPATHDIR += $ORIGIN/$$relative_path($$LIBSPATH, ..)
+}
 
 INCLUDEPATH += $$LIBSDIR/QMinetest
 LIBS += -L$$LIBSPATH -lluajit-5.1 -lqminetest

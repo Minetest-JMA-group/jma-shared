@@ -19,10 +19,9 @@ DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs depr
 # Check if LIBSPATH is set
 !isEmpty(LIBSPATH) {
 	# Check if it exists and is a directory
+	LIBSPATH = $$absolute_path($$LIBSPATH, $$OUT_PWD)
 	exists($$LIBSPATH) {
 		# Check if the last part of the path is 'libs'
-		# Take absolute path because the variable might contain something like just ..
-		LIBSPATH = $$absolute_path($$LIBSPATH)
 		basename = $$basename(LIBSPATH)
 		equals(basename, libs) {
 			message("Using LIBSPATH: $$LIBSPATH")

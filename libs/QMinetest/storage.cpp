@@ -62,7 +62,7 @@ err:
 	return "";
 }
 
-bool storage::set_int(const char *key, const lua_Integer a) const
+bool storage::set_int(const char *key, const lua_Integer a)
 {
 	SAVE_STACK;
 
@@ -90,7 +90,7 @@ err:
 	return false;
 }
 
-bool storage::set_string(const char *key, const char *str) const
+bool storage::set_string(const char *key, const char *str)
 {
 	SAVE_STACK;
 

@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QStringList>
 #include <QString>
+#include <QStringBuilder>
 #include <cstring>
 #include <QJsonParseError>
 #include <QJsonValue>
@@ -21,8 +22,7 @@
 
 static minetest m;
 static uint max_len = 1024, mode = ENFORCING;
-static QByteArray lastreg;
-static QString modpath, lastregwl;
+static QString modpath, lastreg, lastregwl;
 static std::forward_list<QRegularExpression> whitelist;
 static std::forward_list<QRegularExpression> blacklist;
 static const char *caller = nullptr;
@@ -70,11 +70,11 @@ static int patterns_to_reglist(std::forward_list<QRegularExpression> &list, cons
 	return i;
 }
 
-static QStringList load_string_list(storage *s, const char *list_name)
+static QStringList load_string_list(const storage &s, const QString &list_name)
 {
 	QStringList string_list;
-	if (s->contains(list_name)) {
-		QByteArray list = s->get_string(list_name);
+	if (s.contains(list_name)) {
+		QByteArray list = s.get_string(list_name);
 		if (list.isEmpty())
 			return QStringList();
 		to_valid_json(list);
@@ -108,7 +108,7 @@ load_file:
 	return in.readAll().split("\n", Qt::SkipEmptyParts);
 }
 
-static void save_regex_list(std::forward_list<QRegularExpression> &list, const char *list_name)
+static void save_regex_list(const std::forward_list<QRegularExpression> &list, const QString &list_name)
 {
 	QStringList string_list = reglist_to_patterns(list);
 	QJsonDocument doc(QJsonArray::fromStringList(string_list));
@@ -118,7 +118,7 @@ static void save_regex_list(std::forward_list<QRegularExpression> &list, const c
 	m.pop_modstorage();
 }
 
-static bool export_regex_list(std::forward_list<QRegularExpression> &list, const char *list_name)
+static bool export_regex_list(const std::forward_list<QRegularExpression> &list, const QString &list_name)
 {
 	QStringList string_list = reglist_to_patterns(list);
 	QFile f(modpath + "/" + list_name);
@@ -133,7 +133,7 @@ static bool export_regex_list(std::forward_list<QRegularExpression> &list, const
 	return true;
 }
 
-static bool check_args(const char *function_name, lua_State *L, int max_elem_num, const char *expected_elem_name)
+static bool check_args(const char *function_name, lua_State *L, const int max_elem_num, const char *expected_elem_name)
 {
 	int elem_num = lua_gettop(L);
 
@@ -201,12 +201,12 @@ int is_blacklisted(lua_State *L)
 	if (!check_args("is_blacklisted", L, 1, "token"))
 		return 0;
 	QString token = lua_tostring(L, 1);
-
 	bool res = false;
+
 	for (const QRegularExpression &reg : blacklist) {
 		if (reg.match(token).hasMatch()) {
 			res = true;
-			lastreg = reg.pattern().toUtf8();
+			lastreg = reg.pattern();
 			break;
 		}
 	}
@@ -221,7 +221,7 @@ int is_whitelisted(lua_State *L)
 {
 	if (!check_args("is_whitelisted", L, 1, "token"))
 		return 0;
-	const char *token = lua_tostring(L, 1);
+	QString token = lua_tostring(L, 1);
 	bool res = false;
 
 	for (const QRegularExpression &reg : whitelist) {
@@ -243,7 +243,13 @@ int get_mode(lua_State *L)
 
 int get_lastreg(lua_State *L)
 {
-	lua_pushstring(L, lastreg.constData());
+	lua_pushstring(L, lastreg.toUtf8().constData());
+	return 1;
+}
+
+int get_lastregwl(lua_State *L)
+{
+	lua_pushstring(L, lastregwl.toUtf8().constData());
 	return 1;
 }
 
@@ -273,6 +279,9 @@ static void register_functions(lua_State* L)
 	lua_pushcfunction(L, get_lastreg);
 	lua_setfield(L, -2, "get_lastreg");
 
+	lua_pushcfunction(L, get_lastregwl);
+	lua_setfield(L, -2, "get_lastregwl");
+
 	lua_setglobal(L, "filter");
 }
 
@@ -295,26 +304,12 @@ static struct cmd_ret filter_console(const char *name, QString param)
 		if (params.size() != 2 || (params[1] != "blacklist" && params[1] != "whitelist"))
 			return {false, "Usage: /filter export [ blacklist | whitelist ]"};
 
-		auto& list = (params[1] == "blacklist") ? blacklist : whitelist;
+		auto& list = (params[1].toLower() == "blacklist") ? blacklist : whitelist;
 		if (export_regex_list(list, params[1])) {
 			qLog << "filter: " << name << " exported " << params[1] << " to file";
 			return {true, params[1] + " exported successfully to file"};
 		}
 		return {false, "Error opening filter's " % params[1] % " file."};
-		if (params[1] == "blacklist") {
-			if (export_regex_list(blacklist, "blacklist")) {
-				
-
-			}
-
-		}
-		if (params[1] == "whitelist") {
-			if (export_regex_list(whitelist, "whitelist")) {
-				qLog << "filter: " << name << " exported whitelist to file";
-				return {true, "whitelist exported successfully to file"};
-			}
-			return {false, "Error opening filter's whitelist file."};
-		}
 	}
 
 	if (params[0] == "getenforce") {
@@ -330,21 +325,26 @@ static struct cmd_ret filter_console(const char *name, QString param)
 
 	if (params[0] == "setenforce") {
 		if (params.size() == 2) {
-			if (params[1] == "1" || !params[1].compare("Enforcing", Qt::CaseInsensitive)) {
-				if (mode == ENFORCING)
-					return {false, "Filter mode already set to Enforcing"};
-				mode = ENFORCING;
-				store_conf("mode", ENFORCING);
-				qLog << "filter: " << name << " set mode to Enforcing";
-				return {true, "New filter mode: Enforcing"};
-			}
-			if (params[1] == "0" || !params[1].compare("Permissive", Qt::CaseInsensitive)) {
-				if (mode == PERMISSIVE)
-					return {false, "Filter mode already set to Permissive"};
-				mode = PERMISSIVE;
-				store_conf("mode", PERMISSIVE);
-				qLog << "filter: " << name << " set mode to Permissive";
-				return {true, "New filter mode: Permissive"};
+			QString param = params[1].toLower();
+
+			struct ModeEntry {
+				QStringList values;
+				uint mode;
+				QMyByteArray name;
+			};
+			const QVector<ModeEntry> modeMap = {
+			        {{"1", "enforcing"}, ENFORCING, "Enforcing"},
+			        {{"0", "permissive"}, PERMISSIVE, "Permissive"}
+			};
+
+			for (const auto& entry : modeMap)
+			if (entry.values.contains(param)) {
+				if (mode == entry.mode)
+					return {false, "Filter mode already set to " + entry.name};
+				mode = entry.mode;
+				store_conf("mode", entry.mode);
+				qLog << "filter: " << name << " set mode to " << entry.name;
+				return {true, "New filter mode: " + entry.name};
 			}
 		}
 		return {false, "Usage: /filter setenforce [ Enforcing | Permissive | 1 | 0 ]"};
@@ -360,15 +360,12 @@ static struct cmd_ret filter_console(const char *name, QString param)
 		if (max_len == max_len_changed)
 			return {false, "Maximum message length was already " + QByteArray::number(max_len)};
 		max_len = max_len_changed;
-
-		m.get_mod_storage();
-		storage s(m.L);
-		s.set_int("max_len", max_len);
-		m.pop_modstorage();
+		store_conf("max_len", max_len);
 
 		qLog << "filter: " << name << " set max_len to " << max_len;
 		return {true, "Maximum message length changed"};
 	}
+
 	if (params[0] == "help") {
 		return {true, R"(The filter works by matching regex patterns from lists with each message to try and find the match.
 If match is found in blacklist, the message is blocked.
@@ -392,119 +389,85 @@ rmwl <regex>: Remove regex from whitelist
 add <regex>: Add regex to blacklist
 rm <regex>: Remove regex frmo blacklist)"};
 	}
-	if (params[0] == "dump") {
-		QString res = "Blacklist contents:\n";
-		for (const QRegularExpression &reg : blacklist)
+	struct ListEntry {
+		QString name;
+		std::forward_list<QRegularExpression> &list;
+		QString &lastreg;
+	};
+	const QVector<ListEntry> listMap = {
+	        {"blacklist", blacklist, lastreg},
+	        {"whitelist", whitelist, lastregwl}
+	};
+	bool should_run = true;
+	int li;
+
+	if (params[0] == "dump") li = 0;
+	else if (params[0] == "dumpwl") li = 1;
+	else should_run = false;
+	if (should_run) {
+		QString res = listMap[li].name + " contents:\n";
+		for (const QRegularExpression &reg : listMap[li].list)
 			res += QStringLiteral("\"") % reg.pattern() % QStringLiteral("\"\n");
 		res.chop(1);
 		return {true, res.toUtf8()};
 	}
-	if (params[0] == "dumpwl") {
-		QString res = "Whitelist contents:\n";
-		for (const QRegularExpression &reg : whitelist)
-			res += QStringLiteral("\"") % reg.pattern() % QStringLiteral("\"\n");
-		res.chop(1);
-		return {true, res.toUtf8()};
-	}
-	if (params[0] == "last") {
+	should_run = true;
+
+	if (params[0] == "last") li = 0;
+	else if (params[0] == "lastwl") li = 1;
+	else should_run = false;
+	if (should_run) {
 		if (lastreg.isEmpty())
-			return {false, "No blacklist regex was matched since server startup."};
-		caller = name;
-		qLog << "Last blacklist regex: " << lastreg;
-		caller = nullptr;
-		return {true, ""};
+			return {false, "No " % listMap[li].name % " regex was matched since server startup."};
+		return {true, "Last blacklist regex: " + listMap[li].lastreg};
 	}
-	if (params[0] == "lastwl") {
-		if (lastregwl.isEmpty())
-			return {false, "No whitelist regex was matched since server startup."};
-		caller = name;
-		qLog << "Last whitelist regex: " << lastregwl;
-		caller = nullptr;
-		return {true, ""};
-	}
-	if (params[0] == "reload") {
+	should_run = true;
+
+	if (params[0] == "reload") li = 0;
+	else if (params[0] == "reloadwl") li = 1;
+	else should_run = false;
+	if (should_run) {
 		caller = name;
 		m.get_mod_storage();
 		storage s(m.L);
-		s.set_string("blacklist", "");
-		qLog << "Modstorage blacklist erased";
-		QStringList string_list = load_string_list(&s, "blacklist");
-		qLog << "Loaded " << patterns_to_reglist(blacklist, string_list) << " entries";
+		s.set_string(listMap[li].name, "");
+		qLog << "Modstorage " << listMap[li].name << " erased";
+		QStringList string_list = load_string_list(s, listMap[li].name);
+		qLog << "Loaded " << patterns_to_reglist(listMap[li].list, string_list) << " entries";
 		m.pop_modstorage();
 		caller = nullptr;
-		qLog << "filter: " << name << " reloaded blacklist from file";
+		qLog << "filter: " << name << " reloaded " << listMap[li].name << " from file";
 		return {true, ""};
 	}
-	if (params[0] == "reloadwl") {
-		caller = name;
-		m.get_mod_storage();
-		storage s(m.L);
-		s.set_string("whitelist", "");
-		qLog << "Modstorage whitelist erased";
-		QStringList string_list = load_string_list(&s, "whitelist");
-		qLog << "Loaded " << patterns_to_reglist(whitelist, string_list) << " entries";
-		m.pop_modstorage();
-		caller = nullptr;
-		qLog << "filter: " << name << " reloaded whitelist from file";
-		return {true, ""};
-	}
-	if (params[0] == "addwl") {
+	should_run = true;
+
+	if (params[0] == "add") li = 0;
+	else if (params[0] == "addwl") li = 1;
+	else should_run = false;
+	if (should_run) {
 		if (params.size() != 2)
-			return {false, "Usage: /filter addwl <regex>"};
+			return {false, "Usage: /filter add|addwl <regex>"};
 		QRegularExpression reg(params[1], QRegularExpression::CaseInsensitiveOption);
-		caller = name;
-		if (!reg.isValid()) {
-			qLog << "Invalid regex: " << reg.errorString();
-			caller = nullptr;
-			return {false, ""};
-		}
-		whitelist.push_front(reg);
-		save_regex_list(whitelist, "whitelist");
-		qLog << "Added \'" << params[1] << "\' to whitelist";
-		caller = nullptr;
-		qLog << "filter: " << name << " added \'" << params[1] << "\' to whitelist";
-		return {true, ""};
+		if (!reg.isValid())
+			return {false, "Invalid regex: " + reg.errorString()};
+		listMap[li].list.push_front(reg);
+		save_regex_list(listMap[li].list, listMap[li].name);
+		qLog << "filter: " << name << " added \'" << params[1] << "\' to " << listMap[li].name;
+		return {true, "Added \'" % params[1] % "\' to " % listMap[li].name};
 	}
-	if (params[0] == "add") {
+	should_run = true;
+
+	if (params[0] == "rm") li = 0;
+	else if (params[0] == "rmwl") li = 1;
+	else should_run = false;
+	if (should_run) {
 		if (params.size() != 2)
-			return {false, "Usage: /filter add <regex>"};
-		QRegularExpression reg(params[1], QRegularExpression::CaseInsensitiveOption);
-		caller = name;
-		if (!reg.isValid()) {
-			qLog << "Invalid regex: " << reg.errorString();
-			caller = nullptr;
-			return {false, ""};
-		}
-		blacklist.push_front(reg);
-		save_regex_list(blacklist, "blacklist");
-		qLog << "Added \'" << params[1] << "\' to blacklist";
-		caller = nullptr;
-		qLog << "filter: " << name << " added \'" << params[1] << "\' to blacklist";
-		return {true, ""};
-	}
-	if (params[0] == "rm") {
-		if (params.size() != 2)
-			return {false, "Usage: /filter rm <regex>"};
-		auto count = blacklist.remove_if([&params](QRegularExpression &reg){ return reg.pattern() == params[1]; });
+			return {false, "Usage: /filter rm|rmwl <regex>"};
+		auto count = listMap[li].list.remove_if([&params](QRegularExpression &reg){ return reg.pattern() == params[1]; });
 		if (count != 0)
-			save_regex_list(blacklist, "blacklist");
-		caller = name;
-		qLog << "Removed " << count << " entries from blacklist";
-		caller = nullptr;
-		qLog << "filter: " << name << " removed \'" << params[1] << "\' from blacklist. Affected " << count << " entries";
-		return {true, ""};
-	}
-	if (params[0] == "rmwl") {
-		if (params.size() != 2)
-			return {false, "Usage: /filter rm <regex>"};
-		auto count = whitelist.remove_if([&params](QRegularExpression &reg){ return reg.pattern() == params[1]; });
-		if (count != 0)
-			save_regex_list(whitelist, "whitelist");
-		caller = name;
-		qLog << "Removed " << count << " entries from whitelist";
-		caller = nullptr;
-		qLog << "filter: " << name << " removed \'" << params[1] << "\' from whitelist. Affected " << count << " entries";
-		return {true, ""};
+			save_regex_list(listMap[li].list, listMap[li].name);
+		qLog << "filter: " << name << " removed \'" << params[1] << "\' from " << listMap[li].name << ". Affected " << count << " entries";
+		return {true, "Removed " % QString::number(count) % " entries from " % listMap[li].name};
 	}
 
 	return {false, "Unknown command. Usage: /filter <command> <args>\nCheck /filter help"};
@@ -535,8 +498,8 @@ extern "C" int luaopen_mylibrary(lua_State *L)
 	}
 #endif
 
-	QStringList string_whitelist = load_string_list(&s, "whitelist");
-	QStringList string_blacklist = load_string_list(&s, "blacklist");
+	QStringList string_whitelist = load_string_list(s, "whitelist");
+	QStringList string_blacklist = load_string_list(s, "blacklist");
 	m.pop_modstorage();
 
 	patterns_to_reglist(blacklist, string_blacklist);

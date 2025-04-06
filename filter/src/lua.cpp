@@ -186,7 +186,6 @@ int is_message_too_long(lua_State *L)
 		return 0;
 	QString token = lua_tostring(L, 1);
 	if (token.size() > max_len) {
-		lastreg = "spam";
 		lua_pushboolean(L, true);
 		return 1;
 	}
@@ -248,7 +247,7 @@ int get_lastreg(lua_State *L)
 	return 1;
 }
 
-void register_functions(lua_State* L)
+static void register_functions(lua_State* L)
 {
 	lua_getglobal(L, "filter");
 	if (!lua_istable(L, -1)) {
@@ -277,7 +276,15 @@ void register_functions(lua_State* L)
 	lua_setglobal(L, "filter");
 }
 
-struct cmd_ret filter_console(const char *name, QString param)
+static void store_conf(const char *key, int val)
+{
+	m.get_mod_storage();
+	storage s(m.L);
+	s.set_int(key, val);
+	m.pop_modstorage();
+}
+
+static struct cmd_ret filter_console(const char *name, QString param)
 {
 	QStringList params = param.split(" ", Qt::SkipEmptyParts);
 
@@ -285,46 +292,49 @@ struct cmd_ret filter_console(const char *name, QString param)
 		return {false, "Usage: /filter <command> <args>\nCheck /filter help"};
 
 	if (params[0] == "export") {
-		caller = name;
-		if (params.size() != 2)
-			goto out_export;
+		if (params.size() != 2 || (params[1] != "blacklist" && params[1] != "whitelist"))
+			return {false, "Usage: /filter export [ blacklist | whitelist ]"};
+
+		auto& list = (params[1] == "blacklist") ? blacklist : whitelist;
+		if (export_regex_list(list, params[1])) {
+			qLog << "filter: " << name << " exported " << params[1] << " to file";
+			return {true, params[1] + " exported successfully to file"};
+		}
+		return {false, "Error opening filter's " % params[1] % " file."};
 		if (params[1] == "blacklist") {
 			if (export_regex_list(blacklist, "blacklist")) {
-				caller = nullptr;
-				qLog << "filter: " << name << " exported blacklist to file";
-				return {true, "blacklist exported successfully to file"};
+				
+
 			}
-			caller = nullptr;
-			return {false, ""};
+
 		}
 		if (params[1] == "whitelist") {
 			if (export_regex_list(whitelist, "whitelist")) {
-				caller = nullptr;
 				qLog << "filter: " << name << " exported whitelist to file";
 				return {true, "whitelist exported successfully to file"};
 			}
-			caller = nullptr;
-			return {false, ""};
+			return {false, "Error opening filter's whitelist file."};
 		}
-out_export:
-		caller = nullptr;
-		return {false, "Usage: /filter export [ blacklist | whitelist ]"};
 	}
+
 	if (params[0] == "getenforce") {
 		if (mode)
 			return {true, "Enforcing"};
 		else
 			return {true, "Permissive"};
 	}
+
 	if (params[0] == "get_max_len") {
-		return {true, QString::number(max_len).toUtf8()};
+		return {true, QByteArray::number(max_len)};
 	}
+
 	if (params[0] == "setenforce") {
 		if (params.size() == 2) {
 			if (params[1] == "1" || !params[1].compare("Enforcing", Qt::CaseInsensitive)) {
 				if (mode == ENFORCING)
 					return {false, "Filter mode already set to Enforcing"};
 				mode = ENFORCING;
+				store_conf("mode", ENFORCING);
 				qLog << "filter: " << name << " set mode to Enforcing";
 				return {true, "New filter mode: Enforcing"};
 			}
@@ -332,12 +342,14 @@ out_export:
 				if (mode == PERMISSIVE)
 					return {false, "Filter mode already set to Permissive"};
 				mode = PERMISSIVE;
+				store_conf("mode", PERMISSIVE);
 				qLog << "filter: " << name << " set mode to Permissive";
 				return {true, "New filter mode: Permissive"};
 			}
 		}
 		return {false, "Usage: /filter setenforce [ Enforcing | Permissive | 1 | 0 ]"};
 	}
+
 	if (params[0] == "set_max_len") {
 		if (params.size() != 2)
 			return {false, "Usage: /filter set_max_len <max_len: number>"};
@@ -345,12 +357,8 @@ out_export:
 		uint max_len_changed = params[1].toUInt(&ok);
 		if (!ok)
 			return {false, "Usage: /filter set_max_len <max_len: number>"};
-		if (max_len == max_len_changed) {
-			caller = name;
-			qLog << "Maximum message length was already " << max_len;
-			caller = nullptr;
-			return {false, ""};
-		}
+		if (max_len == max_len_changed)
+			return {false, "Maximum message length was already " + QByteArray::number(max_len)};
 		max_len = max_len_changed;
 		qLog << "filter: " << name << " set max_len to " << max_len;
 		return {true, "Maximum message length changed"};

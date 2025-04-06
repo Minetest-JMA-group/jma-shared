@@ -18,13 +18,13 @@ public:
 	{
 		return get_string(key.toUtf8().constData());
 	}
-	bool set_int(const char *key, const lua_Integer a) const;
-	bool set_int(const QString &key, const lua_Integer a) const
+	bool set_int(const char *key, const lua_Integer a);
+	bool set_int(const QString &key, const lua_Integer a)
 	{
 		return set_int(key.toUtf8().constData(), a);
 	}
-	bool set_string(const char *key, const char *str) const;
-	bool set_string(const QString &key, const QByteArray &str) const
+	bool set_string(const char *key, const char *str);
+	bool set_string(const QString &key, const QByteArray &str)
 	{
 		return set_string(key.toUtf8().constData(), str.constData());
 	}

@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <forward_list>
 #include <time.h>
+#include <type_traits>
 
 #define INT_ERROR std::numeric_limits<lua_Integer>::min()
 
@@ -44,6 +45,10 @@ public:
 
 	template <size_t N>
 	QMyByteArray(const char (&str)[N]) : QByteArray(QByteArray::fromRawData(str, N - 1)) {}
+
+	template <typename T>
+	requires std::is_convertible_v<T, QString>
+	QMyByteArray(const T &other) : QMyByteArray(QString(other)) {}
 
 	template <size_t N>
 	QMyByteArray& operator=(const char (&str)[N]) {

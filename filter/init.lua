@@ -28,18 +28,23 @@ if not core.registered_privileges["filtering"] then
 	core.register_privilege("filtering", "Filter manager")
 end
 
-assert(algorithms.load_library(), "Filter mod requires corresponding mylibrary.so C++ module to work.")
+if not algorithms.load_library() then
+    minetest.log("warning", "Filter mod requires corresponding mylibrary.so C++ module to work.")
+
+	function filter.check_message()
+		return true
+	end
+
+    return
+end
 
 function filter.register_on_violation(func)
 	table.insert(filter.registered_on_violations, func)
 end
 
 -- Check if the message is too long using the C++ function
---####
--- Replaced by no-op function until the corresponding functionality is implemented/fixed. We need to get the server running right now!
---####
 local function is_message_too_long(message)
-	return false
+	return filter.is_message_too_long(message)
 end
 
 -- Return true if message is fine. false if it should be blocked.

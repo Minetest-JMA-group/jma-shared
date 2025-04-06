@@ -360,6 +360,12 @@ static struct cmd_ret filter_console(const char *name, QString param)
 		if (max_len == max_len_changed)
 			return {false, "Maximum message length was already " + QByteArray::number(max_len)};
 		max_len = max_len_changed;
+
+		m.get_mod_storage();
+		storage s(m.L);
+		s.set_int("max_len", max_len);
+		m.pop_modstorage();
+
 		qLog << "filter: " << name << " set max_len to " << max_len;
 		return {true, "Maximum message length changed"};
 	}

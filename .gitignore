@@ -1,1 +1,6 @@
 *.pro.user
+
+*.so
+*.so.*
+*.dylib
+*.dll

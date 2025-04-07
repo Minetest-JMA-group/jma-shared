@@ -17,6 +17,9 @@ QMAKE_CXXFLAGS_RELEASE += -mtune=native
 DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 # Check if LIBSPATH is set
+isEmpty(LIBSPATH) {
+	LIBSPATH = $$(LIBSPATH)
+}
 !isEmpty(LIBSPATH) {
 	# Check if it exists and is a directory
 	LIBSPATH = $$absolute_path($$LIBSPATH, $$OUT_PWD)

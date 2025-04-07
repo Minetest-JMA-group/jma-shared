@@ -57,18 +57,16 @@ isEmpty(OUT_PWD) {
 
 # Set build directory to be in cwd from where qmake was ran
 release {
-	DESTDIR = $$OUT_PWD/build_release
+	BUILDDIR = $$OUT_PWD/build_release
 }
 debug {
-	DESTDIR = $$OUT_PWD/build_debug
+	BUILDDIR = $$OUT_PWD/build_debug
 }
-OBJECTS_DIR = $$DESTDIR/obj
-MOC_DIR = $$DESTDIR/moc
-RCC_DIR = $$DESTDIR/rcc
-UI_DIR = $$DESTDIR/ui
-
-target.path = $$MODFOLDER
-INSTALLS += target
+DESTDIR = $$MODFOLDER
+OBJECTS_DIR = $$BUILDDIR/obj
+MOC_DIR = $$BUILDDIR/moc
+RCC_DIR = $$BUILDDIR/rcc
+UI_DIR = $$BUILDDIR/ui
 
 # Set RPATH relative to $ORIGIN
 unix {

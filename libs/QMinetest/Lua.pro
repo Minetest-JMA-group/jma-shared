@@ -32,7 +32,21 @@ DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs depr
 		error("LIBSPATH does not exist: $$LIBSPATH")
 	}
 } else {
-	error("LIBSPATH was not provided.")
+	MYHOME = $$(HOME)
+	isEmpty(MYHOME) {
+		error("LIBSPATH was not provided and HOME environment variable not set.")
+	}
+	JMA_REPO_CANDIDATES = $$files($$MYHOME/.minetest/*"jma-"*, true)
+	for(jma_repo, JMA_REPO_CANDIDATES) {
+		LIBSPATH = $$files($$jma_repo/*libs, true)
+		!isEmpty(LIBSPATH) {
+			break()
+		}
+	}
+	isEmpty(LIBSPATH) {
+		error("LIBSPATH was not provided and search for it in $HOME/.minetest failed")
+	}
+	warning("LIBSPATH was not provided. Using auto-obtained $$LIBSPATH")
 }
 
 # Set build directory to be in cwd from where qmake was ran

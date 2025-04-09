@@ -5,3 +5,6 @@
 *.dylib
 *.dll
 .qmake.stash
+Makefile
+Makefile.*
+build_qt/

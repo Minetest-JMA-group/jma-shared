@@ -6,11 +6,10 @@ TARGET = $$basename(MODFOLDER)
 
 TEMPLATE = lib
 CONFIG += c++latest
-CONFIG += release
 CONFIG += warn_on
-QMAKE_CXXFLAGS_RELEASE += -O3
-QMAKE_CXXFLAGS_RELEASE += -march=native
-QMAKE_CXXFLAGS_RELEASE += -mtune=native
+QMAKE_CXXFLAGS += -O3
+QMAKE_CXXFLAGS += -march=native
+QMAKE_CXXFLAGS += -mtune=native
 
 # You can make your code fail to compile if it uses deprecated APIs.
 # In order to do so, uncomment the following line.
@@ -57,12 +56,7 @@ isEmpty(LIBSPATH) {
 }
 
 # Set build directory to be in cwd from where qmake was ran
-release {
-	BUILDDIR = $$OUT_PWD/build_release
-}
-debug {
-	BUILDDIR = $$OUT_PWD/build_debug
-}
+BUILDDIR = $$OUT_PWD/build_qt
 DESTDIR = $$MODFOLDER
 OBJECTS_DIR = $$BUILDDIR/obj
 MOC_DIR = $$BUILDDIR/moc

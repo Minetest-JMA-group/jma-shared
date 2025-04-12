@@ -6,22 +6,22 @@ local last_bad_msg = ""
 
 -- Define violation types and their messages
 local violation_types = {
-    too_long = {
-        name = "message too long",
-        chat_msg = "Your message is too long. Please shorten it.",
-        kick_msg = "Please keep your messages concise!",
-        log_msg = "VIOLATION (message too long)",
-        formspec_title = "Message Too Long!",
-        formspec_image = "filter_warning.png"
-    },
-    blacklisted = {
-        name = "inappropriate content",
-        chat_msg = "Watch your language!",
-        kick_msg = "Please mind your language!",
-        log_msg = "VIOLATION (inappropriate content)",
-        formspec_title = "Please watch your language!",
-        formspec_image = "filter_warning.png"
-    }
+	too_long = {
+		name = "message too long",
+		chat_msg = "Your message is too long. Please shorten it.",
+		kick_msg = "Please keep your messages concise!",
+		log_msg = "VIOLATION (message too long)",
+		formspec_title = "Message Too Long!",
+		formspec_image = "filter_warning.png"
+	},
+	blacklisted = {
+		name = "inappropriate content",
+		chat_msg = "Watch your language!",
+		kick_msg = "Please mind your language!",
+		log_msg = "VIOLATION (inappropriate content)",
+		formspec_title = "Please watch your language!",
+		formspec_image = "filter_warning.png"
+	}
 }
 
 if not core.registered_privileges["filtering"] then
@@ -29,13 +29,13 @@ if not core.registered_privileges["filtering"] then
 end
 
 if not algorithms.load_library() then
-    minetest.log("warning", "Filter mod requires corresponding mylibrary.so C++ module to work.")
+	minetest.log("warning", "Filter mod requires corresponding mylibrary.so C++ module to work.")
 
 	function filter.check_message()
 		return true
 	end
 
-    return
+	return
 end
 
 function filter.register_on_violation(func)

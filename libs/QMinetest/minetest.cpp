@@ -32,7 +32,7 @@ QByteArray minetest::get_current_modname() const
 	return res;
 }
 
-QByteArray minetest::get_modpath(const char *modname) const
+QString minetest::get_modpath(const char *modname) const
 {
 	SAVE_STACK;
 
@@ -41,13 +41,13 @@ QByteArray minetest::get_modpath(const char *modname) const
 
 	lua_pushstring(L, modname);
 	lua_call(L, 1, 1);
-	QByteArray res = lua_tostring(L, -1);
+	QString res = lua_tostring(L, -1);
 
 	RESTORE_STACK;
 	return res;
 }
 
-QByteArray minetest::get_worldpath() const
+QString minetest::get_worldpath() const
 {
 	SAVE_STACK;
 
@@ -55,7 +55,7 @@ QByteArray minetest::get_worldpath() const
 	lua_getfield(L, -1, "get_worldpath");
 
 	lua_call(L, 0, 1);
-	QByteArray res = lua_tostring(L, -1);
+	QString res = lua_tostring(L, -1);
 
 	RESTORE_STACK;
 	return res;

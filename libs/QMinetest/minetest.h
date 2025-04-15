@@ -2,13 +2,15 @@
 // Copyright (c) 2023 Marko Petrović
 #ifndef MINETEST_H
 #define MINETEST_H
+#include <QString>
 #include <player.h>
+#include <ctime>
+#include <luajit-2.1/lua.hpp>
+#include <QTextStream>
 #include <QStringList>
-#include <forward_list>
-#include <time.h>
+#include <QByteArray>
 #include <type_traits>
-
-#define INT_ERROR std::numeric_limits<lua_Integer>::min()
+#include <forward_list>
 
 #define chatcommand_sig bool (*)(QString&, QString&, QString&)
 #define chatmsg_sig bool (*)(QString&, QString&)
@@ -22,10 +24,6 @@ void printLuaTable(lua_State* L, int index);
 void printLuaType(lua_State *L, int index, QTextStream &where);
 void copyLuaTable(lua_State *L, int srcIndex, int destIndex);
 void pushQStringList(lua_State *L, const QStringList &privlist);
-inline bool lua_isinteger(lua_State *L, int index)
-{
-	return lua_type(L, index) == LUA_TNUMBER;
-}
 
 class QMyByteArray : public QByteArray {
 public:
@@ -94,10 +92,10 @@ public:
 	void chat_send_all(const QString &msg) const { return chat_send_all(msg.toUtf8().constData()); }
 	void chat_send_player(const char *playername, const char *msg) const;
 	void chat_send_player(const QString &playername, const QString &msg) const {return chat_send_player(playername.toUtf8().constData(), msg.toUtf8().constData()); }
-	const char *get_current_modname() const;
-	const char *get_modpath(const char *modname) const;
-	const char *get_modpath(const QString &modname) const { return get_modpath(modname.toUtf8().constData()); }
-	const char *get_worldpath() const;
+	QByteArray get_current_modname() const;
+	QByteArray get_modpath(const char *modname) const;
+	QByteArray get_modpath(const QString &modname) const { return get_modpath(modname.toUtf8().constData()); }
+	QByteArray get_worldpath() const;
 	void register_privilege(const char *name, const char *definition) const;
 	void register_privilege(const QString &name, const QString &definition) const { return register_privilege(name.toUtf8().constData(), definition.toUtf8().constData()); }
 	void get_mod_storage(); // Leaves StorageRef on the stack top

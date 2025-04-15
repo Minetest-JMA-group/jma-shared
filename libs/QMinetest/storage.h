@@ -2,7 +2,13 @@
 // Copyright (c) 2023 Marko Petrović
 #ifndef STORAGE_H
 #define STORAGE_H
-#include <minetest.h>
+#include <player.h>
+#include <luajit-2.1/lua.hpp>
+#include <QByteArray>
+#include <QString>
+#include <type_traits>
+
+#define INT_ERROR std::numeric_limits<lua_Integer>::min()
 
 // Assume that Lua StorageRef object is on the top of the stack
 class storage : public lua_state_class {

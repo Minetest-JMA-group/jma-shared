@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025 Marko Petrović
-
-#include <minetest.h>
 #include <QCoreApplication>
 #include <thread>
 #include <future>

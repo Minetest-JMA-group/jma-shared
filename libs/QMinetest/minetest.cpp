@@ -18,7 +18,7 @@ void lua_state_class::set_state(lua_State *L)
     lua_setmetatable(L, -2);
 */
 
-const char *minetest::get_current_modname() const
+QByteArray minetest::get_current_modname() const
 {
 	SAVE_STACK;
 
@@ -26,13 +26,13 @@ const char *minetest::get_current_modname() const
 	lua_getfield(L, -1, "get_current_modname");
 
 	lua_call(L, 0, 1);
-	const char *res = lua_tostring(L, -1);
+	QByteArray res = lua_tostring(L, -1);
 
 	RESTORE_STACK;
 	return res;
 }
 
-const char *minetest::get_modpath(const char *modname) const
+QByteArray minetest::get_modpath(const char *modname) const
 {
 	SAVE_STACK;
 
@@ -41,13 +41,13 @@ const char *minetest::get_modpath(const char *modname) const
 
 	lua_pushstring(L, modname);
 	lua_call(L, 1, 1);
-	const char *res = lua_tostring(L, -1);
+	QByteArray res = lua_tostring(L, -1);
 
 	RESTORE_STACK;
 	return res;
 }
 
-const char *minetest::get_worldpath() const
+QByteArray minetest::get_worldpath() const
 {
 	SAVE_STACK;
 
@@ -55,7 +55,7 @@ const char *minetest::get_worldpath() const
 	lua_getfield(L, -1, "get_worldpath");
 
 	lua_call(L, 0, 1);
-	const char *res = lua_tostring(L, -1);
+	QByteArray res = lua_tostring(L, -1);
 
 	RESTORE_STACK;
 	return res;

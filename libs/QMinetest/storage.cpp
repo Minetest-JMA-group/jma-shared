@@ -1,34 +1,34 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2023 Marko Petrović
 #include <storage.h>
+#include <QTextStream>
+#include <QByteArray>
 #define qLog QTextStream(stderr)
 
 lua_Integer storage::get_int(const char *key) const
 {
 	SAVE_STACK;
-	lua_Integer res;
+	lua_Integer res = INT_ERROR;
 
 	if (!lua_isuserdata(L, -1))
-		goto err;
+		goto out;
 	lua_getfield(L, -1, "get_int"); // Assuming the StorageRef object is at the top of the stack
 	if (!lua_isfunction(L, -1))
-		goto err;
+		goto out;
 
 	lua_pushvalue(L, __old_top);
 	lua_pushstring(L, key);
 	if (lua_pcall(L, 2, 1, 0)) {
 		qLog << "Error calling storage function\n" << lua_tostring(L, -1) << "\n";
-		goto err;
+		goto out;
 	}
 	if (!lua_isinteger(L, -1))
-		goto err;
+		goto out;
 
 	res = lua_tointeger(L, -1);
+out:
 	RESTORE_STACK;
 	return res;
-err:
-	RESTORE_STACK;
-	return INT_ERROR;
 }
 
 
@@ -38,26 +38,24 @@ QByteArray storage::get_string(const char *key) const
 	QByteArray res;
 
 	if (!lua_isuserdata(L, -1))
-		goto err;
+		goto out;
 
 	lua_getfield(L, -1, "get_string"); // Assuming the StorageRef object is at the top of the stack
 	if (!lua_isfunction(L, -1))
-		goto err;
+		goto out;
 
 	lua_pushvalue(L, __old_top);
 	lua_pushstring(L, key);
 	if (lua_pcall(L, 2, 1, 0)) {
 		qLog << "Error calling storage function\n" << lua_tostring(L, -1) << "\n";
-		goto err;
+		goto out;
 	}
 
 	if (!lua_isstring(L, -1))
-		goto err;
+		goto out;
 
 	res = lua_tostring(L, -1);
-	RESTORE_STACK;
-	return res;
-err:
+out:
 	RESTORE_STACK;
 	return "";
 }
@@ -121,29 +119,27 @@ err:
 bool storage::contains(const char *key) const
 {
 	SAVE_STACK;
-	bool res;
+	bool res = false;
 
 	if (!lua_isuserdata(L, -1))
-		goto err;
+		goto out;
 
 	lua_getfield(L, -1, "contains"); // Assuming the StorageRef object is at the top of the stack
 	if (!lua_isfunction(L, -1))
-		goto err;
+		goto out;
 
 	lua_pushvalue(L, __old_top);
 	lua_pushstring(L, key);
 	if (lua_pcall(L, 2, 1, 0)) {
 		qLog << "Error calling storage function\n" << lua_tostring(L, -1) << "\n";
-		goto err;
+		goto out;
 	}
 
 	if (!lua_isboolean(L, -1))
-		goto err;
+		goto out;
 
 	res = lua_toboolean(L, -1);
+out:
 	RESTORE_STACK;
 	return res;
-err:
-	RESTORE_STACK;
-	return false;
 }

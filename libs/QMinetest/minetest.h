@@ -18,6 +18,7 @@
 #define prejoinplayer_sig const char* (*)(QString&, QString&)
 #define shutdown_sig void (*)()
 #define after_sig void (*)()
+#define leaveplayer_sig void (*)(player&, bool)
 
 void printLuaStack(lua_State* L);
 void printLuaTable(lua_State* L, int index);
@@ -76,6 +77,7 @@ private:
 	static int lua_callback_wrapper_comm(lua_State *L);
 	static int lua_callback_wrapper_joinplayer(lua_State *L);
 	static int lua_callback_wrapper_prejoinplayer(lua_State *L);
+	static int lua_callback_wrapper_leaveplayer(lua_State *L);
 	bool is_top_modstorage();
 	std::forward_list<shutdown_sig> registered_on_shutdown;
 public:
@@ -83,6 +85,7 @@ public:
 	static std::forward_list<chatcommand_sig> registered_on_chatcommand;
 	static std::forward_list<joinplayer_sig> registered_on_joinplayer;
 	static std::forward_list<prejoinplayer_sig> registered_on_prejoinplayer;
+	static std::forward_list<leaveplayer_sig> registered_on_leaveplayer;
 	using lua_state_class::lua_state_class;
 	minetest();
 	~minetest();
@@ -107,6 +110,7 @@ public:
 	void register_on_shutdown(shutdown_sig);
 	void register_on_joinplayer(joinplayer_sig);
 	void register_on_prejoinplayer(prejoinplayer_sig);
+	void register_on_leaveplayer(leaveplayer_sig);
 	void after(after_sig);	// Both x86-64 and aarch64 use calling conventions that pass arguments in registers. lua_State pointer fits in register, so we can ignore it.
 
 	void dont_call_this_use_macro_reg_chatcommand(const char *comm, const struct cmd_def &def) const;

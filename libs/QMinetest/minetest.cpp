@@ -216,9 +216,10 @@ int minetest::lua_callback_wrapper_joinplayer(lua_State *L)
 {
 	time_t last_login = 0;
 
-	if (lua_gettop(L) == 2)
+	if (lua_gettop(L) == 2) {
 		last_login = lua_tonumber(L, 2);
-	lua_pushvalue(L, 1);
+		lua_pop(L, 1);
+	}
 	player p(L);
 	for (const auto &handler : registered_on_joinplayer)
 		handler(p, last_login);
@@ -246,10 +247,27 @@ int minetest::lua_callback_wrapper_prejoinplayer(lua_State *L)
 	return retval;
 }
 
+int minetest::lua_callback_wrapper_leaveplayer(lua_State *L)
+{
+	int retval = 0;
+	bool timed_out = false;
+
+	if (lua_gettop(L) == 2) {
+		timed_out = lua_toboolean(L, 2);
+		lua_pop(L, 1);
+	}
+	player p(L);
+	for (const auto &handler : registered_on_leaveplayer)
+		handler(p, timed_out);
+
+	return retval;
+}
+
 std::forward_list<chatmsg_sig> minetest::registered_on_chatmsg = std::forward_list<chatmsg_sig>();
 std::forward_list<chatcommand_sig> minetest::registered_on_chatcommand = std::forward_list<chatcommand_sig>();
 std::forward_list<joinplayer_sig> minetest::registered_on_joinplayer = std::forward_list<joinplayer_sig>();
 std::forward_list<prejoinplayer_sig> minetest::registered_on_prejoinplayer = std::forward_list<prejoinplayer_sig>();
+std::forward_list<leaveplayer_sig> minetest::registered_on_leaveplayer = std::forward_list<leaveplayer_sig>();
 
 void minetest::register_on_chat_message(bool (* funcPtr)(QString&, QString&))
 {
@@ -325,6 +343,25 @@ void minetest::register_on_joinplayer(void (* funcPtr)(player &, time_t))
 		first_joinplayer_handler = false;
 	}
 	registered_on_joinplayer.push_front(funcPtr);
+}
+
+void minetest::register_on_leaveplayer(void (*funcPtr)(player &, bool))
+{
+	static bool first_leaveplayer_handler = true;
+
+	if (first_leaveplayer_handler) {
+		SAVE_STACK;
+
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "register_on_leaveplayer");
+
+		lua_pushcfunction(L, this->lua_callback_wrapper_leaveplayer);
+		lua_call(L, 1, 0);
+
+		RESTORE_STACK;
+		first_leaveplayer_handler = false;
+	}
+	registered_on_leaveplayer.push_front(funcPtr);
 }
 
 void minetest::after(void (* funcPtr)())

@@ -95,6 +95,7 @@ public:
 	QByteArray get_current_modname() const;
 	QByteArray get_modpath(const char *modname) const;
 	QByteArray get_modpath(const QString &modname) const { return get_modpath(modname.toUtf8().constData()); }
+	QByteArray get_modpath(const QByteArray &modname) const { return get_modpath(modname.constData()); }
 	QByteArray get_worldpath() const;
 	void register_privilege(const char *name, const char *definition) const;
 	void register_privilege(const QString &name, const QString &definition) const { return register_privilege(name.toUtf8().constData(), definition.toUtf8().constData()); }

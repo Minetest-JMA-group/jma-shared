@@ -179,6 +179,21 @@ void minetest::chat_send_player(const char *playername, const char *msg) const
 	RESTORE_STACK;
 }
 
+bool minetest::player_exists(const char *playername) const
+{
+	SAVE_STACK;
+
+	lua_getglobal(L, "core");
+	lua_getfield(L, -1, "player_exists");
+
+	lua_pushstring(L, playername);
+	lua_call(L, 1, 1);
+	bool res = lua_toboolean(L, -1);
+
+	RESTORE_STACK;
+	return res;
+}
+
 int minetest::lua_callback_wrapper_comm(lua_State *L)
 {
 	bool handled = false;

@@ -104,6 +104,9 @@ public:
 	void register_privilege(const QString &name, const QString &definition) const { return register_privilege(name.toUtf8().constData(), definition.toUtf8().constData()); }
 	void get_mod_storage(); // Leaves StorageRef on the stack top
 	void pop_modstorage();   // Pops StorageRef from the stack top
+	bool player_exists(const char *playername) const;
+	bool player_exists(const QString &playername) const { return player_exists(playername.toUtf8().constData()); }
+	bool player_exists(const QByteArray &playername) const { return player_exists(playername.constData()); }
 
 	void register_on_chat_message(chatmsg_sig);
 	void register_on_chatcommand(chatcommand_sig);

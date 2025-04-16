@@ -7,6 +7,8 @@ TARGET = $$basename(_PRO_FILE_PWD_)
 TEMPLATE = lib
 CONFIG += c++latest
 CONFIG += warn_on
+QMAKE_CXXFLAGS -= -O2
+QMAKE_CXXFLAGS_RELEASE -= -O2
 QMAKE_CXXFLAGS += -O3
 QMAKE_CXXFLAGS += -march=native
 QMAKE_CXXFLAGS += -mtune=native

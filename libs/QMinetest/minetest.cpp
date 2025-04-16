@@ -391,14 +391,6 @@ void minetest::after(void (* funcPtr)())
 	RESTORE_STACK;
 }
 
-void pushQStringList(lua_State *L, const QStringList &privlist) {
-	lua_newtable(L);
-	for (const QString &priv : privlist) {
-		lua_pushboolean(L, true);
-		lua_setfield(L, -2, priv.toUtf8().constData());
-	}
-}
-
 void minetest::create_command_deftable(lua_State *L, const struct cmd_def &def)
 {
 	lua_newtable(L);

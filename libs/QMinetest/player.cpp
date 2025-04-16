@@ -9,8 +9,11 @@ bool player::get_meta() const
 {
 	SAVE_STACK;
 
-	if (!lua_isuserdata(L, -1))
+	if (!lua_isuserdata(L, -1)) {
+		qLog << "Called get_meta on an invalid player object.\n";
+		printLuaStack(L);
 		goto err;
+	}
 	lua_getfield(L, -1, "get_meta"); // Assuming the Player object is at the top of the stack
 	if (!lua_isfunction(L, -1))
 		goto err;
@@ -33,8 +36,11 @@ QByteArray player::get_player_name() const
 	QByteArray res;
 	SAVE_STACK;
 
-	if (!lua_isuserdata(L, -1))
+	if (!lua_isuserdata(L, -1)) {
+		qLog << "Called get_player_name on an invalid player object.\n";
+		printLuaStack(L);
 		goto out;
+	}
 	lua_getfield(L, -1, "get_player_name"); // Assuming the Player object is at the top of the stack
 	if (!lua_isfunction(L, -1))
 		goto out;

@@ -3,9 +3,8 @@
 #ifndef MINETEST_H
 #define MINETEST_H
 #include <QString>
-#include <player.h>
+#include <mylua.h>
 #include <ctime>
-#include <luajit-2.1/lua.hpp>
 #include <QTextStream>
 #include <QStringList>
 #include <QByteArray>
@@ -19,12 +18,6 @@
 #define shutdown_sig void (*)()
 #define after_sig void (*)()
 #define leaveplayer_sig void (*)(player&, bool)
-
-void printLuaStack(lua_State* L);
-void printLuaTable(lua_State* L, int index);
-void printLuaType(lua_State *L, int index, QTextStream &where);
-void copyLuaTable(lua_State *L, int srcIndex, int destIndex);
-void pushQStringList(lua_State *L, const QStringList &privlist);
 
 class QMyByteArray : public QByteArray {
 public:

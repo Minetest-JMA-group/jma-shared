@@ -74,8 +74,8 @@ INCLUDEPATH += $$LIBSPATH/QMinetest
 LIBS += -L$$LIBSPATH -lluajit-5.1
 
 SOURCES += \
-    debug.cpp \
     minetest.cpp \
+    mylua.cpp \
     player.cpp \
     qlog.cpp \
     qtinit.cpp \
@@ -83,5 +83,6 @@ SOURCES += \
 
 HEADERS += \
     minetest.h \
+    mylua.h \
     player.h \
     storage.h

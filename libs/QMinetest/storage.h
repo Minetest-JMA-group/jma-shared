@@ -2,8 +2,7 @@
 // Copyright (c) 2023 Marko Petrović
 #ifndef STORAGE_H
 #define STORAGE_H
-#include <player.h>
-#include <luajit-2.1/lua.hpp>
+#include <mylua.h>
 #include <QByteArray>
 #include <QString>
 #include <type_traits>

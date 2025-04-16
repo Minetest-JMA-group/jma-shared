@@ -348,7 +348,7 @@ void minetest::register_on_joinplayer(void (* funcPtr)(player &, time_t))
 		SAVE_STACK;
 
 		lua_getglobal(L, "core");
-		lua_getfield(L, -1, "register_on_prejoinplayer");
+		lua_getfield(L, -1, "register_on_joinplayer");
 
 		lua_pushcfunction(L, this->lua_callback_wrapper_joinplayer);
 		lua_call(L, 1, 0);

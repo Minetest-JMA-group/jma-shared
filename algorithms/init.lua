@@ -21,7 +21,7 @@ algorithms.load_library = function(libpath)
 	local modname = minetest.get_current_modname()
 
 	if not c_mods[modname] then
-		minetest.log("["..modname.."]: Attempted to load shared object file without permission!")
+		minetest.log("error", "["..modname.."]: Attempted to load shared object file without permission!")
 		return false
 	end
 
@@ -38,15 +38,15 @@ algorithms.load_library = function(libpath)
 		libinit, err = ie.package.loadlib(MP.."/lib"..modname..".so", "luaopen_mylibrary")
 	end
 	if not libinit and err then
-		minetest.log("["..modname.."]: Failed to load shared object file")
-		minetest.log("["..modname.."]: "..err)
+		minetest.log("error", "["..modname.."]: Failed to load shared object file")
+		minetest.log("error", "["..modname.."]: "..err)
 		return false
 	end
 
 	local ret = libinit()
 	if ret and ret ~= 0 then
-		minetest.log("["..modname.."]: Failed to load shared object file")
-		minetest.log("["..modname.."]: Exited with code: "..tostring(ret))
+		minetest.log("error", "["..modname.."]: Failed to load shared object file")
+		minetest.log("error", "["..modname.."]: Exited with code: "..tostring(ret))
 		return false
 	end
 	return true

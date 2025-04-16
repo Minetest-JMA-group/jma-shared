@@ -264,7 +264,6 @@ int minetest::lua_callback_wrapper_prejoinplayer(lua_State *L)
 
 int minetest::lua_callback_wrapper_leaveplayer(lua_State *L)
 {
-	int retval = 0;
 	bool timed_out = false;
 
 	if (lua_gettop(L) == 2) {
@@ -275,7 +274,7 @@ int minetest::lua_callback_wrapper_leaveplayer(lua_State *L)
 	for (const auto &handler : registered_on_leaveplayer)
 		handler(p, timed_out);
 
-	return retval;
+	return 0;
 }
 
 std::forward_list<chatmsg_sig> minetest::registered_on_chatmsg = std::forward_list<chatmsg_sig>();

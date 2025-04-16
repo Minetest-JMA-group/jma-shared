@@ -8,7 +8,7 @@ local initial_callback_num
 core.register_on_chat_message(function(sender_name, message)
 	-- Call other callbacks so that we're last
 	for i = initial_callback_num, #core.registered_on_chat_messages do
-		if core.registered_on_chat_messages(sender_name, message) then
+		if core.registered_on_chat_messages[i](sender_name, message) then
 			return true
 		end
 	end

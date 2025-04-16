@@ -36,7 +36,7 @@ static struct cmd_ret block(QByteArray name, QByteArray param)
 		return {false, QStringLiteral("Failed to save the change. Error: ") + strerror(saved_errno)};
 	}
 	db[name][param] = BLOCKED;
-	return {true, "PLayer " + param + " blocked. You won't see their messages anymore."};
+	return {true, "Player " + param + " blocked. You won't see their messages anymore."};
 }
 
 static struct cmd_ret unblock(QByteArray name, QByteArray param)
@@ -55,7 +55,7 @@ static struct cmd_ret unblock(QByteArray name, QByteArray param)
 		return {false, QStringLiteral("Failed to save the change. Error: ") + strerror(saved_errno)};
 	}
 	db[name][param] = UNBLOCKED;
-	return {true, "PLayer " + param + " unblocked. You can chat with them again."};
+	return {true, "Player " + param + " unblocked. You can chat with them again."};
 }
 
 /* Args: sender_name: string, receiver_name: string

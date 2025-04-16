@@ -91,6 +91,7 @@ public:
 	~minetest();
 	void log_message(const char *level, const char *msg) const;
 	void log_message(const QString &level, const QString &msg) const { return log_message(level.toUtf8().constData(), msg.toUtf8().constData()); }
+	void log_message(const char *level, const QString &msg) const { return log_message(level, msg.toUtf8().constData()); }
 	void chat_send_all(const char *msg) const;
 	void chat_send_all(const QString &msg) const { return chat_send_all(msg.toUtf8().constData()); }
 	void chat_send_player(const char *playername, const char *msg) const;

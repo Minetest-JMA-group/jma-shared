@@ -63,7 +63,7 @@ static struct cmd_ret unblock(QByteArray name, QByteArray param)
  */
 static int is_chat_blocked(lua_State *L)
 {
-	if (lua_gettop(L) < 3 || !lua_isstring(L, 1) || !lua_isstring(L, 2)) {
+	if (lua_gettop(L) < 2 || !lua_isstring(L, 1) || !lua_isstring(L, 2)) {
 		m.log_message("error", modname + ": send_message called with wrong arguments!");
 		return 0;
 	}

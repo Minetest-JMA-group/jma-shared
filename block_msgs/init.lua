@@ -4,15 +4,22 @@ if not algorithms.load_library() then
 	return
 end
 
-local initial_callback_num
+local registered_on_chat_messages_snapshot = {}
+
 core.register_on_chat_message(function(sender_name, message)
 	-- Call other callbacks so that we're last
-	for i = initial_callback_num, #core.registered_on_chat_messages do
-		if core.registered_on_chat_messages[i](sender_name, message) then
-			return true
+	for _, func in ipairs(core.registered_on_chat_messages) do
+		if not registered_on_chat_messages_snapshot[func] then
+			if func(sender_name, message) then
+				return true
+			end
 		end
 	end
-	
+
+	if message:sub(1, 1) == "/" then
+		return false -- let commands through unhandled
+	end
+
 	local formatted_message = core.format_chat_message(sender_name, message)
 	for _, player in ipairs(core.get_connected_players()) do
 		local receiver_name = player:get_player_name()
@@ -20,10 +27,13 @@ core.register_on_chat_message(function(sender_name, message)
 			core.chat_send_player(receiver_name, formatted_message)
 		end
 	end
-	
+
 	return true
 end)
-initial_callback_num = #core.registered_on_chat_messages + 1
+
+for _, func in ipairs(core.registered_on_chat_messages) do
+	registered_on_chat_messages_snapshot[func] = true
+end
 
 local directed_chatcomms = {
 	["msg"] = true,

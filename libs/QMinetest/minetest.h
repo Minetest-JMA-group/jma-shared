@@ -4,6 +4,7 @@
 #define MINETEST_H
 #include <QString>
 #include <mylua.h>
+#include <player.h>
 #include <ctime>
 #include <QTextStream>
 #include <QStringList>

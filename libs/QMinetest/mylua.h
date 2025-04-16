@@ -1,6 +1,8 @@
 #ifndef MYLUA_H
 #define MYLUA_H
 #include <luajit-2.1/lua.hpp>
+#include <QTextStream>
+#include <QStringList>
 
 #define SAVE_STACK	int __cur_top, __old_top = lua_gettop(L)
 

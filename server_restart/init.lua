@@ -35,7 +35,7 @@ function server_restart.request_restart(playername, time, update)
 		for _, p in ipairs(minetest.get_connected_players()) do
 			minetest.show_formspec(p:get_player_name(), "server_restart", string.format(formspec, msg, requestedby_msg))
 		end
-		minetest.after(4, do_restart)
+		minetest.after(8, do_restart)
 	end)
 end
 

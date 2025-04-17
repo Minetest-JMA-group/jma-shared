@@ -1,6 +1,7 @@
 block_msgs = {}
 if not algorithms.load_library() then
 	block_msgs.is_chat_blocked = function() return false end
+	block_msgs.chat_send_all = function(sender_name, message) core.chat_send_all(message) end
 	return
 end
 

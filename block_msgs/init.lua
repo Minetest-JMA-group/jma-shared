@@ -27,7 +27,7 @@ core.register_on_chat_message(function(sender_name, message)
 			core.chat_send_player(receiver_name, formatted_message)
 		end
 	end
-	core.log("action", "CHAT: "..formatted_message)
+	core.log("action", "CHAT: <"..sender_name..">: "..message)
 
 	return true
 end)

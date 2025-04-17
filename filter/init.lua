@@ -113,12 +113,21 @@ function filter.on_violation(name, message, violation_type)
 
 	local resolution
 	if filter.get_mode() == 0 then
+		if discord and discord.enabled then
+			if violation_type == "too_long" then
+				discord.send_action_report("**filter**: [PERMISSIVE] Message too long: \"%s\" (exceeds maximum length)", last_bad_msg)
+			else
+				discord.send_action_report("**filter**: [PERMISSIVE] Message \"%s\" matched using blacklist regex: \"%s\"", last_bad_msg, filter.get_lastreg())
+			end
+		end
 		resolution = "permissive"
 	end
 
-	for _, cb in pairs(filter.registered_on_violations) do
-		if cb(name, message, violations, violation_type) then
-			resolution = "custom"
+	if not resolution then
+		for _, cb in pairs(filter.registered_on_violations) do
+			if cb(name, message, violations, violation_type) then
+				resolution = "custom"
+			end
 		end
 	end
 

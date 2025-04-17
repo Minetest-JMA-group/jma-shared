@@ -69,7 +69,7 @@ static int is_chat_blocked(lua_State *L)
 	}
 	const char *sname = lua_tostring(L, 1);
 	QByteArray sender_name = QByteArray::fromRawData(sname, strlen(sname));
-	const char *rname = lua_tostring(L, 1);
+	const char *rname = lua_tostring(L, 2);
 	QByteArray receiver_name = QByteArray::fromRawData(rname, strlen(rname));
 
 	if (db[receiver_name][sender_name] == UNFETCHED) {

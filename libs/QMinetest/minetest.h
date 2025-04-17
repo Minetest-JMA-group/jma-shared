@@ -97,12 +97,12 @@ public:
 	QString get_worldpath() const;
 	void register_privilege(const char *name, const char *definition) const;
 	void register_privilege(const QString &name, const QString &definition) const { return register_privilege(name.toUtf8().constData(), definition.toUtf8().constData()); }
-	void get_mod_storage(); // Leaves StorageRef on the stack top
-	void pop_modstorage();   // Pops StorageRef from the stack top
+	void get_mod_storage();		// Leaves StorageRef on the stack top
+	void pop_modstorage();		// Pops StorageRef from the stack top
 	bool player_exists(const char *playername) const;
 	bool player_exists(const QString &playername) const { return player_exists(playername.toUtf8().constData()); }
 	bool player_exists(const QByteArray &playername) const { return player_exists(playername.constData()); }
-	bool get_player_by_name(const char *playername);
+	bool get_player_by_name(const char *playername);	// Leaves player ObjectRef on the stack top. Should be popped manually, e.g. with lua_pop(L, 1)
 	bool get_player_by_name(const QString &playername) { return get_player_by_name(playername.toUtf8().constData()); }
 	bool get_player_by_name(const QByteArray &playername) { return get_player_by_name(playername.constData()); }
 

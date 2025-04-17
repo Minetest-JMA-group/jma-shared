@@ -102,6 +102,9 @@ public:
 	bool player_exists(const char *playername) const;
 	bool player_exists(const QString &playername) const { return player_exists(playername.toUtf8().constData()); }
 	bool player_exists(const QByteArray &playername) const { return player_exists(playername.constData()); }
+	bool get_player_by_name(const char *playername);
+	bool get_player_by_name(const QString &playername) { return get_player_by_name(playername.toUtf8().constData()); }
+	bool get_player_by_name(const QByteArray &playername) { return get_player_by_name(playername.constData()); }
 
 	void register_on_chat_message(chatmsg_sig);
 	void register_on_chatcommand(chatcommand_sig);

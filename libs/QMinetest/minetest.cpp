@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2023 Marko Petrović
 #include <minetest.h>
+#include <player.h>
 
 lua_state_class::lua_state_class(lua_State *L) : L(L) {}
 lua_state_class::lua_state_class() {}
@@ -13,9 +14,9 @@ void lua_state_class::set_state(lua_State *L)
 }
 
 /* StorageRef user object construction in engine (className = "StorageRef"):
-    *(void **)(lua_newuserdata(L, sizeof(void *))) = o; // o - StorageRef pointer
-    luaL_getmetatable(L, className);
-    lua_setmetatable(L, -2);
+	*(void **)(lua_newuserdata(L, sizeof(void *))) = o; // o - StorageRef pointer
+	luaL_getmetatable(L, className);
+	lua_setmetatable(L, -2);
 */
 
 QByteArray minetest::get_current_modname() const
@@ -93,8 +94,8 @@ void minetest::get_mod_storage()
 		copyLuaTable(L, -1, -2);
 		lua_pushnil(L);
 		lua_setfield(L, -3, "__gc");
-		lua_pop(L, 1);  // Pop the original StorageRef metatable
-		lua_setmetatable(L, -2);    // Set new StorageRef_nogc to modstorage userobject
+		lua_pop(L, 1);	// Pop the original StorageRef metatable
+		lua_setmetatable(L, -2);	// Set new StorageRef_nogc to modstorage userobject
 	}
 	else {
 		*(void **)(lua_newuserdata(L, sizeof(void *))) = StorageRef;
@@ -192,6 +193,23 @@ bool minetest::player_exists(const char *playername) const
 
 	RESTORE_STACK;
 	return res;
+}
+
+bool minetest::get_player_by_name(const char *playername)
+{
+	SAVE_STACK;
+
+	lua_getglobal(L, "core");
+	lua_getfield(L, -1, "get_player_by_name");
+	lua_remove(L, -2);
+
+	lua_pushstring(L, playername);
+	lua_call(L, 1, 1);
+	if (lua_isnil(L, -1)) {
+		lua_pop(L, 1);
+		return false;
+	}
+	return true;
 }
 
 int minetest::lua_callback_wrapper_comm(lua_State *L)

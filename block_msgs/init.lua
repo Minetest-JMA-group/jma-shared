@@ -4,6 +4,15 @@ if not algorithms.load_library() then
 	return
 end
 
+function block_msgs.chat_send_all(sender_name, message)
+	for _, player in ipairs(core.get_connected_players()) do
+		local receiver_name = player:get_player_name()
+		if not block_msgs.is_chat_blocked(sender_name, receiver_name) then
+			core.chat_send_player(receiver_name, formatted_message)
+		end
+	end
+end
+
 local registered_on_chat_messages_snapshot = {}
 
 core.register_on_chat_message(function(sender_name, message)
@@ -21,12 +30,7 @@ core.register_on_chat_message(function(sender_name, message)
 	end
 
 	local formatted_message = core.format_chat_message(sender_name, message)
-	for _, player in ipairs(core.get_connected_players()) do
-		local receiver_name = player:get_player_name()
-		if not block_msgs.is_chat_blocked(sender_name, receiver_name) then
-			core.chat_send_player(receiver_name, formatted_message)
-		end
-	end
+	block_msgs.chat_send_all(sender_name, formatted_message)
 	core.log("action", "CHAT: <"..sender_name..">: "..message)
 
 	return true

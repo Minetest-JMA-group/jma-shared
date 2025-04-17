@@ -8,7 +8,7 @@ function block_msgs.chat_send_all(sender_name, message)
 	for _, player in ipairs(core.get_connected_players()) do
 		local receiver_name = player:get_player_name()
 		if not block_msgs.is_chat_blocked(sender_name, receiver_name) then
-			core.chat_send_player(receiver_name, formatted_message)
+			core.chat_send_player(receiver_name, message)
 		end
 	end
 end

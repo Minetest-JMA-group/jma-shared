@@ -89,7 +89,8 @@ public:
 	void chat_send_all(const char *msg) const;
 	void chat_send_all(const QString &msg) const { return chat_send_all(msg.toUtf8().constData()); }
 	void chat_send_player(const char *playername, const char *msg) const;
-	void chat_send_player(const QString &playername, const QString &msg) const {return chat_send_player(playername.toUtf8().constData(), msg.toUtf8().constData()); }
+	void chat_send_player(const QString &playername, const QString &msg) const { return chat_send_player(playername.toUtf8().constData(), msg.toUtf8().constData()); }
+	void chat_send_player(const QByteArray &playername, const QString &msg) const { return chat_send_player(playername.constData(), msg.toUtf8().constData()); }
 	QByteArray get_current_modname() const;
 	QString get_modpath(const char *modname) const;
 	QString get_modpath(const QString &modname) const { return get_modpath(modname.toUtf8().constData()); }

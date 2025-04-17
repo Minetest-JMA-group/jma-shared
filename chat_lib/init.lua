@@ -39,7 +39,7 @@ function minetest.chat_send_player(name, message, source)
 	chat_lib.chat_send_player(name, message)
 end
 
-function chat_lib.send_message_to_privileged(message, privileges)
+function chat_lib.send_message_to_privileged(message, privileges, sender)
 	if not message or not privileges then
 		return 0
 	end
@@ -70,8 +70,10 @@ function chat_lib.send_message_to_privileged(message, privileges)
 		if not sent_to[player_name] then
 			for priv_name in pairs(priv_check) do
 				if minetest.check_player_privs(player_name, {[priv_name] = true}) then
-					minetest.chat_send_player(player_name, message)
-					count = count + 1
+					if not sender or not block_msgs or not block_msgs.is_chat_blocked(sender, player_name) then
+						minetest.chat_send_player(player_name, message)
+						count = count + 1
+					end
 					sent_to[player_name] = true
 					break -- Stop checking other privileges for this player
 				end

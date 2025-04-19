@@ -27,6 +27,11 @@ int parse(lua_State* L)
 	// Iterate over the words
 	int currCapsSpace = capsSpace + 1;
 	for (QString& word : words) {
+		if (m.get_player_by_name(word)) {
+			lua_pop(L, 1);
+			text += word + " ";
+			continue;
+		}
 		QString lw = word.toLower();
 		if (whitelist->contains(lw)) {
 			text += word + " ";

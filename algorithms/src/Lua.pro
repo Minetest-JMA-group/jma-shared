@@ -9,9 +9,7 @@ CONFIG += c++latest
 CONFIG += warn_on
 QMAKE_CXXFLAGS -= -O2
 QMAKE_CXXFLAGS_RELEASE -= -O2
-QMAKE_CXXFLAGS += -O3
-QMAKE_CXXFLAGS += -march=native
-QMAKE_CXXFLAGS += -mtune=native
+QMAKE_CXXFLAGS += -O3 -march=native -mtune=native -Werror
 
 # You can make your code fail to compile if it uses deprecated APIs.
 # In order to do so, uncomment the following line.

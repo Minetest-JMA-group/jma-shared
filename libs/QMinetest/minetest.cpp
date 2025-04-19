@@ -197,8 +197,6 @@ bool minetest::player_exists(const char *playername) const
 
 bool minetest::get_player_by_name(const char *playername)
 {
-	SAVE_STACK;
-
 	lua_getglobal(L, "core");
 	lua_getfield(L, -1, "get_player_by_name");
 	lua_remove(L, -2);

@@ -36,10 +36,6 @@ static struct cmd_ret block(QByteArray name, QByteArray param)
 		return {false, QStringLiteral("Failed to save the change. Error: ") + strerror(saved_errno)};
 	}
 	db[name][param] = BLOCKED;
-	if (m.get_player_by_name(param)) {
-		lua_pop(m.L, 1);
-		m.chat_send_player(param, name + " has blocked you. They won't see your messages anymore.");
-	}
 	qLog << modname << ": " << name << " has blocked " << param;
 	return {true, "Player " + param + " blocked. You won't see their messages anymore."};
 }
@@ -60,10 +56,6 @@ static struct cmd_ret unblock(QByteArray name, QByteArray param)
 		return {false, QStringLiteral("Failed to save the change. Error: ") + strerror(saved_errno)};
 	}
 	db[name][param] = UNBLOCKED;
-	if (m.get_player_by_name(param)) {
-		lua_pop(m.L, 1);
-		m.chat_send_player(param, name + " has unblocked you. You can chat with them again.");
-	}
 	qLog << modname << ": " << name << " has unblocked " << param;
 	return {true, "Player " + param + " unblocked. You can chat with them again."};
 }

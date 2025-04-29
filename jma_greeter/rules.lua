@@ -20,6 +20,10 @@ if minetest.global_exists("sfinv") then
 end
 
 local function need_to_accept(pname)
+	if jma_greeter.rules_mode == "no_priv_change" then
+		-- In "no_priv_change" mode, no need to check privileges
+		return false
+	end
 	return not minetest.check_player_privs(pname, { interact = true }) and
 			not minetest.check_player_privs(pname, { shout = true })
 end
@@ -90,11 +94,17 @@ minetest.register_on_player_receive_fields(function(player, form, fields)
 	local pname = player:get_player_name()
 	if need_to_accept(pname) then
 		if fields.yes then
-			local privs = minetest.get_player_privs(pname)
-			privs.shout = true
-			privs.interact = true
-			minetest.set_player_privs(pname, privs)
-			minetest.chat_send_player(pname, minetest.colorize("lime", "Welcome ".. pname .."! You have now permission to play!"))
+			if jma_greeter.rules_mode == "grant_privs" then
+				-- Grant privileges in "grant_privs" mode
+				local privs = minetest.get_player_privs(pname)
+				privs.shout = true
+				privs.interact = true
+				minetest.set_player_privs(pname, privs)
+				minetest.chat_send_player(pname, minetest.colorize("lime", "Welcome ".. pname .."! You have now permission to play!"))
+			else
+				-- Just allow the player to play in "no_priv_change" mode
+				minetest.chat_send_player(pname, minetest.colorize("lime", "Welcome ".. pname .."! You can now play!"))
+			end
 			jma_greeter.queue_next(player)
 			return true
 		elseif fields.no then

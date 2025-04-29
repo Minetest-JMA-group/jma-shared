@@ -2,8 +2,13 @@ jma_greeter = {
 	players_greeting_events = {},
 	editor_context = {},
 	events_on_newplayer = {"new_player_rules", "news"},
-	events_on_join = {"news"}
+	events_on_join = {"news"},
+	rules_mode = minetest.settings:get("jma_greeter_rules_mode") or "grant_privs"
+	-- Modes:
+	-- "grant_privs" - Grant privileges after accepting rules
+	-- "no_priv_change" - Do not modify privileges, just allow the player to play
 }
+
 local worldpath = minetest.get_worldpath()
 
 local game_title
@@ -103,10 +108,12 @@ jma_greeter.events = {
 		.. "——————————————————————————————————————————————————————————————"
 		minetest.chat_send_player(pname, minetest.colorize("#2af7b6", msg))
 
-		local privs = minetest.get_player_privs(pname)
-		privs.shout = nil
-		privs.interact = nil
-		minetest.set_player_privs(pname, privs)
+		if jma_greeter.rules_mode == "grant_privs" then
+			local privs = minetest.get_player_privs(pname)
+			privs.shout = nil
+			privs.interact = nil
+			minetest.set_player_privs(pname, privs)
+		end
 
 		jma_greeter.show_rules(player)
 	end,

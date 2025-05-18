@@ -8,6 +8,9 @@ do
 	end
 end
 
+local motd = minetest.settings:get("motd")
+local motd_color = minetest.settings:get("motd_color")
+
 local function get_server_uptime_formatted()
     local seconds = math.floor(minetest.get_server_uptime())
 
@@ -40,7 +43,7 @@ local function get_server_uptime_formatted()
 end
 
 function minetest.get_server_status(name, joined)
-	local msg = string.format("— %s | Version: %s | Uptime: %s | Max Lag: %.3f | ",
+	local msg = string.format("- %s | Version: %s | Uptime: %s | Max Lag: %.3f | ",
 	game_title, minetest.get_version().string, get_server_uptime_formatted(), minetest.get_server_max_lag() or "0")
 
 	local players = minetest.get_connected_players()
@@ -61,38 +64,14 @@ function minetest.get_server_status(name, joined)
 
 	msg = msg .. plist
 
-	local motd = minetest.settings:get("motd")
-	if motd and motd ~= "" then
-		local motd_color = minetest.settings:get("motd_color")
-		if motd_color and motd_color ~= "" then
-			motd = minetest.colorize(motd_color, motd)
-		end
-		msg = msg .. "\n— " .. motd
-	end
+    if not joined then
+        if motd and motd ~= "" then
+            if motd_color and motd_color ~= "" then
+                motd = minetest.colorize(motd_color, motd)
+            end
+            msg = msg .. "\n— " .. motd
+        end
+    end
 
 	return msg
 end
-
-minetest.register_chatcommand("set_motd", {
-	description = "Set message of the day displayed to players connecting",
-	params = "<text>",
-	privs = {dev = true},
-	func = function(name, text)
-		minetest.settings:set("motd", text)
-
-		minetest.log("action", "chat_lib: " .. name .. " updated the MOTD to: " .. text)
-		return true, "MOTD updated"
-	end,
-})
-
-minetest.register_chatcommand("set_motd_color", {
-	description = "Set MOTD color",
-	params = "<color string>",
-	privs = {dev = true},
-	func = function(name, color)
-		minetest.settings:set("motd_color", color)
-
-		minetest.log("action", "chat_lib: " .. name .. " updated the MOTD color to: " .. color)
-		return true, "MOTD color updated"
-	end,
-})

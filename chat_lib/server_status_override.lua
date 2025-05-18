@@ -64,7 +64,7 @@ function minetest.get_server_status(name, joined)
 
 	msg = msg .. plist
 
-    if not joined then
+    if joined then
         if motd and motd ~= "" then
             if motd_color and motd_color ~= "" then
                 motd = minetest.colorize(motd_color, motd)

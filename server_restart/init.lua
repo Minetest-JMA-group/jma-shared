@@ -29,6 +29,12 @@ local formspec = "formspec_version[7]"
 function server_restart.request_restart(playername, time, update)
     local requestedby_msg = "Restart requested by " .. playername
     minetest.log("warning", "server_restart: " .. requestedby_msg)
+
+	if time == 0 then
+		do_restart()
+		return
+	end
+
 	minetest.after(time, function()
 		local msg = "The server will be restarted, and it should only take a moment. Please reconnect afterward."
 		minetest.chat_send_all(minetest.colorize("red", "- " .. msg .. "\n" .. requestedby_msg))

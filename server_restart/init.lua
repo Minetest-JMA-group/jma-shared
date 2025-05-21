@@ -88,6 +88,6 @@ minetest.register_chatcommand("qcancel", {
 
 ctf_api.register_on_match_end(function()
 	if ctf_modebase.restart_on_next_match then
-		server_restart.request_restart(requested_by, 0)
+		server_restart.request_restart(requested_by, 3)
 	end
 end)

@@ -22,8 +22,12 @@ static QHash<QByteArray, QHash<QByteArray, int>> db;
 
 static struct cmd_ret block(QByteArray name, QByteArray param)
 {
+	if (name == param)
+		return {false, "You cannot block yourself."};
+
 	if (!m.player_exists(param))
 		return {false, "Player " + param + " doesn't exist"};
+
 	if (db[name][param] == BLOCKED)
 		return {false, "Player " + param + " was already blocked"};
 
@@ -39,6 +43,7 @@ static struct cmd_ret block(QByteArray name, QByteArray param)
 	qLog << modname << ": " << name << " has blocked " << param;
 	return {true, "Player " + param + " blocked. You won't see their messages anymore."};
 }
+
 
 static struct cmd_ret unblock(QByteArray name, QByteArray param)
 {

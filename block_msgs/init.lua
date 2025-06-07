@@ -5,6 +5,16 @@ if not algorithms.load_library() then
 	return
 end
 
+local block_cmd = core.registered_chatcommands["block"]
+local cpp_func = block_cmd.func
+block_cmd.func = function(name, param)
+	if core.check_player_privs(param, "moderator") then
+		return false, "You cannot block a moderator"
+	end
+	return cpp_func(name, param)
+end
+core.override_chatcommand("block", block_cmd)
+
 function block_msgs.chat_send_all(sender_name, message)
 	for _, player in ipairs(core.get_connected_players()) do
 		local receiver_name = player:get_player_name()

@@ -502,8 +502,8 @@ extern "C" int luaopen_mylibrary(lua_State *L)
 	QStringList string_blacklist = load_string_list(s, "blacklist");
 	m.pop_modstorage();
 
-	patterns_to_reglist(blacklist, string_blacklist);
-	patterns_to_reglist(whitelist, string_whitelist);
+	qLog << "Loaded " << patterns_to_reglist(blacklist, string_blacklist) << " blacklist entries";
+	qLog << "Loaded " << patterns_to_reglist(whitelist, string_whitelist) << " whitelist entries";
 	register_functions(L);
 	m.register_chatcommand("filter", QStringList("filtering"), "filter management console", "<command> <args>", filter_console);
 

@@ -144,8 +144,3 @@ returns: (string) the substring formed from i to j, inclusive (this is a utf8-aw
 > = utf8_simple.sub('Αγαπώ τηγανίτες', 3, -5)
 απώ τηγαν
 ```
-
-### utf8_simple.codepoint(c)
-- c: an UTF-8 character (string of 1 or more bytes)
-
-returns: A number representing character's Unicode codepoint

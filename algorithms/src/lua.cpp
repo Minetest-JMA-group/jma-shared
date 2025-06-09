@@ -3,8 +3,9 @@
 #include <luajit-2.1/lua.hpp>
 #include <QTextStream>
 #include <QString>
+#include <QList>
 
-int countCaps(lua_State* L)
+int countCaps(lua_State *L)
 {
 	if (!lua_isstring(L, 1)) {
 		lua_pushinteger(L, 0);
@@ -20,7 +21,23 @@ int countCaps(lua_State* L)
 	return 1;
 }
 
-int lower(lua_State* L)
+int codepoint(lua_State *L)
+{
+	if (!lua_isstring(L, 1)) {
+		lua_pushstring(L, "Non-string argument");
+		lua_error(L);
+	}
+	QString str(lua_tostring(L, 1));
+	auto ucsList = str.toUcs4();
+	if (ucsList.size() != 1) {
+		lua_pushstring(L, "Not a single Unicode char");
+		lua_error(L);
+	}
+	lua_pushnumber(L, ucsList[0]);
+	return 1;
+}
+
+int lower(lua_State *L)
 {
 	if (!lua_isstring(L, 1)) {
 		lua_pushstring(L, "");
@@ -31,7 +48,7 @@ int lower(lua_State* L)
 	return 1;
 }
 
-int upper(lua_State* L)
+int upper(lua_State *L)
 {
 	if (!lua_isstring(L, 1)) {
 		lua_pushstring(L, "");
@@ -42,7 +59,7 @@ int upper(lua_State* L)
 	return 1;
 }
 
-extern "C" int luaopen_mylibrary(lua_State* L)
+extern "C" int luaopen_mylibrary(lua_State *L)
 {
 	lua_getglobal(L, "algorithms");
 	lua_pushcfunction(L, countCaps);
@@ -51,6 +68,8 @@ extern "C" int luaopen_mylibrary(lua_State* L)
 	lua_setfield(L, -2, "lower");
 	lua_pushcfunction(L, upper);
 	lua_setfield(L, -2, "upper");
+	lua_pushcfunction(L, codepoint);
+	lua_setfield(L, -2, "codepoint");
 	lua_pop(L, 1);
 	return 0;
 }

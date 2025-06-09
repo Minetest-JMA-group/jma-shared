@@ -2,15 +2,9 @@
 
 This "library" is meant to be a very thin helper that you can easily drop in to another project without really calling it a dependency.  It aims to provide the most minimal of handling functions for working with utf8 strings.  It does not aim to be feature-complete or even error-descriptive.  It works for what is practical but not complex.  You have been warned. =^__^=
 
-## The require() Line
-
-```lua
-local utf8 = require('utf8_simple')
-```
-
 ## The Only Functions You Need to Know
 
-### utf8.chars(s[, no_subs])
+### utf8_simple.chars(s[, no_subs])
 - s: (string) the utf8 string to iterate over (by characters)
 - nosubs: (boolean) true turns the substring utf8 characters into byte-lengths
 
@@ -18,7 +12,7 @@ local utf8 = require('utf8_simple')
 -- i is the character/letter index within the string
 -- c is the utf8 character (string of 1 or more bytes)
 -- b is the byte index within the string
-for i, c, b in utf8.chars('Αγαπώ τηγανίτες') do
+for i, c, b in utf8_simple.chars('Αγαπώ τηγανίτες') do
 	print(i, c, b)
 end
 ```
@@ -42,7 +36,7 @@ Output:
 	15	ς	28
 
 ### ALTERNATE FORM
-Creating small substrings can be a performance concern, the 2nd parameter to utf8.chars()
+Creating small substrings can be a performance concern, the 2nd parameter to utf8_simple.chars()
 allows you to toggle the substrings to instead by the byte width of the character.
 
 This is for situations when you only care about the byte width (less common).
@@ -51,7 +45,7 @@ This is for situations when you only care about the byte width (less common).
 -- i is the character/letter index within the string
 -- w is the utf8 character width (in bytes)
 -- b is the byte index within the string
-for i, w, b in utf8.chars('Αγαπώ τηγανίτες', true) do
+for i, w, b in utf8_simple.chars('Αγαπώ τηγανίτες', true) do
 	print(i, w, b)
 end
 ```
@@ -74,7 +68,7 @@ Output:
 	14	2	26
 	15	2	28
 
-### utf8.map(s, f[, no_subs])
+### utf8_simple.map(s, f[, no_subs])
 - s: (string) the utf8 string to map 'f' over
 - f: (function) a function accepting: f(visual_index, utf8_char -or- width, byte_index)
 - no_subs: (boolean) true means don't make small substrings from each character (byte width instead)
@@ -82,16 +76,16 @@ Output:
 returns: (nothing)
 
 ```lua
-> utf8.map('Αγαπώ τηγανίτες', print) -- does the same as the first example above
+> utf8_simple.map('Αγαπώ τηγανίτες', print) -- does the same as the first example above
 ```
 
 ```lua
-> utf8.map('Αγαπώ τηγανίτες', print, true) -- the alternate form from above
+> utf8_simple.map('Αγαπώ τηγανίτες', print, true) -- the alternate form from above
 ```
 
 ## Others
 
-### utf8.len(s)
+### utf8_simple.len(s)
 - s: (string) the utf8 string
 
 returns: (number) the number of utf8 characters in s (not the byte length)
@@ -99,11 +93,11 @@ returns: (number) the number of utf8 characters in s (not the byte length)
 note: be aware of "invisible" utf8 characters
 
 ```lua
-> = utf8.len('Αγαπώ τηγανίτες')
+> = utf8_simple.len('Αγαπώ τηγανίτες')
 15
 ```
 
-### utf8.reverse(s)
+### utf8_simple.reverse(s)
 - s: (string) the utf8 string
 
 returns: (string) the utf8-reversed form of s
@@ -111,21 +105,21 @@ returns: (string) the utf8-reversed form of s
 note: reversing left-to-right utf8 strings that include directional formatting characters will look odd
 
 ```lua
-> = utf8.reverse('Αγαπώ τηγανίτες')
+> = utf8_simple.reverse('Αγαπώ τηγανίτες')
 ςετίναγητ ώπαγΑ
 ```
 
-### utf8.strip(s)
+### utf8_simple.strip(s)
 - s: (string) the utf8 string
 
 returns: (string) s with all non-ascii characters removed (characters > 1 byte)
 
 ```lua
-> = utf8.strip('cat♥dog')
+> = utf8_simple.strip('cat♥dog')
 catdog
 ```
 
-### utf8.replace(s, map)
+### utf8_simple.replace(s, map)
 - s: (string) the utf8 string
 - map: (table) keys are utf8 characters to replace, values are their replacement
 
@@ -134,12 +128,12 @@ returns: (string) s with all the key-characters in map replaced
 note: the keys must be utf8 characters, the values **can** be strings
 
 ```lua
-> = utf8.replace('∃y ∀x ¬(x ≺ y)', { ['∃'] = 'E', ['∀'] = 'A', ['¬'] = '\r\n', ['≺'] = '<' })
+> = utf8_simple.replace('∃y ∀x ¬(x ≺ y)', { ['∃'] = 'E', ['∀'] = 'A', ['¬'] = '\r\n', ['≺'] = '<' })
 Ey Ax 
 (x < y)
 ```
 
-### utf8.sub(s, i, j)
+### utf8_simple.sub(s, i, j)
 - s: (string) the utf8 string
 - i: (string) the starting index in the utf8 string
 - j: (stirng) the ending index in the utf8 string
@@ -147,6 +141,11 @@ Ey Ax
 returns: (string) the substring formed from i to j, inclusive (this is a utf8-aware string.sub())
 
 ```lua
-> = utf8.sub('Αγαπώ τηγανίτες', 3, -5)
+> = utf8_simple.sub('Αγαπώ τηγανίτες', 3, -5)
 απώ τηγαν
 ```
+
+### utf8_simple.codepoint(c)
+- c: an UTF-8 character (string of 1 or more bytes)
+
+returns: A number representing character's Unicode codepoint

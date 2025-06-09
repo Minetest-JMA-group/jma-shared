@@ -122,3 +122,27 @@ utf8_simple.sub =
 
 		return string.sub(s, i, b + c - 1)
 	end
+
+-- Get a number representing character's Unicode code
+-- Argument should be a single UTF-8 char
+utf8_simple.codepoint =
+	function(utf8char)
+		local b = { utf8char:byte(1, -1) }
+
+		if #b == 1 then
+			return b[1]
+		elseif #b == 2 then
+			-- mask with bitwise AND, then shift/or
+			return ((b[1] & 0x1F) << 6) | (b[2] & 0x3F)
+		elseif #b == 3 then
+			return ((b[1] & 0x0F) << 12)
+				| ((b[2] & 0x3F) << 6)
+				|  (b[3] & 0x3F)
+		elseif #b == 4 then
+			return ((b[1] & 0x07) << 18)
+				| ((b[2] & 0x3F) << 12)
+				| ((b[3] & 0x3F) << 6)
+				|  (b[4] & 0x3F)
+		else
+			error("Invalid UTF-8 character")
+	end

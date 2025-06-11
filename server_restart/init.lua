@@ -2,7 +2,16 @@
 -- Copyright (c) 2024 Nanowolf4 (n4w@tutanota.com)
 
 server_restart = {}
-local ie = minetest.request_insecure_environment() or error("server_restart: Insecure environment required!")
+local ie = minetest.request_insecure_environment()
+
+local ignore = core.settings:get_bool("JMA_IGNORE_SECURITY_WARNINGS")
+if not ignore then
+	assert(ie ~= nil, "server_restart: Insecure environment required!")
+elseif ie == nil then
+	core.log("error", "WARNING: server_restart is not working! Insecure environment required")
+	return
+end
+
 
 local shell_command = minetest.settings:get("restart_command")
 local disconnect_msg = "Server is restarting. Please reconnect in a couple seconds."

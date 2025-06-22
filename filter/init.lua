@@ -2,7 +2,6 @@ local discordCooldown = 0
 filter = { registered_on_violations = {}, phrase = "Filter mod has detected the player writing a bad message: " }
 local violations = {}
 local last_kicked_time = os.time()
-local last_bad_msg = ""
 
 -- Define violation types and their messages
 local violation_types = {
@@ -56,21 +55,19 @@ function filter.check_message(message)
 
 	-- Check message length
 	if is_message_too_long(message) then
-		last_bad_msg = message
 		return false, "too_long"
 	end
 
 	-- Check message content
 	local is_allowed = filter.is_whitelisted(message) or not filter.is_blacklisted(message)
 	if not is_allowed then
-		last_bad_msg = message
 		return false, "blacklisted"
 	end
 
 	return true
 end
 
-function filter.mute(name, duration, violation_type)
+function filter.mute(name, duration, violation_type, message)
 	local v_type = violation_types[violation_type] or violation_types.blacklisted
 
 	minetest.chat_send_all(name .. " has been temporarily muted for " .. v_type.name .. ".")
@@ -78,9 +75,9 @@ function filter.mute(name, duration, violation_type)
 
 	local reason
 	if violation_type == "too_long" then
-		reason = string.format("Message too long: \"%s\" (exceeds maximum length)", last_bad_msg)
+		reason = string.format("Message too long: \"%s\" (exceeds maximum length)", message)
 	else
-		reason = string.format("%s\"%s\" using blacklist regex: \"%s\"", filter.phrase, last_bad_msg, filter.get_lastreg())
+		reason = string.format("%s\"%s\" using blacklist regex: \"%s\"", filter.phrase, message, filter.get_lastreg())
 	end
 
 	xban.mute_player(name, "filter", os.time() + (duration*60), reason)
@@ -115,9 +112,9 @@ function filter.on_violation(name, message, violation_type)
 	if filter.get_mode() == 0 then
 		if discord and discord.enabled then
 			if violation_type == "too_long" then
-				discord.send_action_report("**filter**: [PERMISSIVE] Message too long: \"%s\" (exceeds maximum length)", last_bad_msg)
+				discord.send_action_report("**filter**: [PERMISSIVE] Message too long: \"%s\" (exceeds maximum length)", message)
 			else
-				discord.send_action_report("**filter**: [PERMISSIVE] Message \"%s\" matched using blacklist regex: \"%s\"", last_bad_msg, filter.get_lastreg())
+				discord.send_action_report("**filter**: [PERMISSIVE] Message \"%s\" matched using blacklist regex: \"%s\"", message, filter.get_lastreg())
 			end
 		end
 		resolution = "permissive"
@@ -138,7 +135,7 @@ function filter.on_violation(name, message, violation_type)
 			minetest.chat_send_player(name, v_type.chat_msg)
 		elseif violations[name] <= 3 then
 			resolution = "muted"
-			filter.mute(name, 1, violation_type)
+			filter.mute(name, 1, violation_type, message)
 		else
 			resolution = "kicked"
 			minetest.kick_player(name, v_type.kick_msg)
@@ -146,9 +143,9 @@ function filter.on_violation(name, message, violation_type)
 				local format_string = "***filter***: Kicked %s for %s \"%s\""
 				if violation_type == "blacklisted" then
 					format_string = "***filter***: Kicked %s for %s \"%s\" caught with blacklist regex \"%s\""
-					discord.send_action_report(format_string, name, v_type.name, last_bad_msg, filter.get_lastreg())
+					discord.send_action_report(format_string, name, v_type.name, message, filter.get_lastreg())
 				else
-					discord.send_action_report(format_string, name, v_type.name, last_bad_msg)
+					discord.send_action_report(format_string, name, v_type.name, message)
 				end
 				last_kicked_time = os.time()
 			end

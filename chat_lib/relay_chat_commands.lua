@@ -118,5 +118,6 @@ return {
 	afp_temp_interval = true,
 	xlogout = true,
 	xmsg = true,
-	filter = true
+	filter = true,
+	relay_commands = true
 }

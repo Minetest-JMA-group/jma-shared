@@ -27,6 +27,7 @@ end
 
 function playtime.remove_playtime(name)
 	storage:set_string(name, "")
+	storage:set_int("last_leave:" .. name, 0)
 end
 
 local function save_playtime(player)
@@ -34,8 +35,18 @@ local function save_playtime(player)
 	if total[name] then
 		storage:set_int("playtime:" .. name, total[name] + playtime.get_current_playtime(name))
 	end
+
+	storage:set_string("last_leave:" .. name, os.time())
 	current[name] = nil
 	total[name] = nil
+end
+
+function playtime.get_last_leave(name)
+	local t = tonumber(storage:get_string("last_leave:" .. name)) or 0
+	if t == 0 then
+		return nil
+	end
+	return t
 end
 
 minetest.register_on_leaveplayer(function(player)

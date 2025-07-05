@@ -19,7 +19,7 @@ if minetest.global_exists("sfinv") then
 	})
 end
 
-local function need_to_accept(pname)
+function jma_greeter.need_to_accept(pname)
 	if jma_greeter.rules_mode == "no_priv_change" then
 		-- In "no_priv_change" mode, no need to check privileges
 		return false
@@ -37,7 +37,7 @@ function jma_greeter.show_rules(player)
 	.. "box[0,0.7;11,9.1;#00000055]"
 	.. "hypertext[0.1,0.8;10.8,8.9;rules;" .. minetest.formspec_escape(rules_text) .. "]"
 
-	if not need_to_accept(pname) then
+	if not jma_greeter.need_to_accept(pname) then
 		fs = fs .. "button_exit[3.5,10;4,0.8;ok;Okay]"
 	else
 		local yes = minetest.formspec_escape("Yes, let me play!")
@@ -92,7 +92,7 @@ minetest.register_on_player_receive_fields(function(player, form, fields)
 	if form ~= "jma_greeter:rules" then return end
 
 	local pname = player:get_player_name()
-	if need_to_accept(pname) then
+	if jma_greeter.need_to_accept(pname) then
 		if fields.yes then
 			if jma_greeter.rules_mode == "grant_privs" then
 				-- Grant privileges in "grant_privs" mode

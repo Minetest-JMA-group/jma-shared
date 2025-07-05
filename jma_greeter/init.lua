@@ -155,20 +155,17 @@ function jma_greeter.queue_next(player)
 	end
 end
 
-minetest.register_on_newplayer(function(player)
-	minetest.after(0.5, function()
-		if player:is_player() then
-			jma_greeter.add_queue(player, jma_greeter.events_on_newplayer)
-			jma_greeter.queue_next(player)
-		end
-	end)
-end)
-
 minetest.register_on_joinplayer(function(player, last_login)
-	if not last_login then return end
+	local pname = player:get_player_name()
 	minetest.after(0.5, function()
 		if player:is_player() then
-			jma_greeter.add_queue(player, jma_greeter.events_on_join)
+			if jma_greeter.need_to_accept(pname) or not last_login then
+				-- If the player needs to accept rules, add the rules event first
+				jma_greeter.add_queue(player, jma_greeter.events_on_newplayer)
+			else
+				-- Otherwise, just add the news event
+				jma_greeter.add_queue(player, jma_greeter.events_on_join)
+			end
 			jma_greeter.queue_next(player)
 		end
 	end)

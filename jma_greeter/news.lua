@@ -39,7 +39,7 @@ function jma_greeter.show_news(pname, force)
 		bar_color = "#2d42fc",
 	})
 	.. "box[0,0.7;14,9.1;#00000055]"
-	.. "hypertext[0.1,0.8;13.8,8.9;rules;" .. minetest.formspec_escape(news_text) .. "]"
+	.. "hypertext[0.1,0.8;10.8,8.9;rules;" .. minetest.formspec_escape(news_text) .. "]"
 	.. "button_exit[3.75,10;3.5,0.8;;Okay]"
 	.. "checkbox[6,0.35;disable_news;Don't show me this again;" .. is_news_disabled .. "]"
 	minetest.show_formspec(pname, "jma_greeter:news", fs)

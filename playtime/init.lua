@@ -42,11 +42,7 @@ local function save_playtime(player)
 end
 
 function playtime.get_last_leave(name)
-	local t = tonumber(storage:get_string("last_leave:" .. name)) or 0
-	if t == 0 then
-		return nil
-	end
-	return t
+	return tonumber(storage:get_string("last_leave:" .. name)) or 0
 end
 
 minetest.register_on_leaveplayer(function(player)

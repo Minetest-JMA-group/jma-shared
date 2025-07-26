@@ -98,6 +98,7 @@ end)
 
 dofile(minetest.get_modpath("jma_greeter") .. "/rules.lua")
 dofile(minetest.get_modpath("jma_greeter") .. "/news.lua")
+dofile(minetest.get_modpath("jma_greeter") .. "/faq.lua")
 
 jma_greeter.events = {
 	new_player_rules = function(player)

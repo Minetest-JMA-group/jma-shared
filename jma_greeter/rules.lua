@@ -97,6 +97,7 @@ minetest.register_on_player_receive_fields(function(player, form, fields)
 	local pname = player:get_player_name()
 	if jma_greeter.need_to_accept(pname) then
 		if fields.yes then
+			minetest.log("action", "[jma_greeter]: Player " .. pname .. " accepted rules.")
 			player:get_meta():set_int("jma_greeter_rules_accepted", 1)
 			if jma_greeter.rules_mode == "grant_privs" then
 				-- Grant privileges in "grant_privs" mode
@@ -112,6 +113,7 @@ minetest.register_on_player_receive_fields(function(player, form, fields)
 			jma_greeter.queue_next(player)
 			return true
 		elseif fields.no then
+			minetest.log("action", "[jma_greeter]: Player " .. pname .. " declined rules.")
 			minetest.kick_player(pname, "You need to agree to the rules to play on this server. Please rejoin and confirm another time.")
 			if jma_greeter.players_greeting_events[pname] then
 				jma_greeter.players_greeting_events[pname] = nil

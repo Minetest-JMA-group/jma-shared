@@ -107,9 +107,11 @@ minetest.register_on_player_receive_fields(function(player, form, fields)
 
 	local pname = player:get_player_name()
 	if fields.yes then
+		minetest.log("action", "[jma_greeter]: Player " .. pname .. " accepted TOS.")
 		player:get_meta():set_int("jma_greeter_tos_accepted", get_current_tos_version())
 		jma_greeter.queue_next(player)
 	elseif fields.no then
+		minetest.log("action", "[jma_greeter]: Player " .. pname .. " declined TOS.")
 		minetest.kick_player(pname, kick_message)
 	elseif fields.quit and not jma_greeter.has_accepted_tos(player) then
 		jma_greeter.show_tos(player)

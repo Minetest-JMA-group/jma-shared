@@ -1,7 +1,8 @@
 jma_greeter = {
+	is_checking_persistent_forms = false,
 	players_greeting_events = {},
 	editor_context = {},
-	events_on_newplayer = {"new_player_rules", "news"},
+	events_on_newplayer = {"tos", "new_player_rules", "news"},
 	events_on_join = {"news"},
 	rules_mode = minetest.settings:get("jma_greeter_rules_mode") or "grant_privs"
 	-- Modes:
@@ -19,12 +20,13 @@ end
 
 function jma_greeter.get_base_formspec(def)
 	local size = def.size
+	local title = def.title_override or string.format("%s — %s", game_title, def.title)
 	return "formspec_version[7]"
 	.. string.format("size[%d,%d]", size.x, size.y)
 	.. "bgcolor[#00000000;false]"
 	.. string.format("box[0,0;%d,0.7;%s]", size.x, def.bar_color or "#000000ff")
-	.. string.format("hypertext[0,0;%d,0.7;title;<global valign=middle><b>%s — %s</b>]",
-	size.x, game_title, minetest.formspec_escape(def.title))
+	.. string.format("hypertext[0,0;%d,0.7;title;<global valign=middle><b>%s</b>]",
+	size.x, minetest.formspec_escape(title))
 end
 
 function jma_greeter.load_file(filename)
@@ -99,29 +101,47 @@ end)
 dofile(minetest.get_modpath("jma_greeter") .. "/rules.lua")
 dofile(minetest.get_modpath("jma_greeter") .. "/news.lua")
 dofile(minetest.get_modpath("jma_greeter") .. "/faq.lua")
+dofile(minetest.get_modpath("jma_greeter") .. "/tos.lua")
 
 jma_greeter.events = {
-	new_player_rules = function(player)
-		local pname = player:get_player_name()
-		local msg = "——————————————————————————————————————————————————————————————\n"
-		.. "Welcome! To start playing, please familiarize yourself with the server rules.\n"
-		.. "If you don't see the rules window, enter the \"/rules\" command to the chat.\n"
-		.. "——————————————————————————————————————————————————————————————"
-		minetest.chat_send_player(pname, minetest.colorize("#2af7b6", msg))
+	tos = {
+		func = function(player)
+			jma_greeter.show_tos(player)
+		end,
+		on_reshow = function(player)
+			jma_greeter.show_tos(player)
+		end,
+		unskippable = true,
+	},
 
-		if jma_greeter.rules_mode == "grant_privs" then
-			local privs = minetest.get_player_privs(pname)
-			privs.shout = nil
-			privs.interact = nil
-			minetest.set_player_privs(pname, privs)
-		end
+	new_player_rules = {
+		func = function(player)
+			local pname = player:get_player_name()
+			local msg = "——————————————————————————————————————————————————————————————\n"
+			.. "Welcome! To start playing, please familiarize yourself with the server rules.\n"
+			.. "If you don't see the rules window, enter the \"/rules\" command to the chat.\n"
+			.. "——————————————————————————————————————————————————————————————"
+			minetest.chat_send_player(pname, minetest.colorize("#2af7b6", msg))
 
-		jma_greeter.show_rules(player)
-	end,
+			if jma_greeter.rules_mode == "grant_privs" then
+				local privs = minetest.get_player_privs(pname)
+				privs.shout = nil
+				privs.interact = nil
+				minetest.set_player_privs(pname, privs)
+			end
+			jma_greeter.show_rules(player)
+		end,
+		on_reshow = function(player)
+			jma_greeter.show_rules(player)
+		end,
+		unskippable = true,
+	},
 
-	news = function(player)
-		jma_greeter.show_news(player:get_player_name())
-	end
+	news = {
+		func = function(player)
+			jma_greeter.show_news(player:get_player_name())
+		end,
+	}
 }
 
 function jma_greeter.add_queue(player, queue_list)
@@ -129,13 +149,15 @@ function jma_greeter.add_queue(player, queue_list)
 
 	local events = jma_greeter.players_greeting_events[pname] or {}
 	for _, name_or_func in ipairs(queue_list) do
-		local event
+		local event_obj
 		if type(name_or_func) == "function" then
-			event = name_or_func
+			event_obj = {func = name_or_func}
 		else
-			event = jma_greeter.events[name_or_func]
+			event_obj = jma_greeter.events[name_or_func]
 		end
-		table.insert(events, event)
+		if event_obj then
+			table.insert(events, event_obj)
+		end
 	end
 
 	jma_greeter.players_greeting_events[pname] = events
@@ -145,10 +167,13 @@ function jma_greeter.queue_next(player)
 	local pname = player:get_player_name()
 	local events = jma_greeter.players_greeting_events[pname]
 	if not events then return end
+
+	-- Remove the completed event
+	table.remove(events, 1)
+
+	-- If there's a next event, run it
 	if events[1] then
-		local func = events[1]
-		table.remove(events, 1)
-		func(player)
+		events[1].func(player)
 	end
 
 	if #events == 0 then
@@ -159,15 +184,32 @@ end
 minetest.register_on_joinplayer(function(player, last_login)
 	local pname = player:get_player_name()
 	minetest.after(0.5, function()
-		if player:is_player() then
-			if jma_greeter.need_to_accept(pname) or not last_login then
-				-- If the player needs to accept rules, add the rules event first
-				jma_greeter.add_queue(player, jma_greeter.events_on_newplayer)
+		if not player:is_player() then
+			return
+		end
+
+		local queue = {}
+		if not jma_greeter.has_accepted_tos(player) then
+			table.insert(queue, "tos")
+		end
+
+		if not jma_greeter.has_accepted_rules(pname) then
+			if last_login and minetest.check_player_privs(pname, {interact = true, shout = true}) then
+				player:get_meta():set_int("jma_greeter_rules_accepted", 1)
 			else
-				-- Otherwise, just add the news event
-				jma_greeter.add_queue(player, jma_greeter.events_on_join)
+				table.insert(queue, "new_player_rules")
 			end
-			jma_greeter.queue_next(player)
+		end
+
+		table.insert(queue, "news")
+
+		jma_greeter.add_queue(player, queue)
+
+		-- Start the first event
+		local events = jma_greeter.players_greeting_events[pname]
+		if events and events[1] then
+			events[1].func(player)
+			jma_greeter.start_persistent_check_if_needed()
 		end
 	end)
 end)
@@ -178,3 +220,33 @@ minetest.register_on_leaveplayer(function(player)
 		jma_greeter.players_greeting_events[pname] = nil
 	end
 end)
+
+function jma_greeter.check_persistent_forms()
+	local has_unskippable_events = false
+	for pname, events in pairs(jma_greeter.players_greeting_events) do
+		local player = minetest.get_player_by_name(pname)
+		if player and events and events[1] and events[1].unskippable then
+			has_unskippable_events = true
+			local event_to_show = events[1]
+			if event_to_show.on_reshow then
+				event_to_show.on_reshow(player)
+			else
+				event_to_show.func(player)
+			end
+		end
+	end
+
+	if has_unskippable_events then
+		minetest.after(3, jma_greeter.check_persistent_forms)
+	else
+		jma_greeter.is_checking_persistent_forms = false
+	end
+end
+
+function jma_greeter.start_persistent_check_if_needed()
+	if jma_greeter.is_checking_persistent_forms then
+		return
+	end
+	jma_greeter.is_checking_persistent_forms = true
+	jma_greeter.check_persistent_forms()
+end

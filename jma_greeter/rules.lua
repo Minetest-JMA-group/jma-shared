@@ -19,13 +19,16 @@ if minetest.global_exists("sfinv") then
 	})
 end
 
-function jma_greeter.need_to_accept(pname)
-	if jma_greeter.rules_mode == "no_priv_change" then
-		-- In "no_priv_change" mode, no need to check privileges
+function jma_greeter.has_accepted_rules(pname)
+	local player = minetest.get_player_by_name(pname)
+	if not player then
 		return false
 	end
-	return not minetest.check_player_privs(pname, { interact = true }) and
-			not minetest.check_player_privs(pname, { shout = true })
+	return player:get_meta():get_int("jma_greeter_rules_accepted") == 1
+end
+
+function jma_greeter.need_to_accept(pname)
+	return not jma_greeter.has_accepted_rules(pname)
 end
 
 function jma_greeter.show_rules(player)
@@ -94,6 +97,7 @@ minetest.register_on_player_receive_fields(function(player, form, fields)
 	local pname = player:get_player_name()
 	if jma_greeter.need_to_accept(pname) then
 		if fields.yes then
+			player:get_meta():set_int("jma_greeter_rules_accepted", 1)
 			if jma_greeter.rules_mode == "grant_privs" then
 				-- Grant privileges in "grant_privs" mode
 				local privs = minetest.get_player_privs(pname)

@@ -27,6 +27,11 @@ local function makeTrackingIterator(text, pattern)
 	end
 end
 
+local port = core.settings:get("port")
+assert(port, "Cannot obtain this server's port")
+port = tostring(port)
+assert(port, "Cannot convert server's port to string")
+
 core.register_chatcommand("ebpf", {
 	params = "<subcommand> [arguments]",
 	description = "Interface to the eBPFtool utility",
@@ -38,7 +43,7 @@ core.register_chatcommand("ebpf", {
 		table.insert(argv, iter())
 		table.insert(argv, iter())
 		if argv[2] == "ban" then
-			table.insert(argv, iter())
+			table.insert(argv, port)
 			table.insert(argv, iter())
 			table.insert(argv, getRemainder())
 		end

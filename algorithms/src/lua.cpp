@@ -76,7 +76,7 @@ static char **build_argv(lua_State *L, int table_index)
 	argv[len] = NULL;
 
 	// Iterate over the table
-	for (int i = 1; i <= len; i++) {
+	for (size_t i = 1; i <= len; i++) {
 		lua_rawgeti(L, table_index, i);
 		if (!lua_isstring(L, -1)) {
 			delete[] argv;

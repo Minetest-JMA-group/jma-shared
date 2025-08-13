@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <string>
 #include <thread>
+#include <sys/syscall.h>
 
 int countCaps(lua_State *L)
 {
@@ -94,9 +95,10 @@ void read_into_string(int fd, std::string *str)
 
 	while ((ret = read(fd, buf, 1024))) {
 		if (ret < 0)
-			return;
+			break;
 		str->append(buf, ret);
 	}
+	close(fd);
 }
 
 // Return stdout,stderr,exit_code
@@ -123,12 +125,13 @@ int execute(lua_State *L)
 	if (pid == 0) {
 		close(stdout_pipefd[0]);
 		close(stderr_pipefd[0]);
+		// We don't want exit() as that would call various stuff from the inherited current process' memory
 		if (dup2(stdout_pipefd[1], 1) < 1 || dup2(stderr_pipefd[1], 2) < 1)
-			exit(errno);
+			syscall(SYS_exit_group, errno);
 		close(stdout_pipefd[1]);
 		close(stderr_pipefd[1]);
 		execvp(argv[1], argv);
-		exit(errno);
+		syscall(SYS_exit_group, errno);
 	}
 	close(stdout_pipefd[1]);
 	close(stderr_pipefd[1]);

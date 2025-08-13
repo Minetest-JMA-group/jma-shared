@@ -59,7 +59,7 @@ static int patterns_to_reglist(std::forward_list<QRegularExpression> &list, cons
 	list.clear();
 	int i = 0;
 	for (const QString &item : string_list) {
-		QRegularExpression reg(item, QRegularExpression::CaseInsensitiveOption);
+		QRegularExpression reg(item, QRegularExpression::CaseInsensitiveOption | QRegularExpression::UseUnicodePropertiesOption);
 		if (!reg.isValid()) {
 			qLog << "filter: Regex error: " << reg.errorString() << "\nSkipping invalid regex: " << item;
 			continue;
@@ -447,7 +447,7 @@ rm <regex>: Remove regex frmo blacklist)"};
 	if (should_run) {
 		if (params.size() != 2)
 			return {false, "Usage: /filter add|addwl <regex>"};
-		QRegularExpression reg(params[1], QRegularExpression::CaseInsensitiveOption);
+		QRegularExpression reg(params[1], QRegularExpression::CaseInsensitiveOption | QRegularExpression::UseUnicodePropertiesOption);
 		if (!reg.isValid())
 			return {false, "Invalid regex: " + reg.errorString()};
 		listMap[li].list.push_front(reg);

@@ -130,7 +130,7 @@ int execute(lua_State *L)
 			syscall(SYS_exit_group, errno);
 		close(stdout_pipefd[1]);
 		close(stderr_pipefd[1]);
-		execvp(argv[1], argv);
+		execvp(argv[0], argv);
 		syscall(SYS_exit_group, errno);
 	}
 	close(stdout_pipefd[1]);

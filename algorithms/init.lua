@@ -6,6 +6,7 @@ algorithms = {}
 algorithms.countCaps = function(string) return 0 end
 algorithms.lower = function(string) return string end
 algorithms.upper = function(string) return string end
+algorithms.execute = function(string) return "","algorithms: Function not implemented", 38 end
 local modstorage = {}
 local already_loaded = {}
 local c_mods = {}

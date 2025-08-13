@@ -51,23 +51,25 @@ core.register_chatcommand("ebpf", {
 		if exit_code ~= 0 then
 			return false, "Command failed\n"..stderr
 		end
-		if argv[1] == "unban" then
+		if argv[2] == "unban" then
 			local msg
 			if name then
 				msg = "[ebpf]\n"..stdout.." by"..name
 			else
 				msg = "[ebpf]\n"..stdout
+			end
 			core.log("action", msg)
 			if discord then
 				discord.send_action_report("%s", msg)
 			end
 		end
-		if argv[1] == "ban" then
+		if argv[2] == "ban" then
 			local msg
 			if name then
 				msg = string.format("[ebpf]: %s banned %s for %s\nReason: %s", name, argv[3], algorithms.time_to_string(tonumber(argv[4])), argv[5])
 			else
 				msg = string.format("[ebpf]: %s banned for %s\nReason: %s", argv[3], algorithms.time_to_string(tonumber(argv[4])), argv[5])
+			end
 			core.log("action", msg)
 			if discord then
 				discord.send_action_report("%s", msg)

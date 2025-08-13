@@ -82,7 +82,7 @@ static char **build_argv(lua_State *L, int table_index)
 			delete[] argv;
 			return NULL;
 		}
-		argv[i-1] = lua_tostring(L, -1);
+		argv[i-1] = (char*) lua_tostring(L, -1);
 	}
 	return argv;
 }

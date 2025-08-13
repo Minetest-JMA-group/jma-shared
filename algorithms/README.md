@@ -18,3 +18,4 @@
 - boolean, [key] `algorithms.hasCommonKey(tbl1: table, tbl2: table` - -- Check if two tables have a common key and what it is. Return the key if found.
 - customType `algorithms.getconfig(key: string, default: customType, [optional] modstorage)` - Return the object serialized under "key" in modstorage, or `default` if the object doesn't exist. modstorage is either passed as parameter, or obtained with algorithms.get_mod_storage()
 - modstorage `algorithms.get_mod_storage()` - Return a modstorage userobject and saves it inside algorithms mod so that it doesn't have to be passed as parameter later. Must be called during mod load time.
+- string, string, integer `algorithms.execute(argv: table)` - Execute program argv[1] with arguments argv and return the strings captured on stdout and stderr in that order, and the program's exit code

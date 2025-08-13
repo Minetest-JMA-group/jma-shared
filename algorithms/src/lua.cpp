@@ -87,7 +87,7 @@ static char **build_argv(lua_State *L, int table_index)
 	return argv;
 }
 
-void read_into_string(int fd, std::string &str)
+void read_into_string(int fd, std::string *str)
 {
 	char buf[1024];
 	ssize_t ret;
@@ -95,7 +95,7 @@ void read_into_string(int fd, std::string &str)
 	while ((ret = read(fd, buf, 1024))) {
 		if (ret < 0)
 			return;
-		str.append(buf, ret);
+		str->append(buf, ret);
 	}
 }
 
@@ -133,8 +133,8 @@ int execute(lua_State *L)
 	close(stdout_pipefd[1]);
 	close(stderr_pipefd[1]);
 	std::string stdout_str, stderr_str;
-	std::thread t1(read_into_string, stdout_pipefd[0], stdout_str);
-	std::thread t2(read_into_string, stderr_pipefd[0], stderr_str);
+	std::thread t1(read_into_string, stdout_pipefd[0], &stdout_str);
+	std::thread t2(read_into_string, stderr_pipefd[0], &stderr_str);
 	siginfo_t info;
 	int ret = waitid(P_PID, pid, &info, WEXITED);
 	if (ret < 0)

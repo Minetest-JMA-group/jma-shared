@@ -137,13 +137,25 @@ int execute(lua_State *L)
 	close(stderr_pipefd[1]);
 	std::string stdout_str, stderr_str;
 	std::thread t1(read_into_string, stdout_pipefd[0], &stdout_str);
-	std::thread t2(read_into_string, stderr_pipefd[0], &stderr_str);
+	read_into_string(stderr_pipefd[0], &stderr_str);
 	siginfo_t info;
 	int ret = waitid(P_PID, pid, &info, WEXITED);
-	if (ret < 0)
+	if (ret < 0) {
 		info.si_status = errno;
+		stderr_str += "[algorithms] waitid: ";
+		stderr_str += strerror(info.si_status);
+	}
+	else {
+		if (info.si_code == CLD_KILLED || info.si_code == CLD_DUMPED) {
+			if (!stderr_str.empty() && stderr_str.back() != '\n')
+				stderr_str += "\n";
+			stderr_str += "Killed by signal ";
+			stderr_str += strsignal(info.si_status);
+			if (info.si_code == CLD_DUMPED)
+				stderr_str += "\nCore dumped";
+		}
+	}
 	t1.join();
-	t2.join();
 	lua_pushstring(L, stdout_str.c_str());
 	lua_pushstring(L, stderr_str.c_str());
 	lua_pushinteger(L, info.si_status);

@@ -63,7 +63,7 @@ QByteArray storage::get_string(const char *key) const
 	res = lua_tostring(L, -1);
 out:
 	RESTORE_STACK;
-	return "";
+	return res;
 }
 
 bool storage::set_int(const char *key, const lua_Integer a)

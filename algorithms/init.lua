@@ -6,22 +6,31 @@ algorithms = {}
 algorithms.countCaps = function(string) return 0 end
 algorithms.lower = function(string) return string end
 algorithms.upper = function(string) return string end
-algorithms.execute = function(string) return "","algorithms: Function not implemented", 38 end
+algorithms.execute = function(argv_table) return "","[algorithms]: Function not implemented", 38 end
 local modstorage = {}
 local already_loaded = {}
 local c_mods = {}
+local trusted_mods = {}
 local ie = minetest.request_insecure_environment()
-local list = minetest.settings:get("secure.c_mods") or ""
+local settings = minetest.settings
+local list = settings:get("secure.c_mods") or ""
 
 for word in list:gmatch("[^,%s]+") do
 	c_mods[word] = true
 end
 
+list = settings:get("secure.trusted_mods") or ""
+for word in list:gmatch("[^,%s]+") do
+	trusted_mods[word] = true
+end
+list = nil
+
+
 -- Load the shared library lib<modname>.so in the mod folder of the calling mod, or on path libpath relative to the mod folder
 algorithms.load_library = function(libpath)
 	local modname = minetest.get_current_modname()
 
-	if not c_mods[modname] then
+	if not c_mods[modname] and not trusted_mods[modname] then
 		minetest.log("error", "["..modname.."]: Attempted to load shared object file without permission!")
 		return false
 	end
@@ -53,6 +62,19 @@ algorithms.load_library = function(libpath)
 	return true
 end
 algorithms.load_library()
+
+-- Move privileged functions to a local guarded table
+local insecure_env = {
+	execute = algorithms.execute
+}
+algorithms.execute = nil
+algorithms.request_insecure_environment = function()
+	if not trusted_mods[modname] then
+		return nil
+	else
+		return insecure_env
+	end
+end
 
 -- Check whether the value `value` exists in an indexed table `t`
 algorithms.table_contains = function(t, value)

@@ -69,6 +69,7 @@ local insecure_env = {
 }
 algorithms.execute = nil
 algorithms.request_insecure_environment = function()
+	local modname = minetest.get_current_modname()
 	if not trusted_mods[modname] then
 		return nil
 	else

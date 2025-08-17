@@ -1,7 +1,13 @@
+local ie = algorithms.request_insecure_environment()
+if not ie then
+	core.log("error", "The ebpf mod cannot work without being listed in secure.trusted_mods")
+	return
+end
+
 ebpf = {}
 
 ebpf.list_bans = function()
-	local stdout, stderr, exit_code = algorithms.execute({"ebpf", "list_bans"})
+	local stdout, stderr, exit_code = ie.execute({"ebpf", "list_bans"})
 	if exit_code ~= 0 then
 		return stderr
 	else
@@ -52,7 +58,7 @@ core.register_chatcommand("ebpf", {
 			argv[2] = "unknown"
 		end
 
-		local stdout, stderr, exit_code = algorithms.execute(argv)
+		local stdout, stderr, exit_code = ie.execute(argv)
 		if exit_code ~= 0 then
 			return false, "Command failed\n"..stderr
 		end

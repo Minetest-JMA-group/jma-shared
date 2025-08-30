@@ -117,7 +117,7 @@ core.register_chatcommand("lockdown", {
 				return true, "Lockdown is disabled"
 			end
 		else
-			return false, "Usage: /lockdown [yes/no/show] [minutes]"
+			return false, "Usage: /lockdown [yes/no/show] [time]"
 		end
 	end,
 })

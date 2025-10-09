@@ -2,14 +2,15 @@
 -- Copyright (c) 2023 Marko Petrović
 
 local cooldown = 60
+local character_limit = 50
 
 local last_time = {}
 minetest.register_chatcommand("lp", {
 	description = "Check what's the longest palindrome present in your string",
 	params = "<word/sentence>",
-	privs = { shout=true },
+	privs = { shout = true },
 	func = function(name, param)
-		if last_time[name] and (os.time() - last_time[name]) < cooldown then
+		if #param > character_limit or last_time[name] and (os.time() - last_time[name]) < cooldown then
 			return false, "Don't spam with palindromes."
 		end
 		if param == "" then

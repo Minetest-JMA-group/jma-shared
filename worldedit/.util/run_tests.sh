@@ -1,6 +1,6 @@
 #!/bin/bash
 tempdir=$(mktemp -d)
-confpath=$tempdir/core.conf
+confpath=$tempdir/minetest.conf
 worldpath=$tempdir/world
 trap 'rm -rf "$tempdir"' EXIT
 
@@ -24,7 +24,7 @@ if [ -z "$mtserver" ]; then
 	chmod -R 777 $tempdir
 	[ -z "$DOCKER_IMAGE" ] && DOCKER_IMAGE="ghcr.io/minetest/minetest:master"
 	vol=(
-		-v "$confpath":/etc/minetest/core.conf
+		-v "$confpath":/etc/minetest/minetest.conf
 		-v "$tempdir":/var/lib/minetest/.minetest
 		-v "$PWD/worldedit":/var/lib/minetest/.minetest/world/worldmods/worldedit
 	)

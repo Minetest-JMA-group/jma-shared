@@ -14,8 +14,9 @@ local do_restart = function()
 	ie.os.execute(shell_command)
 end
 
+
 if not shell_command then
-	core.log("warning", "server_restart: 'restart_command' parameter is not set in core.conf, using core.request_shutdown function")
+	core.log("warning", "server_restart: 'restart_command' parameter is not set in minetest.conf, using core.request_shutdown function")
 	do_restart = function()
 		core.request_shutdown(disconnect_msg, true)
 	end

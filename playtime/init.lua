@@ -3,7 +3,7 @@ playtime = {}
 local current = {}
 local total = {}
 
-local storage = minetest.get_mod_storage()
+local storage = core.get_mod_storage()
 
 function playtime.load_playtime(name)
 	return storage:get_int("playtime:" .. name)
@@ -18,7 +18,7 @@ end
 
 -- Function to get playtime
 function playtime.get_total_playtime(name)
-	if not minetest.get_player_by_name(name) then
+	if not core.get_player_by_name(name) then
 		return playtime.load_playtime(name)
 	end
 
@@ -45,17 +45,17 @@ function playtime.get_last_leave(name)
 	return tonumber(storage:get_string("last_leave:" .. name)) or 0
 end
 
-minetest.register_on_leaveplayer(function(player)
+core.register_on_leaveplayer(function(player)
 	save_playtime(player)
 end)
 
-minetest.register_on_shutdown(function(player)
-	for _, p in ipairs(minetest.get_connected_players()) do
+core.register_on_shutdown(function(player)
+	for _, p in ipairs(core.get_connected_players()) do
 		save_playtime(p)
 	end
 end)
 
-minetest.register_on_joinplayer(function(player)
+core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
 	current[name] = os.time()
 	total[name] = playtime.load_playtime(name)
@@ -75,7 +75,7 @@ function playtime.seconds_to_clock(seconds)
 end
 
 -- Registration time functions
-minetest.register_on_newplayer(function(ObjectRef)
+core.register_on_newplayer(function(ObjectRef)
 	local name = ObjectRef:get_player_name()
 	storage:set_int("regtime:" .. name, os.time())
 end)
@@ -88,7 +88,7 @@ function playtime.get_registration_time(name)
 	return 0
 end
 
-minetest.register_chatcommand("regtime", {
+core.register_chatcommand("regtime", {
 	description = "Get registration time",
 	params = "<playername>",
 	privs = {moderator = true},
@@ -98,7 +98,7 @@ minetest.register_chatcommand("regtime", {
 			return false, "No player name provided"
 		end
 
-		if not minetest.player_exists(target_name) then
+		if not core.player_exists(target_name) then
 			return false, "Player does not exist"
 		end
 
@@ -111,14 +111,14 @@ minetest.register_chatcommand("regtime", {
 	end
 })
 
-minetest.register_chatcommand("playtime", {
+core.register_chatcommand("playtime", {
 	params = "<playername>",
 	description = "Shows total and current session playtime",
 	func = function(name, param)
 		local target_name = param:trim()
 		if target_name == "" then
 			target_name = name
-		elseif name ~= target_name and not minetest.check_player_privs(name, {moderator = true}) then
+		elseif name ~= target_name and not core.check_player_privs(name, {moderator = true}) then
 			return false, "You do not have permission to see other players' playtime"
 		end
 
@@ -126,7 +126,7 @@ minetest.register_chatcommand("playtime", {
 			return false, "Invalid player name"
 		end
 
-		if not minetest.player_exists(target_name) then
+		if not core.player_exists(target_name) then
 			return false, "Player does not exist"
 		end
 

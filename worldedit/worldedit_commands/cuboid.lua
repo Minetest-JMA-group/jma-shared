@@ -1,4 +1,4 @@
-local S = minetest.get_translator("worldedit_commands")
+local S = core.get_translator("worldedit_commands")
 
 worldedit.register_command("outset", {
 	params = "[h/v] <amount>",
@@ -238,7 +238,7 @@ worldedit.register_command("cubeapply", {
 		local cmddef = worldedit.registered_commands[cmd]
 		if cmddef == nil or cmddef.require_pos ~= 2 then
 			return false, S("invalid usage: @1 cannot be used with cubeapply",
-				minetest.colorize("#00ffff", "//"..cmd))
+				core.colorize("#00ffff", "//"..cmd))
 		end
 		-- run parsing of target command
 		local parsed = {cmddef.parse(args)}
@@ -254,7 +254,7 @@ worldedit.register_command("cubeapply", {
 	end,
 	func = function(name, sidex, sidey, sidez, cmd, parsed)
 		local cmddef = assert(worldedit.registered_commands[cmd])
-		local success, missing_privs = minetest.check_player_privs(name, cmddef.privs)
+		local success, missing_privs = core.check_player_privs(name, cmddef.privs)
 		if not success then
 			return false, S("Missing privileges: @1", table.concat(missing_privs, ", "))
 		end

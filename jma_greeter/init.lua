@@ -4,17 +4,17 @@ jma_greeter = {
 	editor_context = {},
 	events_on_newplayer = {"tos", "new_player_rules", "news"},
 	events_on_join = {"news"},
-	rules_mode = minetest.settings:get("jma_greeter_rules_mode") or "grant_privs"
+	rules_mode = core.settings:get("jma_greeter_rules_mode") or "grant_privs"
 	-- Modes:
 	-- "grant_privs" - Grant privileges after accepting rules
 	-- "no_priv_change" - Do not modify privileges, just allow the player to play
 }
 
-local worldpath = minetest.get_worldpath()
+local worldpath = core.get_worldpath()
 
 local game_title
 do
-	local game = minetest.get_game_info()
+	local game = core.get_game_info()
 	game_title = game.title ~= "" and game.title or "JMA"
 end
 
@@ -26,7 +26,7 @@ function jma_greeter.get_base_formspec(def)
 	.. "bgcolor[#00000000;false]"
 	.. string.format("box[0,0;%d,0.7;%s]", size.x, def.bar_color or "#000000ff")
 	.. string.format("hypertext[0,0;%d,0.7;title;<global valign=middle><b>%s</b>]",
-	size.x, minetest.formspec_escape(title))
+	size.x, core.formspec_escape(title))
 end
 
 function jma_greeter.load_file(filename)
@@ -44,7 +44,7 @@ function jma_greeter.write_file(filename, content)
 	if file then
 		file:write(content)
 		file:close()
-		minetest.log("action", "[jma_greeter]: written " .. filename)
+		core.log("action", "[jma_greeter]: written " .. filename)
 		return true
 	end
 	return false
@@ -63,14 +63,14 @@ function jma_greeter.show_editor(pname, txt, title, actions)
 		bar_color = "#8547e8"
 	})
 	.. "box[0,0.7;11,9.1;black]"
-	.. "textarea[0.1,0.8;10.8,8.9;text;;" .. minetest.formspec_escape(txt or "") .. "]"
+	.. "textarea[0.1,0.8;10.8,8.9;text;;" .. core.formspec_escape(txt or "") .. "]"
 	.. "button_exit[1.25,10;4,0.8;save;Save]"
 	.. "button_exit[5.75,10;4,0.8;cancel;Cancel]"
 
-	minetest.show_formspec(pname, "jma_greeter:rules_editor", fs)
+	core.show_formspec(pname, "jma_greeter:rules_editor", fs)
 end
 
-minetest.register_on_player_receive_fields(function(player, form, fields)
+core.register_on_player_receive_fields(function(player, form, fields)
 	if form ~= "jma_greeter:rules_editor" then return end
 
 	local pname = player:get_player_name()
@@ -91,17 +91,17 @@ minetest.register_on_player_receive_fields(function(player, form, fields)
 	return true
 end)
 
-minetest.register_on_leaveplayer(function(player)
+core.register_on_leaveplayer(function(player)
 	local pname = player:get_player_name()
 	if jma_greeter.editor_context[pname] then
 		jma_greeter.editor_context[pname] = nil
 	end
 end)
 
-dofile(minetest.get_modpath("jma_greeter") .. "/rules.lua")
-dofile(minetest.get_modpath("jma_greeter") .. "/news.lua")
-dofile(minetest.get_modpath("jma_greeter") .. "/faq.lua")
-dofile(minetest.get_modpath("jma_greeter") .. "/tos.lua")
+dofile(core.get_modpath("jma_greeter") .. "/rules.lua")
+dofile(core.get_modpath("jma_greeter") .. "/news.lua")
+dofile(core.get_modpath("jma_greeter") .. "/faq.lua")
+dofile(core.get_modpath("jma_greeter") .. "/tos.lua")
 
 jma_greeter.events = {
 	tos = {
@@ -121,13 +121,13 @@ jma_greeter.events = {
 			.. "Welcome! To start playing, please familiarize yourself with the server rules.\n"
 			.. "If you don't see the rules window, enter the \"/rules\" command to the chat.\n"
 			.. "——————————————————————————————————————————————————————————————"
-			minetest.chat_send_player(pname, minetest.colorize("#2af7b6", msg))
+			core.chat_send_player(pname, core.colorize("#2af7b6", msg))
 
 			if jma_greeter.rules_mode == "grant_privs" then
-				local privs = minetest.get_player_privs(pname)
+				local privs = core.get_player_privs(pname)
 				privs.shout = nil
 				privs.interact = nil
-				minetest.set_player_privs(pname, privs)
+				core.set_player_privs(pname, privs)
 			end
 			jma_greeter.show_rules(player)
 		end,
@@ -181,9 +181,9 @@ function jma_greeter.queue_next(player)
 	end
 end
 
-minetest.register_on_joinplayer(function(player, last_login)
+core.register_on_joinplayer(function(player, last_login)
 	local pname = player:get_player_name()
-	minetest.after(0.5, function()
+	core.after(0.5, function()
 		if not player:is_player() then
 			return
 		end
@@ -194,7 +194,7 @@ minetest.register_on_joinplayer(function(player, last_login)
 		end
 
 		if not jma_greeter.has_accepted_rules(pname) then
-			if last_login and minetest.check_player_privs(pname, {interact = true, shout = true}) then
+			if last_login and core.check_player_privs(pname, {interact = true, shout = true}) then
 				player:get_meta():set_int("jma_greeter_rules_accepted", 1)
 			else
 				table.insert(queue, "new_player_rules")
@@ -214,7 +214,7 @@ minetest.register_on_joinplayer(function(player, last_login)
 	end)
 end)
 
-minetest.register_on_leaveplayer(function(player)
+core.register_on_leaveplayer(function(player)
 	local pname = player:get_player_name()
 	if jma_greeter.players_greeting_events[pname] then
 		jma_greeter.players_greeting_events[pname] = nil
@@ -224,7 +224,7 @@ end)
 function jma_greeter.check_persistent_forms()
 	local has_unskippable_events = false
 	for pname, events in pairs(jma_greeter.players_greeting_events) do
-		local player = minetest.get_player_by_name(pname)
+		local player = core.get_player_by_name(pname)
 		if player and events and events[1] and events[1].unskippable then
 			has_unskippable_events = true
 			local event_to_show = events[1]
@@ -237,7 +237,7 @@ function jma_greeter.check_persistent_forms()
 	end
 
 	if has_unskippable_events then
-		minetest.after(3, jma_greeter.check_persistent_forms)
+		core.after(3, jma_greeter.check_persistent_forms)
 	else
 		jma_greeter.is_checking_persistent_forms = false
 	end

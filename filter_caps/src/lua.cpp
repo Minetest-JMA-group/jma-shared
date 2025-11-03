@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2023 Marko Petrović
-#include <minetest.h>
+#include <core.h>
 #include <storage.h>
 #include <QString>
 #include <QStringList>

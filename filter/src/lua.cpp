@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025 Marko Petrović
 #include <luajit-2.1/lua.hpp>
-#include <minetest.h>
+#include <core.h>
 #include <storage.h>
 #include <QRegularExpression>
 #include <QJsonArray>

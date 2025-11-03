@@ -1,4 +1,4 @@
-local S = minetest.get_translator("worldedit_commands")
+local S = core.get_translator("worldedit_commands")
 
 worldedit.set_pos = {}
 worldedit.inspect = {}
@@ -43,19 +43,19 @@ local VEC_6DIRS = {
 local function get_node_rlight(pos)
 	local ret = 0
 	for _, v in ipairs(VEC_6DIRS) do
-		ret = math.max(ret, minetest.get_node_light(vector.add(pos, v)))
+		ret = math.max(ret, core.get_node_light(vector.add(pos, v)))
 	end
 	return ret
 end
 
-minetest.register_on_punchnode(function(pos, node, puncher)
+core.register_on_punchnode(function(pos, node, puncher)
 	local name = puncher:get_player_name()
 	if worldedit.inspect[name] then
 		local axis, sign = worldedit.player_axis(name)
 		local message = S(
 			"inspector: @1 at @2 (param1=@3, param2=@4, received light=@5) punched facing the @6 axis",
 			node.name,
-			minetest.pos_to_string(pos),
+			core.pos_to_string(pos),
 			node.param1,
 			node.param2,
 			get_node_rlight(pos),
@@ -97,14 +97,14 @@ local function set_pos1(name, pos)
 	assert(pos)
 	worldedit.pos1[name] = pos
 	worldedit.mark_pos1(name)
-	worldedit.player_notify(name, S("position @1 set to @2", 1, minetest.pos_to_string(pos)), "ok")
+	worldedit.player_notify(name, S("position @1 set to @2", 1, core.pos_to_string(pos)), "ok")
 end
 
 local function set_pos2(name, pos)
 	assert(pos)
 	worldedit.pos2[name] = pos
 	worldedit.mark_pos2(name)
-	worldedit.player_notify(name, S("position @1 set to @2", 2, minetest.pos_to_string(pos)), "ok")
+	worldedit.player_notify(name, S("position @1 set to @2", 2, core.pos_to_string(pos)), "ok")
 end
 
 worldedit.register_command("pos1", {
@@ -113,7 +113,7 @@ worldedit.register_command("pos1", {
 	category = S("Region operations"),
 	privs = {worldedit=true},
 	func = function(name)
-		local player = minetest.get_player_by_name(name)
+		local player = core.get_player_by_name(name)
 		if not player then return end
 		set_pos1(name, vector.round(player:get_pos()))
 	end,
@@ -125,7 +125,7 @@ worldedit.register_command("pos2", {
 	category = S("Region operations"),
 	privs = {worldedit=true},
 	func = function(name)
-		local player = minetest.get_player_by_name(name)
+		local player = core.get_player_by_name(name)
 		if not player then return end
 		set_pos2(name, vector.round(player:get_pos()))
 	end,
@@ -155,13 +155,13 @@ worldedit.register_command("p", {
 			msg = S("select position @1 by punching a node", 2)
 		elseif param == "get" then --display current WorldEdit positions
 			if worldedit.pos1[name] ~= nil then
-				msg = S("position @1: @2", 1, minetest.pos_to_string(worldedit.pos1[name]))
+				msg = S("position @1: @2", 1, core.pos_to_string(worldedit.pos1[name]))
 			else
 				msg = S("position @1 not set", 1)
 			end
 			msg = msg .. "\n"
 			if worldedit.pos2[name] ~= nil then
-				msg = msg .. S("position @1: @2", 2, minetest.pos_to_string(worldedit.pos2[name]))
+				msg = msg .. S("position @1: @2", 2, core.pos_to_string(worldedit.pos2[name]))
 			else
 				msg = msg .. S("position @1 not set", 2)
 			end
@@ -193,7 +193,7 @@ worldedit.register_command("fixedpos", {
 	end,
 })
 
-minetest.register_on_punchnode(function(pos, node, puncher)
+core.register_on_punchnode(function(pos, node, puncher)
 	local name = puncher:get_player_name()
 	if name ~= "" and worldedit.set_pos[name] ~= nil then --currently setting position
 		if worldedit.set_pos[name] == "pos1" then --setting position 1
@@ -207,7 +207,7 @@ minetest.register_on_punchnode(function(pos, node, puncher)
 			worldedit.set_pos[name] = nil --finished setting positions
 		elseif worldedit.set_pos[name] == "prob" then --setting Minetest schematic node probabilities
 			worldedit.prob_pos[name] = pos
-			minetest.show_formspec(name, "prob_val_enter", "field[text;;]")
+			core.show_formspec(name, "prob_val_enter", "field[text;;]")
 		end
 	end
 end)

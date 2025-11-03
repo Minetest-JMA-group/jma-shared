@@ -71,22 +71,22 @@ local function make_checker(old_func)
 	end
 end
 
-for name, def in pairs(minetest.registered_chatcommands) do
+for name, def in pairs(core.registered_chatcommands) do
 	if directed_chatcomms[name] then
 		def.func = make_checker(def.func)
 	end
 end
 
-local old_register_chatcommand = minetest.register_chatcommand
-function minetest.register_chatcommand(name, def)
+local old_register_chatcommand = core.register_chatcommand
+function core.register_chatcommand(name, def)
 	if directed_chatcomms[name] then
 		def.func = make_checker(def.func)
 	end
 	return old_register_chatcommand(name, def)
 end
 
-local old_override_chatcommand = minetest.override_chatcommand
-function minetest.override_chatcommand(name, def)
+local old_override_chatcommand = core.override_chatcommand
+function core.override_chatcommand(name, def)
 	if directed_chatcomms[name] then
 		def.func = make_checker(def.func)
 	end

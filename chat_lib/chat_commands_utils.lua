@@ -1,19 +1,19 @@
 -- * Copyright (c) 2024 Nanowolf4  (E-Mail: n4w@tutanota.com, XMPP/Jabber: n4w@nixnet.serivces)
 -- * SPDX-License-Identifier: GPL-3.0-or-later
 
-local storage = minetest.get_mod_storage()
+local storage = core.get_mod_storage()
 
 chat_lib.relay_allowed_chat_commands = {}
 if storage:contains("whitelist") then
-	chat_lib.relay_allowed_chat_commands = minetest.deserialize(storage:get_string("whitelist"))
+	chat_lib.relay_allowed_chat_commands = core.deserialize(storage:get_string("whitelist"))
 else
-	chat_lib.relay_allowed_chat_commands = dofile(minetest.get_modpath("chat_lib") .. "/relay_chat_commands.lua")
+	chat_lib.relay_allowed_chat_commands = dofile(core.get_modpath("chat_lib") .. "/relay_chat_commands.lua")
 end
 
 function chat_lib.chatcommand_check_privs(name, command)
-	local def = minetest.registered_chatcommands[command]
+	local def = core.registered_chatcommands[command]
 	local required_privs = def.privs
-	local player_privs = minetest.get_player_privs(name)
+	local player_privs = core.get_player_privs(name)
 	if type(required_privs) == "string" then
 		required_privs = {[required_privs] = true}
 	end
@@ -37,7 +37,7 @@ function chat_lib.execute_chatcommand(name, command, param, callback)
 		send_player_callback[name] = callback
 	end
 
-	local success, ret_val = minetest.registered_chatcommands[command].func(name, param or "")
+	local success, ret_val = core.registered_chatcommands[command].func(name, param or "")
 	send_player_callback[name] = nil
 	return success, ret_val
 end
@@ -46,7 +46,7 @@ function chat_lib.relay_is_chatcommand_allowed(command)
 	return chat_lib.relay_allowed_chat_commands[command] == true
 end
 
-minetest.register_chatcommand("relay_commands", {
+core.register_chatcommand("relay_commands", {
 	description = "Execute relay management command",
 	params = "<command> <command_args>",
 	privs = {dev=true},
@@ -72,7 +72,7 @@ minetest.register_chatcommand("relay_commands", {
 				return false, "Command "..cmdname.." is already in the whitelist"
 			end
 			allowed_commands[cmdname] = true
-			storage:set_string("whitelist", minetest.serialize(allowed_commands))
+			storage:set_string("whitelist", core.serialize(allowed_commands))
 			return true, "Added "..cmdname.." to the whitelist"
 
 		elseif command == "rm" then
@@ -84,16 +84,16 @@ minetest.register_chatcommand("relay_commands", {
 				return false, "Command "..cmdname.." hasn't existed in the whitelist"
 			end
 			allowed_commands[cmdname] = nil
-			storage:set_string("whitelist", minetest.serialize(allowed_commands))
+			storage:set_string("whitelist", core.serialize(allowed_commands))
 			return true, "Removed "..cmdname.." from the whitelist"
 
 		elseif command == "reload" then
-			allowed_commands = dofile(minetest.get_modpath("chat_lib") .. "/relay_chat_commands.lua")
-			storage:set_string("whitelist", minetest.serialize(allowed_commands))
+			allowed_commands = dofile(core.get_modpath("chat_lib") .. "/relay_chat_commands.lua")
+			storage:set_string("whitelist", core.serialize(allowed_commands))
 			return true, "Whitelist reloaded"
 
 		elseif command == "dump" then
-			minetest.chat_send_player(name, dump(allowed_commands))
+			core.chat_send_player(name, dump(allowed_commands))
 			return true
 		end
 

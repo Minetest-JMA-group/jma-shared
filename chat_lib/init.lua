@@ -14,10 +14,10 @@ function chat_lib.register_on_chat_send_player(func)
 	table.insert(chat_lib.registered_on_chat_send_player, func)
 end
 
-chat_lib.chat_send_all = minetest.chat_send_all
-chat_lib.chat_send_player = minetest.chat_send_player
+chat_lib.chat_send_all = core.chat_send_all
+chat_lib.chat_send_player = core.chat_send_player
 
-function minetest.chat_send_all(message, source)
+function core.chat_send_all(message, source)
 	for _, func in ipairs(chat_lib.registered_on_chat_send_all) do
 		if func(message, source) == true then
 			-- Message is handled, not be sent to all players
@@ -28,7 +28,7 @@ function minetest.chat_send_all(message, source)
 	chat_lib.chat_send_all(message)
 end
 
-function minetest.chat_send_player(name, message, source)
+function core.chat_send_player(name, message, source)
 	for _, func in ipairs(chat_lib.registered_on_chat_send_player) do
 		if func(name, message, source) == true then
 			-- Message is handled, not be sent to player
@@ -64,14 +64,14 @@ function chat_lib.send_message_to_privileged(message, privileges, sender)
 	local sent_to = {} -- Track players who already received the message
 
 	-- Get all connected players
-	for _, player in ipairs(minetest.get_connected_players()) do
+	for _, player in ipairs(core.get_connected_players()) do
 		local player_name = player:get_player_name()
 		-- Check if player has any of the required privileges and hasn't received the message yet
 		if not sent_to[player_name] then
 			for priv_name in pairs(priv_check) do
-				if minetest.check_player_privs(player_name, {[priv_name] = true}) then
+				if core.check_player_privs(player_name, {[priv_name] = true}) then
 					if not sender or not block_msgs or not block_msgs.is_chat_blocked(sender, player_name) then
-						minetest.chat_send_player(player_name, message)
+						core.chat_send_player(player_name, message)
 						count = count + 1
 					end
 					sent_to[player_name] = true
@@ -84,5 +84,5 @@ function chat_lib.send_message_to_privileged(message, privileges, sender)
 	return count
 end
 
-dofile(minetest.get_modpath("chat_lib") .. "/chat_commands_utils.lua")
-dofile(minetest.get_modpath("chat_lib") .. "/server_status_override.lua")
+dofile(core.get_modpath("chat_lib") .. "/chat_commands_utils.lua")
+dofile(core.get_modpath("chat_lib") .. "/server_status_override.lua")

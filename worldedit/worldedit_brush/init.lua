@@ -1,4 +1,4 @@
-local S = minetest.get_translator("worldedit_brush")
+local S = core.get_translator("worldedit_brush")
 
 local BRUSH_MAX_DIST = 150
 local brush_on_use = function(itemstack, placer)
@@ -9,14 +9,14 @@ local brush_on_use = function(itemstack, placer)
 	if cmd == "" then
 		worldedit.player_notify(name,
 			S("This brush is not bound, use @1 to bind a command to it.",
-			minetest.colorize("#00ffff", "//brush")), "info")
+			core.colorize("#00ffff", "//brush")), "info")
 		return false
 	end
 
 	local cmddef = worldedit.registered_commands[cmd]
 	if cmddef == nil then return false end -- shouldn't happen as //brush checks this
 
-	local has_privs, missing_privs = minetest.check_player_privs(name, cmddef.privs)
+	local has_privs, missing_privs = core.check_player_privs(name, cmddef.privs)
 	if not has_privs then
 		worldedit.player_notify(name,
 			S("Missing privileges: @1", table.concat(missing_privs, ", ")), "error")
@@ -26,7 +26,7 @@ local brush_on_use = function(itemstack, placer)
 	local raybegin = vector.add(placer:get_pos(),
 		vector.new(0, placer:get_properties().eye_height, 0))
 	local rayend = vector.add(raybegin, vector.multiply(placer:get_look_dir(), BRUSH_MAX_DIST))
-	local ray = minetest.raycast(raybegin, rayend, false, true)
+	local ray = core.raycast(raybegin, rayend, false, true)
 	local pointed_thing = ray:next()
 	if pointed_thing == nil then
 		worldedit.player_notify(name, S("Too far away."), "error")
@@ -49,15 +49,15 @@ local brush_on_use = function(itemstack, placer)
 		return player_notify_old(name, msg, typ)
 	end
 
-	minetest.log("action", string.format("%s uses WorldEdit brush (//%s) at %s",
-		name, cmd, minetest.pos_to_string(pointed_thing.under)))
+	core.log("action", string.format("%s uses WorldEdit brush (//%s) at %s",
+		name, cmd, core.pos_to_string(pointed_thing.under)))
 	cmddef.func(name, unpack(parsed))
 
 	worldedit.player_notify = player_notify_old
 	return true
 end
 
-minetest.register_tool(":worldedit:brush", {
+core.register_tool(":worldedit:brush", {
 	description = S("WorldEdit Brush"),
 	inventory_image = "worldedit_brush.png",
 	stack_max = 1, -- no need to stack these (metadata prevents this anyway)
@@ -84,7 +84,7 @@ worldedit.register_command("brush", {
 		return true, cmd, params
 	end,
 	func = function(name, cmd, params)
-		local player = minetest.get_player_by_name(name)
+		local player = core.get_player_by_name(name)
 		if not player then return end
 		local itemstack = player:get_wielded_item()
 		if itemstack == nil or itemstack:get_name() ~= "worldedit:brush" then
@@ -100,7 +100,7 @@ worldedit.register_command("brush", {
 			local cmddef = worldedit.registered_commands[cmd]
 			if cmddef == nil or cmddef.require_pos ~= 1 then
 				return false, S("@1 cannot be used with brushes",
-					minetest.colorize("#00ffff", "//"..cmd))
+					core.colorize("#00ffff", "//"..cmd))
 			end
 
 			-- Try parsing command params so we can give the user feedback
@@ -112,9 +112,9 @@ worldedit.register_command("brush", {
 
 			meta:set_string("command", cmd)
 			meta:set_string("params", params)
-			local fullcmd = minetest.colorize("#00ffff", "//"..cmd) .. " " .. params
+			local fullcmd = core.colorize("#00ffff", "//"..cmd) .. " " .. params
 			meta:set_string("description",
-				minetest.registered_tools["worldedit:brush"].description .. ": " .. fullcmd)
+				core.registered_tools["worldedit:brush"].description .. ": " .. fullcmd)
 			worldedit.player_notify(name, S("Brush assigned to command: @1", fullcmd), "ok")
 		end
 		player:set_wielded_item(itemstack)

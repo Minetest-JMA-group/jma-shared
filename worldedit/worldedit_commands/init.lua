@@ -1,12 +1,12 @@
-local S = minetest.get_translator("worldedit_commands")
+local S = core.get_translator("worldedit_commands")
 
-minetest.register_privilege("worldedit", S("Can use WorldEdit commands"))
+core.register_privilege("worldedit", S("Can use WorldEdit commands"))
 
 worldedit.pos1 = {}
 worldedit.pos2 = {}
 
 
-local safe_region, reset_pending = dofile(minetest.get_modpath("worldedit_commands") .. "/safe.lua")
+local safe_region, reset_pending = dofile(core.get_modpath("worldedit_commands") .. "/safe.lua")
 
 worldedit.registered_commands = {}
 
@@ -120,13 +120,13 @@ function worldedit.register_command(name, def)
 
 	-- for development
 	--[[if def.require_pos == 2 and not def.nodes_needed then
-		minetest.log("warning", "//" .. name .. " might be missing nodes_needed")
+		core.log("warning", "//" .. name .. " might be missing nodes_needed")
 	end--]]
 
 	-- disable further modification
 	setmetatable(def, {__newindex = {}})
 
-	minetest.register_chatcommand("/" .. name, {
+	core.register_chatcommand("/" .. name, {
 		privs = def.privs,
 		params = def.params,
 		description = def.description,
@@ -139,7 +139,7 @@ end
 
 
 do
-	local modpath = minetest.get_modpath("worldedit_commands")
+	local modpath = core.get_modpath("worldedit_commands")
 	for _, name in ipairs({
 		"code", "cuboid", "manipulations", "marker", "nodename", "primitives",
 		"region", "schematics", "transform", "wand"
@@ -165,16 +165,16 @@ function worldedit.player_notify(name, message, typ)
 		tostring(message)
 	}
 	if typ == "error" then
-		t[2] = minetest.colorize("#f22", t[2])
+		t[2] = core.colorize("#f22", t[2])
 	elseif typ == "ok" then
-		t[2] = minetest.colorize("#2f2", t[2])
+		t[2] = core.colorize("#2f2", t[2])
 	end
-	minetest.chat_send_player(name, table.concat(t, " "))
+	core.chat_send_player(name, table.concat(t, " "))
 end
 
 -- Determines the axis in which a player is facing, returning an axis ("x", "y", or "z") and the sign (1 or -1)
 function worldedit.player_axis(name)
-	local player = minetest.get_player_by_name(name)
+	local player = core.get_player_by_name(name)
 	if not player then
 		-- we promised to return something valid...
 		return "y", -1
@@ -200,7 +200,7 @@ worldedit.register_command("about", {
 		worldedit.player_notify(name, S("WorldEdit @1"..
 			" is available on this server. Type @2 to get a list of "..
 			"commands, or find more information at @3",
-			worldedit.version_string, minetest.colorize("#00ffff", "//help"),
+			worldedit.version_string, core.colorize("#00ffff", "//help"),
 			"https://github.com/Uberi/Minetest-WorldEdit"
 		), "info")
 	end,
@@ -209,10 +209,10 @@ worldedit.register_command("about", {
 -- initially copied from builtin/chatcommands.lua
 local function help_command(name, param)
 	local function format_help_line(cmd, def, follow_alias)
-		local msg = minetest.colorize("#00ffff", "//"..cmd)
+		local msg = core.colorize("#00ffff", "//"..cmd)
 		if def.name ~= cmd then
 			msg = msg .. ": " .. S("alias to @1",
-				minetest.colorize("#00ffff", "//"..def.name))
+				core.colorize("#00ffff", "//"..def.name))
 			if follow_alias then
 				msg = msg .. "\n" .. format_help_line(def.name, def)
 			end
@@ -244,18 +244,18 @@ local function help_command(name, param)
 		end)
 	end
 
-	if not minetest.check_player_privs(name, "worldedit") then
+	if not core.check_player_privs(name, "worldedit") then
 		return false, S("You are not allowed to use any WorldEdit commands.")
 	end
 	if param == "" then
 		local list = {}
 		for cmd, def in pairs(worldedit.registered_commands) do
-			if minetest.check_player_privs(name, def.privs) then
+			if core.check_player_privs(name, def.privs) then
 				list[#list + 1] = cmd
 			end
 		end
 		table.sort(list)
-		local help = minetest.colorize("#00ffff", "//help")
+		local help = core.colorize("#00ffff", "//help")
 		return true, S("Available commands: @1@n"
 				.. "Use '@2' to get more information,"
 				.. " or '@3' to list everything.",
@@ -263,7 +263,7 @@ local function help_command(name, param)
 	elseif param == "all" then
 		local cmds = {}
 		for cmd, def in pairs(worldedit.registered_commands) do
-			if minetest.check_player_privs(name, def.privs) then
+			if core.check_player_privs(name, def.privs) then
 				cmds[#cmds + 1] = {cmd, def}
 			end
 		end

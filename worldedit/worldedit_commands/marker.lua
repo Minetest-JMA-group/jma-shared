@@ -16,7 +16,7 @@ worldedit.mark_pos1 = function(name, region_too)
 		worldedit.keep_loaded(pos1, pos1)
 
 		--add marker
-		worldedit.marker1[name] = minetest.add_entity(pos1, "worldedit:pos1", init_sentinel)
+		worldedit.marker1[name] = core.add_entity(pos1, "worldedit:pos1", init_sentinel)
 		if worldedit.marker1[name] ~= nil then
 			worldedit.marker1[name]:get_luaentity().player_name = name
 		end
@@ -38,7 +38,7 @@ worldedit.mark_pos2 = function(name, region_too)
 		worldedit.keep_loaded(pos2, pos2)
 
 		--add marker
-		worldedit.marker2[name] = minetest.add_entity(pos2, "worldedit:pos2", init_sentinel)
+		worldedit.marker2[name] = core.add_entity(pos2, "worldedit:pos2", init_sentinel)
 		if worldedit.marker2[name] ~= nil then
 			worldedit.marker2[name]:get_luaentity().player_name = name
 		end
@@ -63,7 +63,7 @@ worldedit.mark_region = function(name)
 
 		local vec = vector.subtract(pos2, pos1)
 		local maxside = math.max(vec.x, math.max(vec.y, vec.z))
-		local limit = (tonumber(minetest.settings:get("active_object_send_range_blocks")) or 4) * 16
+		local limit = (tonumber(core.settings:get("active_object_send_range_blocks")) or 4) * 16
 		if maxside > limit * 1.5 then
 			-- The client likely won't be able to see the plane markers as intended anyway,
 			-- thus don't place them and also don't load the area into memory
@@ -81,7 +81,7 @@ worldedit.mark_region = function(name)
 		--XY plane markers
 		for _, z in ipairs({pos1.z - 0.5, pos2.z + 0.5}) do
 			local entpos = vector.new(pos1.x + sizex - 0.5, pos1.y + sizey - 0.5, z)
-			local marker = minetest.add_entity(entpos, "worldedit:region_cube", init_sentinel)
+			local marker = core.add_entity(entpos, "worldedit:region_cube", init_sentinel)
 			if marker ~= nil then
 				marker:set_properties({
 					visual_size={x=sizex * 2, y=sizey * 2},
@@ -95,7 +95,7 @@ worldedit.mark_region = function(name)
 		--YZ plane markers
 		for _, x in ipairs({pos1.x - 0.5, pos2.x + 0.5}) do
 			local entpos = vector.new(x, pos1.y + sizey - 0.5, pos1.z + sizez - 0.5)
-			local marker = minetest.add_entity(entpos, "worldedit:region_cube", init_sentinel)
+			local marker = core.add_entity(entpos, "worldedit:region_cube", init_sentinel)
 			if marker ~= nil then
 				marker:set_properties({
 					visual_size={x=sizez * 2, y=sizey * 2},
@@ -118,7 +118,7 @@ worldedit.marker_update = function(name)
 	worldedit.mark_region(name)
 end
 
-minetest.register_entity(":worldedit:pos1", {
+core.register_entity(":worldedit:pos1", {
 	initial_properties = {
 		visual = "cube",
 		visual_size = {x=1.1, y=1.1},
@@ -144,7 +144,7 @@ minetest.register_entity(":worldedit:pos1", {
 	end,
 })
 
-minetest.register_entity(":worldedit:pos2", {
+core.register_entity(":worldedit:pos2", {
 	initial_properties = {
 		visual = "cube",
 		visual_size = {x=1.1, y=1.1},
@@ -170,7 +170,7 @@ minetest.register_entity(":worldedit:pos2", {
 	end,
 })
 
-minetest.register_entity(":worldedit:region_cube", {
+core.register_entity(":worldedit:region_cube", {
 	initial_properties = {
 		visual = "upright_sprite",
 		textures = {"worldedit_cube.png"},

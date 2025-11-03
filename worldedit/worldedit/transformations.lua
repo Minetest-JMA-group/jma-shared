@@ -4,9 +4,9 @@
 worldedit.deferred_execution = function(next_one, finished)
 	-- Allocate 80% of server step for execution
 	local allocated_usecs =
-		tonumber(minetest.settings:get("dedicated_server_step"):split(" ")[1]) * 1000000 * 0.8
+		tonumber(core.settings:get("dedicated_server_step"):split(" ")[1]) * 1000000 * 0.8
 	local function f()
-		local deadline = minetest.get_us_time() + allocated_usecs
+		local deadline = core.get_us_time() + allocated_usecs
 		repeat
 			local is_done = next_one()
 			if is_done then
@@ -15,8 +15,8 @@ worldedit.deferred_execution = function(next_one, finished)
 				end
 				return
 			end
-		until minetest.get_us_time() >= deadline
-		minetest.after(0, f)
+		until core.get_us_time() >= deadline
+		core.after(0, f)
 	end
 	f()
 end
@@ -88,8 +88,8 @@ function worldedit.stretch(pos1, pos2, stretch_x, stretch_y, stretch_z)
 	local pos1, pos2 = worldedit.sort_pos(pos1, pos2)
 
 	-- Prepare schematic of large node
-	local get_node, get_meta, place_schematic = minetest.get_node,
-			minetest.get_meta, minetest.place_schematic
+	local get_node, get_meta, place_schematic = core.get_node,
+			core.get_meta, core.place_schematic
 	local placeholder_node = {name="", param1=255, param2=0}
 	local nodes = {}
 	for i = 1, stretch_x * stretch_y * stretch_z do
@@ -183,8 +183,8 @@ function worldedit.transpose(pos1, pos2, axis1, axis2)
 	worldedit.keep_loaded(pos1, upper_bound)
 
 	local pos = vector.new(pos1.x, 0, 0)
-	local get_node, get_meta, set_node = minetest.get_node,
-			minetest.get_meta, minetest.set_node
+	local get_node, get_meta, set_node = core.get_node,
+			core.get_meta, core.set_node
 	while pos.x <= pos2.x do
 		pos.y = pos1.y
 		while pos.y <= pos2.y do
@@ -225,8 +225,8 @@ function worldedit.flip(pos1, pos2, axis)
 	local pos = vector.new(pos1.x, 0, 0)
 	local start = pos1[axis] + pos2[axis]
 	pos2[axis] = pos1[axis] + math.floor((pos2[axis] - pos1[axis]) / 2)
-	local get_node, get_meta, set_node = minetest.get_node,
-			minetest.get_meta, minetest.set_node
+	local get_node, get_meta, set_node = core.get_node,
+			core.get_meta, core.set_node
 	while pos.x <= pos2.x do
 		pos.y = pos1.y
 		while pos.y <= pos2.y do
@@ -291,7 +291,7 @@ end
 -- @return The number of nodes oriented.
 function worldedit.orient(pos1, pos2, angle)
 	local pos1, pos2 = worldedit.sort_pos(pos1, pos2)
-	local registered_nodes = minetest.registered_nodes
+	local registered_nodes = core.registered_nodes
 
 	local wallmounted = {
 		[90]  = {0, 1, 5, 4, 2, 3, 0, 0},
@@ -320,7 +320,7 @@ function worldedit.orient(pos1, pos2, angle)
 	worldedit.keep_loaded(pos1, pos2)
 
 	local count = 0
-	local get_node, swap_node = minetest.get_node, minetest.swap_node
+	local get_node, swap_node = core.get_node, core.swap_node
 	local pos = vector.new(pos1.x, 0, 0)
 	while pos.x <= pos2.x do
 		pos.y = pos1.y

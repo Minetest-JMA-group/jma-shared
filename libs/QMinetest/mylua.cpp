@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2023 Marko Petrović
-#include <minetest.h>
+#include <core.h>
 
 void printLuaType(lua_State *L, int index, QTextStream &where)
 {

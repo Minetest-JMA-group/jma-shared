@@ -136,7 +136,7 @@ end
 
 -- Return the marker that is closest to the player
 worldedit.marker_get_closest_to_player = function(name)
-	local player = assert(minetest.get_player_by_name(name))
+	local player = assert(core.get_player_by_name(name))
 	local playerpos = player:get_pos()
 	local dist1 = vector.distance(playerpos, worldedit.pos1[name])
 	local dist2 = vector.distance(playerpos, worldedit.pos2[name])

@@ -1,4 +1,4 @@
-local S = minetest.get_translator("worldedit_commands")
+local S = core.get_translator("worldedit_commands")
 
 local function check_region(name)
 	return worldedit.volume(worldedit.pos1[name], worldedit.pos2[name])
@@ -14,7 +14,7 @@ worldedit.register_command("deleteblocks", {
 	nodes_needed = check_region,
 	func = function(name)
 		local pos1, pos2 = worldedit.pos1[name], worldedit.pos2[name]
-		local success = minetest.delete_area(pos1, pos2)
+		local success = core.delete_area(pos1, pos2)
 		if success then
 			return true, S("Area deleted.")
 		else
@@ -177,7 +177,7 @@ local drain_cache
 local function drain(pos1, pos2)
 	if drain_cache == nil then
 		drain_cache = {}
-		for name, d in pairs(minetest.registered_nodes) do
+		for name, d in pairs(core.registered_nodes) do
 			if d.drawtype == "liquid" or d.drawtype == "flowingliquid" then
 				drain_cache[name] = true
 			end
@@ -187,7 +187,7 @@ local function drain(pos1, pos2)
 	pos1, pos2 = worldedit.sort_pos(pos1, pos2)
 	local count = 0
 
-	local get_node, remove_node = minetest.get_node, minetest.remove_node
+	local get_node, remove_node = core.get_node, core.remove_node
 	for x = pos1.x, pos2.x do
 	for y = pos1.y, pos2.y do
 	for z = pos1.z, pos2.z do
@@ -222,7 +222,7 @@ local function clearcut(pos1, pos2)
 	-- decide which nodes we consider plants
 	if clearcut_cache == nil then
 		clearcut_cache = {}
-		for name, def in pairs(minetest.registered_nodes) do
+		for name, def in pairs(core.registered_nodes) do
 			local groups = def.groups or {}
 			if (
 				-- the groups say so
@@ -244,7 +244,7 @@ local function clearcut(pos1, pos2)
 	local count = 0
 	local prev, any
 
-	local get_node, remove_node = minetest.get_node, minetest.remove_node
+	local get_node, remove_node = core.get_node, core.remove_node
 	for x = pos1.x, pos2.x do
 	for z = pos1.z, pos2.z do
 		prev = false
@@ -257,7 +257,7 @@ local function clearcut(pos1, pos2)
 				prev = true
 				any = true
 			elseif prev then
-				local def = minetest.registered_nodes[n] or {}
+				local def = core.registered_nodes[n] or {}
 				local groups = def.groups or {}
 				if groups.attached_node or (def.buildable_to and groups.falling_node) then
 					remove_node(pos)

@@ -5,7 +5,7 @@ local cooldown = 60
 local character_limit = 50
 
 local last_time = {}
-minetest.register_chatcommand("lp", {
+core.register_chatcommand("lp", {
 	description = "Check what's the longest palindrome present in your string",
 	params = "<word/sentence>",
 	privs = { shout = true },
@@ -16,7 +16,7 @@ minetest.register_chatcommand("lp", {
 		if param == "" then
 			return false, "You have to enter a word in which palindrome will be searched for."
 		end
-		minetest.chat_send_all(name.." has found the palindrome: "..algorithms.lcs(param, utf8_simple.reverse(param)))
+		core.chat_send_all(name.." has found the palindrome: "..algorithms.lcs(param, utf8_simple.reverse(param)))
 		last_time[name] = os.time()
 	end,
 })

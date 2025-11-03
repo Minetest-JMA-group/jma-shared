@@ -9,9 +9,9 @@ local vecw = function(axis, n, base)
 	ret[axis] = n
 	return ret
 end
-local pos2str = minetest.pos_to_string
-local get_node = minetest.get_node
-local set_node = minetest.set_node
+local pos2str = core.pos_to_string
+local get_node = core.get_node
+local set_node = core.set_node
 
 ---------------------
 -- Nodes
@@ -22,9 +22,9 @@ rawset(_G, "testnode2", "")
 rawset(_G, "testnode3", "")
 -- Loads nodenames to use for tests
 local function init_nodes()
-	testnode1 = minetest.registered_aliases["mapgen_stone"]
-	testnode2 = minetest.registered_aliases["mapgen_dirt"]
-	testnode3 = minetest.registered_aliases["mapgen_cobble"] or minetest.registered_aliases["mapgen_dirt_with_grass"]
+	testnode1 = core.registered_aliases["mapgen_stone"]
+	testnode2 = core.registered_aliases["mapgen_dirt"]
+	testnode3 = core.registered_aliases["mapgen_cobble"] or core.registered_aliases["mapgen_dirt_with_grass"]
 	assert(testnode1 and testnode2 and testnode3)
 end
 -- Writes repeating pattern into given area
@@ -50,21 +50,21 @@ end)
 ---------------------
 -- Area management
 ---------------------
-assert(minetest.get_mapgen_setting("mg_name") == "singlenode")
+assert(core.get_mapgen_setting("mg_name") == "singlenode")
 rawset(_G, "area", {})
 do
 	local areamin, areamax
 	local off
-	local c_air = minetest.get_content_id(air)
+	local c_air = core.get_content_id(air)
 	local vbuffer = {}
 	-- Assign a new area for use, will emerge and then call ready()
 	area.assign = function(min, max, ready)
 		areamin = min
 		areamax = max
-		minetest.emerge_area(min, max, function(bpos, action, remaining)
-			assert(action ~= minetest.EMERGE_ERRORED)
+		core.emerge_area(min, max, function(bpos, action, remaining)
+			assert(action ~= core.EMERGE_ERRORED)
 			if remaining > 0 then return end
-			minetest.after(0, function()
+			core.after(0, function()
 				area.clear()
 				ready()
 			end)
@@ -75,7 +75,7 @@ do
 		if off and vector.equals(off, vec(0, 0, 0)) then
 			return
 		end
-		local vmanip = minetest.get_voxel_manip(areamin, areamax)
+		local vmanip = core.get_voxel_manip(areamin, areamax)
 		local vpos1, vpos2 = vmanip:get_emerged_area()
 		local vcount = (vpos2.x - vpos1.x + 1) * (vpos2.y - vpos1.y + 1) * (vpos2.z - vpos1.z + 1)
 		if #vbuffer ~= vcount then
@@ -158,7 +158,7 @@ check.filled = function(pos1, pos2, nodes)
 	if type(nodes) == "string" then
 		nodes = { nodes }
 	end
-	local _, counts = minetest.find_nodes_in_area(pos1, pos2, nodes)
+	local _, counts = core.find_nodes_in_area(pos1, pos2, nodes)
 	local total = worldedit.volume(pos1, pos2)
 	local sum = 0
 	for _, n in pairs(counts) do
@@ -174,7 +174,7 @@ check.not_filled = function(pos1, pos2, nodes)
 	if type(nodes) == "string" then
 		nodes = { nodes }
 	end
-	local _, counts = minetest.find_nodes_in_area(pos1, pos2, nodes)
+	local _, counts = core.find_nodes_in_area(pos1, pos2, nodes)
 	for nodename, n in pairs(counts) do
 		if n ~= 0 then
 			error(counts[nodename] .. " " .. nodename .. " nodes found in " ..
@@ -284,7 +284,7 @@ end)
 for _, name in ipairs({
 	"manipulations", "primitives", "schematic"
 }) do
-	dofile(minetest.get_modpath("worldedit") .. "/test/" .. name .. ".lua")
+	dofile(core.get_modpath("worldedit") .. "/test/" .. name .. ".lua")
 end
 
 
@@ -319,7 +319,7 @@ register_test("worldedit.luatransform", function()
 
 	-- normal operation
 	local err = worldedit.luatransform(pos1, pos2,
-		"minetest.swap_node(pos, {name=" .. ("%q"):format(testnode1) .. "})")
+		"core.swap_node(pos, {name=" .. ("%q"):format(testnode1) .. "})")
 	assert(err == nil)
 	check.filled(pos1, pos1, testnode1)
 end)
@@ -329,7 +329,7 @@ end)
 ---------------------
 worldedit.run_tests = function()
 	do
-		local v = minetest.get_version()
+		local v = core.get_version()
 		print("Running " .. #tests .. " tests for WorldEdit " ..
 			worldedit.version_string .. " on " .. v.project .. " " .. (v.hash or v.string))
 	end
@@ -342,7 +342,7 @@ worldedit.run_tests = function()
 	for x = 0, math.floor(wanted.x/16) do
 	for y = 0, math.floor(wanted.y/16) do
 	for z = 0, math.floor(wanted.z/16) do
-		assert(minetest.forceload_block(vec(x*16, y*16, z*16), true, -1))
+		assert(core.forceload_block(vec(x*16, y*16, z*16), true, -1))
 	end
 	end
 	end
@@ -366,17 +366,17 @@ worldedit.run_tests = function()
 
 		print("Done, " .. failed .. " tests failed.")
 		if failed == 0 then
-			io.close(io.open(minetest.get_worldpath() .. "/tests_ok", "w"))
+			io.close(io.open(core.get_worldpath() .. "/tests_ok", "w"))
 		end
-		minetest.request_shutdown()
+		core.request_shutdown()
 	end)
 end
 
 -- for debug purposes
-minetest.register_on_joinplayer(function(player)
-	minetest.set_player_privs(player:get_player_name(),
-		minetest.string_to_privs("fly,fast,noclip,basic_debug,debug,interact"))
+core.register_on_joinplayer(function(player)
+	core.set_player_privs(player:get_player_name(),
+		core.string_to_privs("fly,fast,noclip,basic_debug,debug,interact"))
 end)
-minetest.register_on_punchnode(function(pos, node, puncher)
-	minetest.chat_send_player(puncher:get_player_name(), pos2str(pos))
+core.register_on_punchnode(function(pos, node, puncher)
+	core.chat_send_player(puncher:get_player_name(), pos2str(pos))
 end)

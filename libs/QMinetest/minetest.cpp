@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2023 Marko Petrović
-#include <core.h>
+#include <minetest.h>
 #include <player.h>
 
 lua_state_class::lua_state_class(lua_State *L) : L(L) {}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2023 Marko Petrović
-#include <core.h>
+#include <minetest.h>
 
 QLog::QLog(minetest *functions) : QTextStream(&assembledString), functions(functions) {}
 QLog::QLog(minetest *functions, const char *caller) : QTextStream(&assembledString), functions(functions), caller(caller) {}

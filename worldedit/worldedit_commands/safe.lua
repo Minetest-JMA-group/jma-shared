@@ -1,6 +1,6 @@
-local S = minetest.get_translator("worldedit_commands")
+local S = core.get_translator("worldedit_commands")
 
-local safe_region_limit = tonumber(minetest.settings:get("worldedit_safe_region_limit") or "20000")
+local safe_region_limit = tonumber(core.settings:get("worldedit_safe_region_limit") or "20000")
 
 local safe_region_callback = {}
 
@@ -17,11 +17,11 @@ local function safe_region(name, count, callback)
 	local count_str = tostring(count)
 	-- highlight millions, 1 mln <=> 100x100x100 cube
 	if #count_str > 6 then
-		count_str = minetest.colorize("#f33", count_str:sub(1, -7)) .. count_str:sub(-6, -1)
+		count_str = core.colorize("#f33", count_str:sub(1, -7)) .. count_str:sub(-6, -1)
 	end
 
-	local yes_cmd = minetest.colorize("#00ffff", "//y")
-	local no_cmd = minetest.colorize("#00ffff", "//n")
+	local yes_cmd = core.colorize("#00ffff", "//y")
+	local no_cmd = core.colorize("#00ffff", "//n")
 	local msg = S("WARNING: this operation could affect up to @1 nodes; type @2 to continue or @3 to cancel",
 		count_str, yes_cmd, no_cmd)
 	worldedit.player_notify(name, msg, "info")
@@ -31,7 +31,7 @@ local function reset_pending(name)
 	safe_region_callback[name] = nil
 end
 
-minetest.register_chatcommand("/y", {
+core.register_chatcommand("/y", {
 	params = "",
 	description = S("Confirm a pending operation"),
 	func = function(name)
@@ -46,7 +46,7 @@ minetest.register_chatcommand("/y", {
 	end,
 })
 
-minetest.register_chatcommand("/n", {
+core.register_chatcommand("/n", {
 	params = "",
 	description = S("Abort a pending operation"),
 	func = function(name)

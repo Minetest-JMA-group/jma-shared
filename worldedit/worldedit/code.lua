@@ -15,7 +15,7 @@ function worldedit.lua(code, name)
 	local func = factory()
 	local player, pos
 	if name then
-		player = minetest.get_player_by_name(name)
+		player = core.get_player_by_name(name)
 		if player then
 			pos = vector.round(player:get_pos())
 		end

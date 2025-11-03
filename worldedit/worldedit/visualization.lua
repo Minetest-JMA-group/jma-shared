@@ -1,7 +1,7 @@
 --- Functions for visibly hiding nodes
 -- @module worldedit.visualization
 
-minetest.register_node("worldedit:placeholder", {
+core.register_node("worldedit:placeholder", {
 	drawtype = "airlike",
 	paramtype = "light",
 	sunlight_propagates = true,
@@ -20,8 +20,8 @@ function worldedit.hide(pos1, pos2)
 	worldedit.keep_loaded(pos1, pos2)
 
 	local pos = vector.new(pos1.x, 0, 0)
-	local get_node, get_meta, swap_node = minetest.get_node,
-			minetest.get_meta, minetest.swap_node
+	local get_node, get_meta, swap_node = core.get_node,
+			core.get_meta, core.swap_node
 	while pos.x <= pos2.x do
 		pos.y = pos1.y
 		while pos.y <= pos2.y do
@@ -57,9 +57,9 @@ function worldedit.suppress(pos1, pos2, node_name)
 
 	worldedit.keep_loaded(pos1, pos2)
 
-	local nodes = minetest.find_nodes_in_area(pos1, pos2, node_name)
-	local get_node, get_meta, swap_node = minetest.get_node,
-			minetest.get_meta, minetest.swap_node
+	local nodes = core.find_nodes_in_area(pos1, pos2, node_name)
+	local get_node, get_meta, swap_node = core.get_node,
+			core.get_meta, core.swap_node
 	for _, pos in ipairs(nodes) do
 		local node = get_node(pos)
 		-- Save the node's original name
@@ -80,8 +80,8 @@ function worldedit.highlight(pos1, pos2, node_name)
 	worldedit.keep_loaded(pos1, pos2)
 
 	local pos = vector.new(pos1.x, 0, 0)
-	local get_node, get_meta, swap_node = minetest.get_node,
-			minetest.get_meta, minetest.swap_node
+	local get_node, get_meta, swap_node = core.get_node,
+			core.get_meta, core.swap_node
 	local count = 0
 	while pos.x <= pos2.x do
 		pos.y = pos1.y
@@ -115,9 +115,9 @@ function worldedit.restore(pos1, pos2)
 
 	worldedit.keep_loaded(pos1, pos2)
 
-	local nodes = minetest.find_nodes_in_area(pos1, pos2, "worldedit:placeholder")
-	local get_node, get_meta, swap_node = minetest.get_node,
-			minetest.get_meta, minetest.swap_node
+	local nodes = core.find_nodes_in_area(pos1, pos2, "worldedit:placeholder")
+	local get_node, get_meta, swap_node = core.get_node,
+			core.get_meta, core.swap_node
 	for _, pos in ipairs(nodes) do
 		local node = get_node(pos)
 		local meta = get_meta(pos)

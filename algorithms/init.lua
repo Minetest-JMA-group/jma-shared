@@ -11,8 +11,8 @@ local modstorage = {}
 local already_loaded = {}
 local c_mods = {}
 local trusted_mods = {}
-local ie = minetest.request_insecure_environment()
-local settings = minetest.settings
+local ie = core.request_insecure_environment()
+local settings = core.settings
 local list = settings:get("secure.c_mods") or ""
 
 for word in list:gmatch("[^,%s]+") do
@@ -28,10 +28,10 @@ list = nil
 
 -- Load the shared library lib<modname>.so in the mod folder of the calling mod, or on path libpath relative to the mod folder
 algorithms.load_library = function(libpath)
-	local modname = minetest.get_current_modname()
+	local modname = core.get_current_modname()
 
 	if not c_mods[modname] and not trusted_mods[modname] then
-		minetest.log("error", "["..modname.."]: Attempted to load shared object file without permission!")
+		core.log("error", "["..modname.."]: Attempted to load shared object file without permission!")
 		return false
 	end
 
@@ -40,7 +40,7 @@ algorithms.load_library = function(libpath)
 	end
 	already_loaded[modname] = true
 
-	local MP = minetest.get_modpath(modname)
+	local MP = core.get_modpath(modname)
 	local libinit, err
 	if type(libpath) == "string" then
 		libinit, err = ie.package.loadlib(MP.."/"..libpath, "luaopen_mylibrary")
@@ -48,15 +48,15 @@ algorithms.load_library = function(libpath)
 		libinit, err = ie.package.loadlib(MP.."/lib"..modname..".so", "luaopen_mylibrary")
 	end
 	if not libinit and err then
-		minetest.log("error", "["..modname.."]: Failed to load shared object file")
-		minetest.log("error", "["..modname.."]: "..err)
+		core.log("error", "["..modname.."]: Failed to load shared object file")
+		core.log("error", "["..modname.."]: "..err)
 		return false
 	end
 
 	local ret = libinit()
 	if ret and ret ~= 0 then
-		minetest.log("error", "["..modname.."]: Failed to load shared object file")
-		minetest.log("error", "["..modname.."]: Exited with code: "..tostring(ret))
+		core.log("error", "["..modname.."]: Failed to load shared object file")
+		core.log("error", "["..modname.."]: Exited with code: "..tostring(ret))
 		return false
 	end
 	return true
@@ -69,7 +69,7 @@ local insecure_env = {
 }
 algorithms.execute = nil
 algorithms.request_insecure_environment = function()
-	local modname = minetest.get_current_modname()
+	local modname = core.get_current_modname()
 	if not trusted_mods[modname] then
 		return nil
 	else
@@ -92,21 +92,21 @@ end
 
 -- Return modstorage object, but also save it in modstorage[modname] for later use
 algorithms.get_mod_storage = function()
-	local modname = minetest.get_current_modname()
-	modstorage[modname] = minetest.get_mod_storage()
+	local modname = core.get_current_modname()
+	modstorage[modname] = core.get_mod_storage()
 	return modstorage[modname]
 end
 
 -- Deserialize and return the object stored under the key `key` in either `s` - the modstorage passed as an argument, or modstorage[modname]
 -- If there is no object referenced under the key `key` return `default`
 algorithms.getconfig = function(key, default, s)
-	local modname = minetest.get_current_modname()
+	local modname = core.get_current_modname()
 	local storage = s or modstorage[modname]
 	if type(key) ~= "string" or not s then
 		return default
 	end
 	if storage:contains(key) then
-		return minetest.deserialize(storage:get_string(key))
+		return core.deserialize(storage:get_string(key))
 	else
 		return default
 	end

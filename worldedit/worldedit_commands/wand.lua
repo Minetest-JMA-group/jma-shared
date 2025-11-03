@@ -1,4 +1,4 @@
-local S = minetest.get_translator("worldedit_commands")
+local S = core.get_translator("worldedit_commands")
 
 local function above_or_under(placer, pointed_thing)
 	if placer:get_player_control().sneak then
@@ -10,7 +10,7 @@ end
 
 local punched_air_time = {}
 
-minetest.register_tool(":worldedit:wand", {
+core.register_tool(":worldedit:wand", {
 	description = S("WorldEdit Wand tool\nLeft-click to set 1st position, right-click to set 2nd"),
 	inventory_image = "worldedit_wand.png",
 	stack_max = 1, -- there is no need to have more than one
@@ -31,7 +31,7 @@ minetest.register_tool(":worldedit:wand", {
 			worldedit.pos1[name] = above_or_under(placer, pointed_thing)
 			worldedit.mark_pos1(name)
 		elseif pointed_thing.type == "nothing" then
-			local now = minetest.get_us_time()
+			local now = core.get_us_time()
 			if now - (punched_air_time[name] or 0) < 1000 * 1000 then
 				-- reset markers
 				worldedit.registered_commands["reset"].func(name)

@@ -1,4 +1,4 @@
-local S = minetest.get_translator("worldedit_commands")
+local S = core.get_translator("worldedit_commands")
 
 
 local check_cube = function(param)

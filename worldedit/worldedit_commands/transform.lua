@@ -1,4 +1,4 @@
-local S = minetest.get_translator("worldedit_commands")
+local S = core.get_translator("worldedit_commands")
 
 local function check_region(name)
 	return worldedit.volume(worldedit.pos1[name], worldedit.pos2[name])

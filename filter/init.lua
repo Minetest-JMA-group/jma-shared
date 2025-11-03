@@ -28,7 +28,7 @@ if not core.registered_privileges["filtering"] then
 end
 
 if not algorithms.load_library() then
-	minetest.log("warning", "Filter mod requires corresponding mylibrary.so C++ module to work.")
+	core.log("warning", "Filter mod requires corresponding mylibrary.so C++ module to work.")
 
 	function filter.check_message()
 		return true
@@ -70,8 +70,8 @@ end
 function filter.mute(name, duration, violation_type, message)
 	local v_type = violation_types[violation_type] or violation_types.blacklisted
 
-	minetest.chat_send_all(name .. " has been temporarily muted for " .. v_type.name .. ".")
-	minetest.chat_send_player(name, v_type.chat_msg)
+	core.chat_send_all(name .. " has been temporarily muted for " .. v_type.name .. ".")
+	core.chat_send_player(name, v_type.chat_msg)
 
 	local reason
 	if violation_type == "too_long" then
@@ -91,7 +91,7 @@ function filter.show_warning_formspec(name, violation_type)
 		"label[2.3,0.5;" .. v_type.formspec_title .. "]" ..
 		"label[2.3,1.1;" .. v_type.chat_msg .. "]"
 
-	if minetest.global_exists("rules") and rules.show then
+	if core.global_exists("rules") and rules.show then
 		formspec = formspec .. [[
 				button[0.5,2.1;3,1;rules;Show Rules]
 				button_exit[3.5,2.1;3,1;close;Okay]
@@ -101,7 +101,7 @@ function filter.show_warning_formspec(name, violation_type)
 				button_exit[2,2.1;3,1;close;Okay]
 			]]
 	end
-	minetest.show_formspec(name, "filter:warning", formspec)
+	core.show_formspec(name, "filter:warning", formspec)
 end
 
 function filter.on_violation(name, message, violation_type)
@@ -129,16 +129,16 @@ function filter.on_violation(name, message, violation_type)
 	end
 
 	if not resolution then
-		if violations[name] == 1 and minetest.get_player_by_name(name) then
+		if violations[name] == 1 and core.get_player_by_name(name) then
 			resolution = "warned"
 			filter.show_warning_formspec(name, violation_type)
-			minetest.chat_send_player(name, v_type.chat_msg)
+			core.chat_send_player(name, v_type.chat_msg)
 		elseif violations[name] <= 3 then
 			resolution = "muted"
 			filter.mute(name, 1, violation_type, message)
 		else
 			resolution = "kicked"
-			minetest.kick_player(name, v_type.kick_msg)
+			core.kick_player(name, v_type.kick_msg)
 			if discord and discord.enabled and (os.time() - last_kicked_time) > discordCooldown then
 				local format_string = "***filter***: Kicked %s for %s \"%s\""
 				if violation_type == "blacklisted" then
@@ -153,16 +153,16 @@ function filter.on_violation(name, message, violation_type)
 	end
 
 	local logmsg = "[filter] " .. v_type.log_msg .. " (" .. resolution .. "): <" .. name .. "> " .. message
-	minetest.log("action", logmsg)
+	core.log("action", logmsg)
 
-	local email_to = minetest.settings:get("filter.email_to")
-	if email_to and minetest.global_exists("email") then
+	local email_to = core.settings:get("filter.email_to")
+	if email_to and core.global_exists("email") then
 		email.send_mail(name, email_to, logmsg)
 	end
 end
 
 -- Insert this check after xban checks whether the player is muted
-table.insert(minetest.registered_on_chat_messages, 2, function(name, message)
+table.insert(core.registered_on_chat_messages, 2, function(name, message)
 	if message:sub(1, 1) == "/" then
 		return
 	end
@@ -191,22 +191,22 @@ local function make_checker(old_func)
 	end
 end
 
-for name, def in pairs(minetest.registered_chatcommands) do
+for name, def in pairs(core.registered_chatcommands) do
 	if (def.privs and def.privs.shout) or xban.cmd_list[name] then
 		def.func = make_checker(def.func)
 	end
 end
 
-local old_register_chatcommand = minetest.register_chatcommand
-function minetest.register_chatcommand(name, def)
+local old_register_chatcommand = core.register_chatcommand
+function core.register_chatcommand(name, def)
 	if (def.privs and def.privs.shout) or xban.cmd_list[name] then
 		def.func = make_checker(def.func)
 	end
 	return old_register_chatcommand(name, def)
 end
 
-local old_override_chatcommand = minetest.override_chatcommand
-function minetest.override_chatcommand(name, def)
+local old_override_chatcommand = core.override_chatcommand
+function core.override_chatcommand(name, def)
 	if (def.privs and def.privs.shout) or xban.cmd_list[name] then
 		def.func = make_checker(def.func)
 	end
@@ -220,12 +220,12 @@ local function step()
 			violations[name] = nil
 		end
 	end
-	minetest.after(10*60, step)
+	core.after(10*60, step)
 end
-minetest.after(10*60, step)
+core.after(10*60, step)
 
-if minetest.global_exists("rules") and rules.show then
-	minetest.register_on_player_receive_fields(function(player, formname, fields)
+if core.global_exists("rules") and rules.show then
+	core.register_on_player_receive_fields(function(player, formname, fields)
 		if formname == "filter:warning" and fields.rules then
 			rules.show(player)
 		end

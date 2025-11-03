@@ -38,12 +38,12 @@ worldedit.normalize_nodename = function(nodename)
 	if nodename == "" then return nil end
 
 	local fullname = ItemStack({name=nodename}):get_name() -- resolve aliases
-	if minetest.registered_nodes[fullname] or fullname == "air" then -- full name
+	if core.registered_nodes[fullname] or fullname == "air" then -- full name
 		return fullname
 	end
 	nodename = nodename:lower()
 
-	for key, _ in pairs(minetest.registered_nodes) do
+	for key, _ in pairs(core.registered_nodes) do
 		if string_endswith(key:lower(), ":" .. nodename) then -- matches name (w/o mod part)
 			return key
 		end
@@ -52,7 +52,7 @@ worldedit.normalize_nodename = function(nodename)
 	if description_cache == nil then
 		-- cache stripped descriptions
 		description_cache = {}
-		for key, value in pairs(minetest.registered_nodes) do
+		for key, value in pairs(core.registered_nodes) do
 			local desc = strip_escapes(value.description):gsub("\n.*", "", 1):lower()
 			if desc ~= "" then
 				description_cache[key] = desc

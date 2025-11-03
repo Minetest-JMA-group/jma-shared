@@ -7,7 +7,7 @@ local function deprecated(new_func)
 	if new_func then
 		msg = msg .. "  Use worldedit." .. new_func .. "() instead."
 	end
-	minetest.log("deprecated", msg)
+	core.log("deprecated", msg)
 end
 
 worldedit.allocate_old = worldedit.allocate
@@ -26,7 +26,7 @@ end
 
 function worldedit.metaload(originpos, file_name)
 	deprecated("load")
-	local file_path = minetest.get_worldpath() ..
+	local file_path = core.get_worldpath() ..
 		"/schems/" .. file_name .. ".wem"
 	local file, err = io.open(file_path, "wb")
 	if err then

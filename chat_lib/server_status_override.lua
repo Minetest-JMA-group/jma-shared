@@ -1,6 +1,6 @@
 local game_title = ""
 do
-	local game = minetest.get_game_info()
+	local game = core.get_game_info()
 	if game.title ~= "" then
 		game_title = game.title
 	else
@@ -8,11 +8,11 @@ do
 	end
 end
 
-local motd = minetest.settings:get("motd")
-local motd_color = minetest.settings:get("motd_color")
+local motd = core.settings:get("motd")
+local motd_color = core.settings:get("motd_color")
 
 local function get_server_uptime_formatted()
-    local seconds = math.floor(minetest.get_server_uptime())
+    local seconds = math.floor(core.get_server_uptime())
 
     if seconds == 0 then
         return "0s"
@@ -42,11 +42,11 @@ local function get_server_uptime_formatted()
     return result
 end
 
-function minetest.get_server_status(name, joined)
+function core.get_server_status(name, joined)
 	local msg = string.format("- %s | Version: %s | Uptime: %s | Max Lag: %.3f | ",
-	game_title, minetest.get_version().string, get_server_uptime_formatted(), minetest.get_server_max_lag() or "0")
+	game_title, core.get_version().string, get_server_uptime_formatted(), core.get_server_max_lag() or "0")
 
-	local players = minetest.get_connected_players()
+	local players = core.get_connected_players()
     local plist = "Players: "
 
     if #players == 0 then
@@ -67,7 +67,7 @@ function minetest.get_server_status(name, joined)
     if joined then
         if motd and motd ~= "" then
             if motd_color and motd_color ~= "" then
-                motd = minetest.colorize(motd_color, motd)
+                motd = core.colorize(motd_color, motd)
             end
             msg = msg .. "\n— " .. motd
         end

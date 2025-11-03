@@ -57,11 +57,11 @@ function worldedit.serialize(pos1, pos2)
 	worldedit.keep_loaded(pos1, pos2)
 
 	local get_node, get_meta, hash_node_position =
-		minetest.get_node, minetest.get_meta, minetest.hash_node_position
+		core.get_node, core.get_meta, core.hash_node_position
 
 	-- Find the positions which have metadata
 	local has_meta = {}
-	local meta_positions = minetest.find_nodes_with_meta(pos1, pos2)
+	local meta_positions = core.find_nodes_with_meta(pos1, pos2)
 	for i = 1, #meta_positions do
 		has_meta[hash_node_position(meta_positions[i])] = true
 	end
@@ -110,22 +110,22 @@ function worldedit.serialize(pos1, pos2)
 		pos.x = pos.x + 1
 	end
 	-- Serialize entries
-	result = minetest.serialize(result)
+	result = core.serialize(result)
 	return LATEST_SERIALIZATION_HEADER .. result, count
 end
 
 local function deserialize_workaround(content)
 	local nodes, err
-	if not minetest.global_exists("jit") then
-		nodes, err = minetest.deserialize(content, true)
+	if not core.global_exists("jit") then
+		nodes, err = core.deserialize(content, true)
 	elseif not content:match("^%s*return%s*{") then
 		-- The data doesn't look like we expect it to so we can't apply the workaround.
 		-- hope for the best
-		minetest.log("warning", "WorldEdit: deserializing data but can't apply LuaJIT workaround")
-		nodes, err = minetest.deserialize(content, true)
+		core.log("warning", "WorldEdit: deserializing data but can't apply LuaJIT workaround")
+		nodes, err = core.deserialize(content, true)
 	else
 		-- XXX: This is a filthy hack that works surprisingly well
-		-- in LuaJIT, `minetest.deserialize` will fail due to the register limit
+		-- in LuaJIT, `core.deserialize` will fail due to the register limit
 		nodes = {}
 		content = content:gsub("^%s*return%s*{", "", 1):gsub("}%s*$", "", 1) -- remove the starting and ending values to leave only the node data
 		-- remove string contents strings while preserving their length
@@ -139,7 +139,7 @@ local function deserialize_workaround(content)
 				break
 			end
 			local current = content:sub(startpos1, startpos)
-			entry, err = minetest.deserialize("return " .. current, true)
+			entry, err = core.deserialize("return " .. current, true)
 			if not entry then
 				break
 			end
@@ -147,12 +147,12 @@ local function deserialize_workaround(content)
 			startpos, startpos1 = endpos, endpos
 		end
 		if not err then
-			entry = minetest.deserialize("return " .. content:sub(startpos1), true) -- process the last entry
+			entry = core.deserialize("return " .. content:sub(startpos1), true) -- process the last entry
 			table.insert(nodes, entry)
 		end
 	end
 	if err then
-		minetest.log("warning", "WorldEdit: deserialize: " .. err)
+		core.log("warning", "WorldEdit: deserialize: " .. err)
 	end
 	return nodes
 end
@@ -163,7 +163,7 @@ local function load_schematic(value)
 	local version, _, content = worldedit.read_header(value)
 	local nodes = {}
 	if version == 1 or version == 2 then -- Original flat table format
-		local tables = minetest.deserialize(content, true)
+		local tables = core.deserialize(content, true)
 		if not tables then return nil end
 
 		-- Transform the node table into an array of nodes
@@ -250,8 +250,8 @@ function worldedit.deserialize(origin_pos, value)
 	worldedit.keep_loaded(pos1, pos2)
 
 	local origin_x, origin_y, origin_z = origin_pos.x, origin_pos.y, origin_pos.z
-	local add_node, get_meta = minetest.add_node, minetest.get_meta
-	local registered_nodes = minetest.registered_nodes
+	local add_node, get_meta = core.add_node, core.get_meta
+	local registered_nodes = core.registered_nodes
 	for i, entry in ipairs(nodes) do
 		if registered_nodes[entry.name] then
 			entry.x, entry.y, entry.z = origin_x + entry.x, origin_y + entry.y, origin_z + entry.z

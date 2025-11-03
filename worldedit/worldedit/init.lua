@@ -15,7 +15,7 @@ local ver = {major=1, minor=3}
 worldedit.version = ver
 worldedit.version_string = string.format("%d.%d", ver.major, ver.minor)
 
-local path = minetest.get_modpath(minetest.get_current_modname())
+local path = core.get_modpath(core.get_current_modname())
 
 local function load_module(path)
 	local file = io.open(path, "r")
@@ -35,11 +35,11 @@ load_module(path .. "/compatibility.lua")
 load_module(path .. "/cuboid.lua")
 
 
-if minetest.settings:get_bool("log_mods") then
+if core.settings:get_bool("log_mods") then
 	print("[WorldEdit] Loaded!")
 end
 
-if minetest.settings:get_bool("worldedit_run_tests") then
+if core.settings:get_bool("worldedit_run_tests") then
 	dofile(path .. "/test/init.lua")
-	minetest.after(0, worldedit.run_tests)
+	core.after(0, worldedit.run_tests)
 end

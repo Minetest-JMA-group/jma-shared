@@ -16,7 +16,7 @@ function worldedit.set(pos1, pos2, node_names)
 	local data = mh.get_empty_data(area)
 
 	if type(node_names) == "string" then -- Only one type of node
-		local id = minetest.get_content_id(node_names)
+		local id = core.get_content_id(node_names)
 		-- Fill area with node
 		for i in area:iterp(pos1, pos2) do
 			data[i] = id
@@ -24,7 +24,7 @@ function worldedit.set(pos1, pos2, node_names)
 	else -- Several types of nodes specified
 		local node_ids = {}
 		for i, v in ipairs(node_names) do
-			node_ids[i] = minetest.get_content_id(v)
+			node_ids[i] = core.get_content_id(v)
 		end
 		-- Fill area randomly with nodes
 		local id_count, rand = #node_ids, math.random
@@ -71,8 +71,8 @@ function worldedit.replace(pos1, pos2, search_node, replace_node, inverse)
 	local manip, area = mh.init(pos1, pos2)
 	local data = manip:get_data()
 
-	local search_id = minetest.get_content_id(search_node)
-	local replace_id = minetest.get_content_id(replace_node)
+	local search_id = core.get_content_id(search_node)
+	local replace_id = core.get_content_id(replace_node)
 
 	local count = 0
 
@@ -174,7 +174,7 @@ function worldedit.copy2(pos1, pos2, off, meta_backwards)
 	mh.finish(dst_manip)
 
 	-- Copy metadata
-	local get_meta = minetest.get_meta
+	local get_meta = core.get_meta
 	if meta_backwards then
 	for z = dim.z-1, 0, -1 do
 		for y = dim.y-1, 0, -1 do
@@ -209,8 +209,8 @@ end
 function worldedit.delete_meta(pos1, pos2)
 	local pos1, pos2 = worldedit.sort_pos(pos1, pos2)
 
-	local meta_positions = minetest.find_nodes_with_meta(pos1, pos2)
-	local get_meta = minetest.get_meta
+	local meta_positions = core.find_nodes_with_meta(pos1, pos2)
+	local get_meta = core.get_meta
 	for _, pos in ipairs(meta_positions) do
 		get_meta(pos):from_table(nil)
 	end
@@ -268,7 +268,7 @@ end
 function worldedit.fixlight(pos1, pos2)
 	local pos1, pos2 = worldedit.sort_pos(pos1, pos2)
 
-	local vmanip = minetest.get_voxel_manip(pos1, pos2)
+	local vmanip = core.get_voxel_manip(pos1, pos2)
 	vmanip:write_to_map()
 	vmanip:update_map() -- this updates the lighting
 
@@ -297,8 +297,8 @@ function worldedit.clear_objects(pos1, pos2)
 	pos2 = vector.add(pos2, 0.5)
 
 	local count = 0
-	if minetest.get_objects_in_area then
-		local objects = minetest.get_objects_in_area(pos1, pos2)
+	if core.get_objects_in_area then
+		local objects = core.get_objects_in_area(pos1, pos2)
 
 		for _, obj in pairs(objects) do
 			if should_delete(obj) then
@@ -321,7 +321,7 @@ function worldedit.clear_objects(pos1, pos2)
 			(center.x - pos1.x) ^ 2 +
 			(center.y - pos1.y) ^ 2 +
 			(center.z - pos1.z) ^ 2)
-	local objects = minetest.get_objects_inside_radius(center, radius)
+	local objects = core.get_objects_inside_radius(center, radius)
 	for _, obj in pairs(objects) do
 		if should_delete(obj) then
 			local pos = obj:get_pos()

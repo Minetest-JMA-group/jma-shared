@@ -1,4 +1,4 @@
-local S = minetest.get_translator("worldedit_commands")
+local S = core.get_translator("worldedit_commands")
 
 worldedit.prob_pos = {}
 worldedit.prob_list = {}
@@ -14,9 +14,9 @@ end
 local function open_schematic(name, param)
 	-- find the file in the world path
 	local testpaths = {
-		minetest.get_worldpath() .. "/schems/" .. param,
-		minetest.get_worldpath() .. "/schems/" .. param .. ".we",
-		minetest.get_worldpath() .. "/schems/" .. param .. ".wem",
+		core.get_worldpath() .. "/schems/" .. param,
+		core.get_worldpath() .. "/schems/" .. param .. ".we",
+		core.get_worldpath() .. "/schems/" .. param .. ".wem",
 	}
 	local file, err
 	for index, path in ipairs(testpaths) do
@@ -50,7 +50,7 @@ local function detect_misaligned_schematic(name, pos1, pos2)
 	-- The expected behaviour is that the (0,0,0) corner of the schematic stays
 	-- at pos1, this only works when the minimum position is actually present
 	-- in the schematic.
-	local node = minetest.get_node(pos1)
+	local node = core.get_node(pos1)
 	local have_node_at_origin = node.name ~= "air" and node.name ~= "ignore"
 	if not have_node_at_origin then
 		worldedit.player_notify(name,
@@ -83,9 +83,9 @@ worldedit.register_command("save", {
 				worldedit.pos2[name])
 		detect_misaligned_schematic(name, worldedit.pos1[name], worldedit.pos2[name])
 
-		local path = minetest.get_worldpath() .. "/schems"
+		local path = core.get_worldpath() .. "/schems"
 		-- Create directory if it does not already exist
-		minetest.mkdir(path)
+		core.mkdir(path)
 
 		local filename = path .. "/" .. param .. ".we"
 		local file, err = io.open(filename, "wb")
@@ -186,12 +186,12 @@ worldedit.register_command("mtschemcreate", {
 	end,
 	nodes_needed = check_region,
 	func = function(name, param)
-		local path = minetest.get_worldpath() .. "/schems"
+		local path = core.get_worldpath() .. "/schems"
 		-- Create directory if it does not already exist
-		minetest.mkdir(path)
+		core.mkdir(path)
 
 		local filename = path .. "/" .. param .. ".mts"
-		local ret = minetest.create_schematic(worldedit.pos1[name],
+		local ret = core.create_schematic(worldedit.pos1[name],
 				worldedit.pos2[name], worldedit.prob_list[name],
 				filename)
 		worldedit.prob_list[name] = {}
@@ -223,12 +223,12 @@ worldedit.register_command("mtschemplace", {
 	func = function(name, filename, rotation)
 		local pos = worldedit.pos1[name]
 
-		local path = minetest.get_worldpath() .. "/schems/" .. filename .. ".mts"
-		if minetest.place_schematic(pos, path, rotation) == nil then
+		local path = core.get_worldpath() .. "/schems/" .. filename .. ".mts"
+		if core.place_schematic(pos, path, rotation) == nil then
 			return false, S("failed to place Minetest schematic")
 		end
 		return true, S("placed Minetest schematic @1 at @2",
-			filename, minetest.pos_to_string(pos))
+			filename, core.pos_to_string(pos))
 	end,
 })
 
@@ -259,14 +259,14 @@ worldedit.register_command("mtschemprob", {
 			end
 			for k,v in pairs(problist) do
 				local prob = math.floor(((v.prob / 256) * 100) * 100 + 0.5) / 100
-				text = text .. minetest.pos_to_string(v.pos) .. ": " .. prob .. "% | "
+				text = text .. core.pos_to_string(v.pos) .. ": " .. prob .. "% | "
 			end
 			worldedit.player_notify(name, S("currently set node probabilities:") .. "\n" .. text, "info")
 		end
 	end,
 })
 
-minetest.register_on_player_receive_fields(function(player, formname, fields)
+core.register_on_player_receive_fields(function(player, formname, fields)
 	if formname == "prob_val_enter" then
 		local name = player:get_player_name()
 		local problist = worldedit.prob_list[name]

@@ -2,15 +2,15 @@
 
 worldedit.alias_command = function(alias, original)
 	if not worldedit.registered_commands[original] then
-		minetest.log("error", "worldedit_shortcommands: original " .. original .. " does not exist")
+		core.log("error", "worldedit_shortcommands: original " .. original .. " does not exist")
 		return
 	end
-	if minetest.chatcommands["/" .. alias] then
-		minetest.log("error", "worldedit_shortcommands: alias " .. alias .. " already exists")
+	if core.chatcommands["/" .. alias] then
+		core.log("error", "worldedit_shortcommands: alias " .. alias .. " already exists")
 		return
 	end
 
-	minetest.register_chatcommand("/" .. alias, minetest.chatcommands["/" .. original])
+	core.register_chatcommand("/" .. alias, core.chatcommands["/" .. original])
 	worldedit.registered_commands[alias] = worldedit.registered_commands[original]
 end
 

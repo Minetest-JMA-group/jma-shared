@@ -6,7 +6,7 @@ This "library" is meant to be a very thin helper that you can easily drop in to 
 
 ### utf8_simple.chars(s[, no_subs])
 - s: (string) the utf8 string to iterate over (by characters)
-- nosubs: (boolean) true turns the substring utf8 characters into byte-lengths
+- no_subs: (boolean) true turns the substring utf8 characters into byte-lengths
 
 ```lua
 -- i is the character/letter index within the string
@@ -37,7 +37,7 @@ Output:
 
 ### ALTERNATE FORM
 Creating small substrings can be a performance concern, the 2nd parameter to utf8_simple.chars()
-allows you to toggle the substrings to instead by the byte width of the character.
+allows you to toggle the substrings to instead return the byte width of the character.
 
 This is for situations when you only care about the byte width (less common).
 
@@ -90,7 +90,8 @@ returns: (nothing)
 
 returns: (number) the number of utf8 characters in s (not the byte length)
 
-note: be aware of "invisible" utf8 characters
+note: invalid byte sequences are treated as standalone placeholder characters so that iteration,
+len, and sub stay in sync; be aware of "invisible" utf8 characters
 
 ```lua
 > = utf8_simple.len('Αγαπώ τηγανίτες')
@@ -135,8 +136,8 @@ Ey Ax
 
 ### utf8_simple.sub(s, i, j)
 - s: (string) the utf8 string
-- i: (string) the starting index in the utf8 string
-- j: (stirng) the ending index in the utf8 string
+- i: (number) the starting index in the utf8 string (follows string.sub semantics)
+- j: (number, optional) the ending index in the utf8 string
 
 returns: (string) the substring formed from i to j, inclusive (this is a utf8-aware string.sub())
 

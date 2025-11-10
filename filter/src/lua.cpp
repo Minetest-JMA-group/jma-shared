@@ -293,6 +293,25 @@ static void store_conf(const char *key, int val)
 	m.pop_modstorage();
 }
 
+static QString extract_regex_argument(const QString &input, const QString &command)
+{
+	int idx = 0;
+	while (idx < input.size() && input[idx].isSpace())
+		++idx;
+
+	if (idx + command.size() > input.size())
+		return QString();
+
+	if (input.mid(idx, command.size()) != command)
+		return QString();
+
+	int regex_start = idx + command.size();
+	while (regex_start < input.size() && input[regex_start].isSpace())
+		++regex_start;
+
+	return input.mid(regex_start);
+}
+
 static struct cmd_ret filter_console(const char *name, QString param)
 {
 	QStringList params = param.split(" ", Qt::SkipEmptyParts);
@@ -445,15 +464,16 @@ rm <regex>: Remove regex frmo blacklist)"};
 	else if (params[0] == "addwl") li = 1;
 	else should_run = false;
 	if (should_run) {
-		if (params.size() != 2)
+		QString regex_param = extract_regex_argument(param, params[0]);
+		if (regex_param.isEmpty())
 			return {false, "Usage: /filter add|addwl <regex>"};
-		QRegularExpression reg(params[1], QRegularExpression::CaseInsensitiveOption | QRegularExpression::UseUnicodePropertiesOption);
+		QRegularExpression reg(regex_param, QRegularExpression::CaseInsensitiveOption | QRegularExpression::UseUnicodePropertiesOption);
 		if (!reg.isValid())
 			return {false, "Invalid regex: " + reg.errorString()};
 		listMap[li].list.push_front(reg);
 		save_regex_list(listMap[li].list, listMap[li].name);
-		qLog << "filter: " << name << " added \'" << params[1] << "\' to " << listMap[li].name;
-		return {true, "Added \'" % params[1] % "\' to " % listMap[li].name};
+		qLog << "filter: " << name << " added \'" << regex_param << "\' to " << listMap[li].name;
+		return {true, "Added \'" % regex_param % "\' to " % listMap[li].name};
 	}
 	should_run = true;
 
@@ -461,12 +481,13 @@ rm <regex>: Remove regex frmo blacklist)"};
 	else if (params[0] == "rmwl") li = 1;
 	else should_run = false;
 	if (should_run) {
-		if (params.size() != 2)
+		QString regex_param = extract_regex_argument(param, params[0]);
+		if (regex_param.isEmpty())
 			return {false, "Usage: /filter rm|rmwl <regex>"};
-		auto count = listMap[li].list.remove_if([&params](QRegularExpression &reg){ return reg.pattern() == params[1]; });
+		auto count = listMap[li].list.remove_if([&regex_param](QRegularExpression &reg){ return reg.pattern() == regex_param; });
 		if (count != 0)
 			save_regex_list(listMap[li].list, listMap[li].name);
-		qLog << "filter: " << name << " removed \'" << params[1] << "\' from " << listMap[li].name << ". Affected " << count << " entries";
+		qLog << "filter: " << name << " removed \'" << regex_param << "\' from " << listMap[li].name << ". Affected " << count << " entries";
 		return {true, "Removed " % QString::number(count) % " entries from " % listMap[li].name};
 	}
 

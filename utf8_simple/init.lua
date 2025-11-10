@@ -16,12 +16,47 @@
 -- 1110xxxx	10xxxxxx 10xxxxxx          | FFFF   (65535)
 -- 11110xxx	10xxxxxx 10xxxxxx 10xxxxxx | 10FFFF (1114111)
 
+utf8_simple = {}
+local utf8_simple = _G.utf8_simple
+
 local byte = string.byte
 local sub = string.sub
 local concat = table.concat
 
-utf8_simple = {}
-local utf8_simple = _G.utf8_simple
+local function resolve_case_path()
+	if core and core.get_modpath then
+		local modname = core.get_current_modname()
+		if modname then
+			local mp = core.get_modpath(modname)
+			if mp then
+				return mp .. '/utf8_simple_case.lua'
+			end
+		end
+
+		local mp = core.get_modpath('utf8_simple')
+		if mp then
+			return mp .. '/utf8_simple_case.lua'
+		end
+	end
+
+	if debug and debug.getinfo then
+		local info = debug.getinfo(1, 'S')
+		if info and info.source and info.source:sub(1, 1) == '@' then
+			local dir = info.source:match('^@(.+)/[^/]+$')
+			if dir then
+				return dir .. '/utf8_simple_case.lua'
+			end
+		end
+	end
+
+	return 'utf8_simple_case.lua'
+end
+
+local case_map = dofile(resolve_case_path())
+local lower_map = case_map.lower
+local upper_map = case_map.upper
+local uppercase_chars = case_map.upper_chars
+case_map = nil
 
 -- helper function
 local posrelat =
@@ -30,8 +65,8 @@ local posrelat =
 			pos = len + pos + 1
 		end
 
-			return pos
-		end
+		return pos
+	end
 
 local function next_char(s, byte_index)
 	local b1, b2, b3, b4 = byte(s, byte_index, byte_index + 3)
@@ -41,7 +76,7 @@ local function next_char(s, byte_index)
 	end
 
 	if b1 <= 0x7F then
-		return 1, b1
+		return 1, b1, b1
 	end
 
 	local function is_cont(b)
@@ -50,61 +85,69 @@ local function next_char(s, byte_index)
 
 	if b1 >= 0xC2 and b1 <= 0xDF then
 		if is_cont(b2) then
-			return 2, b1
+			local cp = ((b1 - 0xC0) * 0x40) + (b2 - 0x80)
+			return 2, b1, cp
 		end
-		return 1, b1
+		return 1, b1, b1
 	end
 
 	if b1 == 0xE0 then
 		if b2 and b2 >= 0xA0 and b2 <= 0xBF and is_cont(b3) then
-			return 3, b1
+			local cp = ((b1 - 0xE0) * 0x1000) + ((b2 - 0x80) * 0x40) + (b3 - 0x80)
+			return 3, b1, cp
 		end
-		return 1, b1
+		return 1, b1, b1
 	end
 
 	if b1 >= 0xE1 and b1 <= 0xEC then
 		if is_cont(b2) and is_cont(b3) then
-			return 3, b1
+			local cp = ((b1 - 0xE0) * 0x1000) + ((b2 - 0x80) * 0x40) + (b3 - 0x80)
+			return 3, b1, cp
 		end
-		return 1, b1
+		return 1, b1, b1
 	end
 
 	if b1 == 0xED then
 		if b2 and b2 >= 0x80 and b2 <= 0x9F and is_cont(b3) then
-			return 3, b1
+			local cp = ((b1 - 0xE0) * 0x1000) + ((b2 - 0x80) * 0x40) + (b3 - 0x80)
+			return 3, b1, cp
 		end
-		return 1, b1
+		return 1, b1, b1
 	end
 
 	if b1 >= 0xEE and b1 <= 0xEF then
 		if is_cont(b2) and is_cont(b3) then
-			return 3, b1
+			local cp = ((b1 - 0xE0) * 0x1000) + ((b2 - 0x80) * 0x40) + (b3 - 0x80)
+			return 3, b1, cp
 		end
-		return 1, b1
+		return 1, b1, b1
 	end
 
 	if b1 == 0xF0 then
 		if b2 and b2 >= 0x90 and b2 <= 0xBF and is_cont(b3) and is_cont(b4) then
-			return 4, b1
+			local cp = ((b1 - 0xF0) * 0x40000) + ((b2 - 0x80) * 0x1000) + ((b3 - 0x80) * 0x40) + (b4 - 0x80)
+			return 4, b1, cp
 		end
-		return 1, b1
+		return 1, b1, b1
 	end
 
 	if b1 >= 0xF1 and b1 <= 0xF3 then
 		if is_cont(b2) and is_cont(b3) and is_cont(b4) then
-			return 4, b1
+			local cp = ((b1 - 0xF0) * 0x40000) + ((b2 - 0x80) * 0x1000) + ((b3 - 0x80) * 0x40) + (b4 - 0x80)
+			return 4, b1, cp
 		end
-		return 1, b1
+		return 1, b1, b1
 	end
 
 	if b1 == 0xF4 then
 		if b2 and b2 >= 0x80 and b2 <= 0x8F and is_cont(b3) and is_cont(b4) then
-			return 4, b1
+			local cp = ((b1 - 0xF0) * 0x40000) + ((b2 - 0x80) * 0x1000) + ((b3 - 0x80) * 0x40) + (b4 - 0x80)
+			return 4, b1, cp
 		end
-		return 1, b1
+		return 1, b1, b1
 	end
 
-	return 1, b1
+	return 1, b1, b1
 end
 
 local function walk(s, handler)
@@ -113,14 +156,14 @@ local function walk(s, handler)
 	local visual = 0
 
 	while byte_index <= slen do
-		local width, lead = next_char(s, byte_index)
+		local width, lead, codepoint = next_char(s, byte_index)
 
 		if not width then
 			break
 		end
 
 		visual = visual + 1
-		local stop = handler(visual, byte_index, width, lead)
+		local stop = handler(visual, byte_index, width, lead, codepoint)
 
 		byte_index = byte_index + width
 
@@ -165,11 +208,11 @@ utf8_simple.len =
 	end
 
 -- replace all utf8 chars with mapping
-utf8_simple.replace =
-	function (s, map)
-		if not map then
-			return s
-		end
+	utf8_simple.replace =
+		function (s, map)
+			if not map then
+				return s
+			end
 
 		local out = {}
 
@@ -244,7 +287,94 @@ utf8_simple.sub =
 			end
 		end)
 
-		return sub(s, start_byte, end_byte)
+			return sub(s, start_byte, end_byte)
+		end
+
+local function apply_case_map(s, mapping)
+	if type(s) ~= 'string' then
+		return ''
+	end
+
+	if s == '' then
+		return ''
+	end
+
+	local out = {}
+	local changed
+
+	walk(s, function (_, byte_index, width, _, codepoint)
+		local chunk = sub(s, byte_index, byte_index + width - 1)
+		local replacement = mapping[codepoint]
+
+		if replacement and replacement ~= chunk then
+			changed = true
+			out[#out + 1] = replacement
+		else
+			out[#out + 1] = chunk
+		end
+	end)
+
+	if not changed then
+		return s
+	end
+
+	return concat(out)
+end
+
+-- count uppercase characters using Unicode data
+utf8_simple.count_caps =
+	function (s)
+		if type(s) ~= 'string' or s == '' then
+			return 0
+		end
+
+		local count = 0
+
+		walk(s, function (_, _, _, _, codepoint)
+			if uppercase_chars[codepoint] then
+				count = count + 1
+			end
+		end)
+
+		return count
+	end
+
+-- convert to uppercase / lowercase using Unicode case mappings
+utf8_simple.lower =
+	function (s)
+		return apply_case_map(s, lower_map)
+	end
+
+utf8_simple.upper =
+	function (s)
+		return apply_case_map(s, upper_map)
+	end
+
+-- return the codepoint of a single-character UTF-8 string
+utf8_simple.codepoint =
+	function (s)
+		if type(s) ~= 'string' or s == '' then
+			error('utf8_simple.codepoint: Non-string argument')
+		end
+
+		local value
+		local seen = 0
+
+		walk(s, function (_, _, _, _, codepoint)
+			seen = seen + 1
+
+			if seen == 1 then
+				value = codepoint
+			else
+				return true
+			end
+		end)
+
+		if seen ~= 1 then
+			error('utf8_simple.codepoint: Not a single Unicode char')
+		end
+
+		return value
 	end
 
 return utf8_simple

@@ -120,6 +120,42 @@ returns: (string) s with all non-ascii characters removed (characters > 1 byte)
 catdog
 ```
 
+### utf8_simple.count_caps(s)
+- s: (string) the utf8 string
+
+returns: (number) count of Unicode uppercase letters (category Lu) inside s
+
+note: malformed UTF-8 bytes are treated as individual placeholder characters, so their byte values are compared against the Unicode tables
+
+```lua
+> = utf8_simple.count_caps('ΑβΓΔ')
+3
+```
+
+### utf8_simple.lower(s)
+- s: (string) the utf8 string
+
+returns: (string) s converted to lowercase using the Unicode simple mappings
+
+note: returns an empty string when the input is not a Lua string
+
+```lua
+> = utf8_simple.lower('Straße')
+straße
+```
+
+### utf8_simple.upper(s)
+- s: (string) the utf8 string
+
+returns: (string) s converted to uppercase using the Unicode simple mappings
+
+note: multi-character uppercase expansions (for example ß -> SS) are supported
+
+```lua
+> = utf8_simple.upper('Straße')
+STRASSE
+```
+
 ### utf8_simple.replace(s, map)
 - s: (string) the utf8 string
 - map: (table) keys are utf8 characters to replace, values are their replacement
@@ -131,7 +167,19 @@ note: the keys must be utf8 characters, the values **can** be strings
 ```lua
 > = utf8_simple.replace('∃y ∀x ¬(x ≺ y)', { ['∃'] = 'E', ['∀'] = 'A', ['¬'] = '\r\n', ['≺'] = '<' })
 Ey Ax 
-(x < y)
+	(x < y)
+```
+
+### utf8_simple.codepoint(s)
+- s: (string) a utf8 string containing exactly one character
+
+returns: (number) the Unicode codepoint of the character
+
+note: raises an error if s is empty, not a string, or contains more than one UTF-8 character
+
+```lua
+> = utf8_simple.codepoint('字')
+23383
 ```
 
 ### utf8_simple.sub(s, i, j)

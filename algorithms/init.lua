@@ -2,10 +2,7 @@
 -- Copyright (c) 2023 Marko Petrović
 
 algorithms = {}
--- Register dummy functions, provided from C++
-algorithms.countCaps = function(string) return 0 end
-algorithms.lower = function(string) return string end
-algorithms.upper = function(string) return string end
+local utf8_simple = _G.utf8_simple
 algorithms.execute = function(argv_table) return "","[algorithms]: Function not implemented", 38 end
 local modstorage = {}
 local already_loaded = {}

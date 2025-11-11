@@ -1,70 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2023 Marko Petrović
 #include <luajit-2.1/lua.hpp>
-#include <QTextStream>
-#include <QString>
-#include <QList>
 #include <errno.h>
-#include <unistd.h>
-#include <string.h>
-#include <sys/wait.h>
+#include <signal.h>
+#include <string.h> // strerror, strsignal
 #include <string>
-#include <thread>
 #include <sys/syscall.h>
-
-int countCaps(lua_State *L)
-{
-	if (lua_gettop(L) == 0 || !lua_isstring(L, 1)) {
-		lua_pushinteger(L, 0);
-		return 1;
-	}
-	QString str(lua_tostring(L, 1));
-	int upperCase = 0;
-	for (const QChar &ch : str)
-		if (ch.isUpper())
-			upperCase++;
-
-	lua_pushinteger(L, upperCase);
-	return 1;
-}
-
-int codepoint(lua_State *L)
-{
-	if (lua_gettop(L) == 0 || !lua_isstring(L, 1)) {
-		lua_pushstring(L, "Non-string argument");
-		lua_error(L);
-	}
-	QString str(lua_tostring(L, 1));
-	auto ucsList = str.toUcs4();
-	if (ucsList.size() != 1) {
-		lua_pushstring(L, "Not a single Unicode char");
-		lua_error(L);
-	}
-	lua_pushnumber(L, ucsList[0]);
-	return 1;
-}
-
-int lower(lua_State *L)
-{
-	if (lua_gettop(L) == 0 || !lua_isstring(L, 1)) {
-		lua_pushstring(L, "");
-		return 1;
-	}
-	QString str(lua_tostring(L, 1));
-	lua_pushstring(L, str.toLower().toUtf8().data());
-	return 1;
-}
-
-int upper(lua_State *L)
-{
-	if (lua_gettop(L) == 0 || !lua_isstring(L, 1)) {
-		lua_pushstring(L, "");
-		return 1;
-	}
-	QString str(lua_tostring(L, 1));
-	lua_pushstring(L, str.toUpper().toUtf8().data());
-	return 1;
-}
+#include <sys/wait.h>
+#include <thread>
+#include <unistd.h>
 
 static char **build_argv(lua_State *L, int table_index)
 {
@@ -165,14 +109,6 @@ int execute(lua_State *L)
 extern "C" int luaopen_mylibrary(lua_State *L)
 {
 	lua_getglobal(L, "algorithms");
-	lua_pushcfunction(L, countCaps);
-	lua_setfield(L, -2, "countCaps");
-	lua_pushcfunction(L, lower);
-	lua_setfield(L, -2, "lower");
-	lua_pushcfunction(L, upper);
-	lua_setfield(L, -2, "upper");
-	lua_pushcfunction(L, codepoint);
-	lua_setfield(L, -2, "codepoint");
 	lua_pushcfunction(L, execute);
 	lua_setfield(L, -2, "execute");
 	lua_pop(L, 1);

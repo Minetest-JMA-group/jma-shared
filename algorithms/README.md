@@ -4,9 +4,7 @@
 
 ## API reference
 
-- number `algorithms.countCaps(string: string)` - Count capital letters in the string. Supports different scripts. (C++)
-- string `algorithms.lower(string: string)` - Turn the string to all-lowercase. Supports different scripts. (C++)
-- string `algorithms.upper(string: string)` - Turn the string to all-uppercase. Supports different scripts. (C++)
+> UTF-8 utilities (case conversion, codepoints, etc.) now live exclusively in the `utf8_simple` mod. Use its API directly.
 - boolean `algorithms.load_library(libpath: string)` - load library at the path libpath relative to the mod folder, or (default) `lib<modname>.so` in the calling mod folder. Return true if successful.
 - boolean `algorithms.table_contains(t: indexed_table, value)` - return true if value exists in indexed table t, and false otherwise
 - number `algorithms.parse_time(t: string)` - convert the time expression (e.g. 5h) to seconds. return 0 for invalid input.

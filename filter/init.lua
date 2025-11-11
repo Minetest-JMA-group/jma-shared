@@ -5,14 +5,6 @@ local last_kicked_time = os.time()
 
 -- Define violation types and their messages
 local violation_types = {
-	too_long = {
-		name = "message too long",
-		chat_msg = "Your message is too long. Please shorten it.",
-		kick_msg = "Please keep your messages concise!",
-		log_msg = "VIOLATION (message too long)",
-		formspec_title = "Message Too Long!",
-		formspec_image = "filter_warning.png"
-	},
 	blacklisted = {
 		name = "inappropriate content",
 		chat_msg = "Watch your language!",
@@ -27,8 +19,10 @@ if not core.registered_privileges["filtering"] then
 	core.register_privilege("filtering", "Filter manager")
 end
 
-if not algorithms.load_library() then
-	core.log("warning", "Filter mod requires corresponding mylibrary.so C++ module to work.")
+local modpath = core.get_modpath(core.get_current_modname())
+local backend_ok, backend_err = pcall(dofile, modpath .. "/backend.lua")
+if not backend_ok then
+	core.log("error", "[filter] Failed to load backend: " .. backend_err)
 
 	function filter.check_message()
 		return true
@@ -41,11 +35,6 @@ function filter.register_on_violation(func)
 	table.insert(filter.registered_on_violations, func)
 end
 
--- Check if the message is too long using the C++ function
-local function is_message_too_long(message)
-	return filter.is_message_too_long(message)
-end
-
 -- Return true if message is fine. false if it should be blocked.
 -- Also returns the violation type if blocked
 function filter.check_message(message)
@@ -53,14 +42,7 @@ function filter.check_message(message)
 		return false, "invalid_type"
 	end
 
-	-- Check message length
-	if is_message_too_long(message) then
-		return false, "too_long"
-	end
-
-	-- Check message content
-	local is_allowed = filter.is_whitelisted(message) or not filter.is_blacklisted(message)
-	if not is_allowed then
+	if filter.is_blacklisted(message) then
 		return false, "blacklisted"
 	end
 
@@ -73,12 +55,7 @@ function filter.mute(name, duration, violation_type, message)
 	core.chat_send_all(name .. " has been temporarily muted for " .. v_type.name .. ".")
 	core.chat_send_player(name, v_type.chat_msg)
 
-	local reason
-	if violation_type == "too_long" then
-		reason = string.format("Message too long: \"%s\" (exceeds maximum length)", message)
-	else
-		reason = string.format("%s\"%s\" using blacklist regex: \"%s\"", filter.phrase, message, filter.get_lastreg())
-	end
+	local reason = string.format("%s\"%s\" using blacklist regex: \"%s\"", filter.phrase, message, filter.get_lastreg())
 
 	xban.mute_player(name, "filter", os.time() + (duration*60), reason)
 end
@@ -111,11 +88,7 @@ function filter.on_violation(name, message, violation_type)
 	local resolution
 	if filter.get_mode() == 0 then
 		if discord and discord.enabled then
-			if violation_type == "too_long" then
-				discord.send_action_report("**filter**: [PERMISSIVE] Message too long: \"%s\" (exceeds maximum length)", message)
-			else
-				discord.send_action_report("**filter**: [PERMISSIVE] Message \"%s\" matched using blacklist regex: \"%s\"", message, filter.get_lastreg())
-			end
+			discord.send_action_report("**filter**: [PERMISSIVE] Message \"%s\" matched using blacklist regex: \"%s\"", message, filter.get_lastreg())
 		end
 		resolution = "permissive"
 	end

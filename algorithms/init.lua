@@ -30,6 +30,9 @@ list = nil
 -- Require only secure.c_mods because in practice it's a shared object load like load_library
 algorithms.require = function(libname)
 	local modname = core.get_current_modname()
+	if not modname then
+		error("algorithms.require can only be called during load time")
+	end
 	if not ie then
 		core.log("warning", "["..modname.."]: Attempted to use require through algorithms, but algorithms is not in secure.trusted_mods")
 		return nil
@@ -57,6 +60,10 @@ end
 -- Load the shared library lib<modname>.so in the mod folder of the calling mod, or on path libpath relative to the mod folder
 algorithms.load_library = function(libpath)
 	local modname = core.get_current_modname()
+	if not modname then
+		core.log("warning", "Cannot load library. Some mod called algorithms.load_library outside load time")
+		return false
+	end
 	if not ie then
 		core.log("warning", "["..modname.."]: Attempted to load shared object file through algorithms, but algorithms is not in secure.trusted_mods")
 		return false
@@ -145,6 +152,9 @@ end
 -- Return modstorage object, but also save it in modstorage[modname] for later use
 algorithms.get_mod_storage = function()
 	local modname = core.get_current_modname()
+	if not modname then
+		error("algorithms.get_mod_storage can only be called during load time")
+	end
 	modstorage[modname] = core.get_mod_storage()
 	return modstorage[modname]
 end

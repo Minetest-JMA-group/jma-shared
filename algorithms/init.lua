@@ -154,7 +154,7 @@ end
 algorithms.getconfig = function(key, default, s)
 	local modname = core.get_current_modname()
 	local storage = s or modstorage[modname]
-	if type(key) ~= "string" or not s then
+	if type(key) ~= "string" or not storage then
 		return default
 	end
 	if storage:contains(key) then

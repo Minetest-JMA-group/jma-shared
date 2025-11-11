@@ -27,7 +27,7 @@ local function load_whitelist()
 		return {}
 	end
 
-	return core.deserialize(raw)
+	return core.deserialize(raw) or {}
 end
 
 local whitelist = load_whitelist()

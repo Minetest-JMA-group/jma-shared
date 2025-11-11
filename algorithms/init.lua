@@ -29,12 +29,11 @@ list = nil
 -- Use this instead of ie.require directly
 -- Require only secure.c_mods because in practice it's a shared object load like load_library
 algorithms.require = function(libname)
+	local modname = core.get_current_modname()
 	if not ie then
 		core.log("warning", "["..modname.."]: Attempted to use require through algorithms, but algorithms is not in secure.trusted_mods")
 		return nil
 	end
-
-	local modname = core.get_current_modname()
 
 	if not c_mods[modname] and not trusted_mods[modname] then
 		core.log("warning", "["..modname.."]: Attempted to use require without permission!")
@@ -57,12 +56,11 @@ end
 
 -- Load the shared library lib<modname>.so in the mod folder of the calling mod, or on path libpath relative to the mod folder
 algorithms.load_library = function(libpath)
+	local modname = core.get_current_modname()
 	if not ie then
 		core.log("warning", "["..modname.."]: Attempted to load shared object file through algorithms, but algorithms is not in secure.trusted_mods")
 		return false
 	end
-
-	local modname = core.get_current_modname()
 
 	if not c_mods[modname] and not trusted_mods[modname] then
 		core.log("warning", "["..modname.."]: Attempted to load shared object file without permission!")
@@ -72,7 +70,6 @@ algorithms.load_library = function(libpath)
 	if already_loaded[modname] then
 		return true
 	end
-	already_loaded[modname] = true
 
 	local MP = core.get_modpath(modname)
 	local libinit, err
@@ -100,6 +97,7 @@ algorithms.load_library = function(libpath)
 		core.log("warning", "["..modname.."]: Exited with code: "..tostring(ret))
 		return false
 	end
+	already_loaded[modname] = true
 	return true
 end
 
@@ -232,7 +230,7 @@ algorithms.nGram = function(string, window_size)
 	end
 	window_size = math.floor(window_size) - 1
 	local string_len = utf8_simple.len(string)
-	if window_size <= string_len then
+	if window_size >= string_len then
 		return {string}
 	end
 	local ret = {}

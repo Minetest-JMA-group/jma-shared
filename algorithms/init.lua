@@ -1,8 +1,8 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- Copyright (c) 2023 Marko Petrović
+-- Copyright (c) 2023-2025 Marko Petrović
 
 algorithms = {}
-local utf8_simple = _G.utf8_simple
+local utf8_simple = utf8_simple
 algorithms.execute = function(argv_table) return "","[algorithms]: Function not implemented", 38 end
 local modstorage = {}
 local already_loaded = {}
@@ -10,6 +10,8 @@ local c_mods = {}
 local trusted_mods = {}
 local ie = core.request_insecure_environment()
 local settings = core.settings
+-- For messages on startup. Set to false if you're aware what doesn't work and are fine with it.
+local verbose = settings:get_bool("algorithms.verbose", true)
 local list = settings:get("secure.c_mods") or ""
 
 for word in list:gmatch("[^,%s]+") do
@@ -23,12 +25,47 @@ end
 list = nil
 
 
--- Load the shared library lib<modname>.so in the mod folder of the calling mod, or on path libpath relative to the mod folder
-algorithms.load_library = function(libpath)
+-- A small wrapper around require that handles the issue when the loaded module uses require itself
+-- Use this instead of ie.require directly
+-- Require only secure.c_mods because in practice it's a shared object load like load_library
+algorithms.require = function(libname)
+	if not ie then
+		core.log("warning", "["..modname.."]: Attempted to use require through algorithms, but algorithms is not in secure.trusted_mods")
+		return nil
+	end
+
 	local modname = core.get_current_modname()
 
 	if not c_mods[modname] and not trusted_mods[modname] then
-		core.log("error", "["..modname.."]: Attempted to load shared object file without permission!")
+		core.log("warning", "["..modname.."]: Attempted to use require without permission!")
+		return nil
+	end
+
+	local old_require = require
+	require = ie.require
+	local lib = require(libname)
+	require = old_require
+	return lib
+end
+
+local jit = algorithms.require("jit")
+if jit then
+	algorithms.os = jit.os
+elseif verbose
+	core.log("warning", "[algorithms]: Cannot determine the current platform")
+end
+
+-- Load the shared library lib<modname>.so in the mod folder of the calling mod, or on path libpath relative to the mod folder
+algorithms.load_library = function(libpath)
+	if not ie then
+		core.log("warning", "["..modname.."]: Attempted to load shared object file through algorithms, but algorithms is not in secure.trusted_mods")
+		return false
+	end
+
+	local modname = core.get_current_modname()
+
+	if not c_mods[modname] and not trusted_mods[modname] then
+		core.log("warning", "["..modname.."]: Attempted to load shared object file without permission!")
 		return false
 	end
 
@@ -42,31 +79,51 @@ algorithms.load_library = function(libpath)
 	if type(libpath) == "string" then
 		libinit, err = ie.package.loadlib(MP.."/"..libpath, "luaopen_mylibrary")
 	else
-		libinit, err = ie.package.loadlib(MP.."/lib"..modname..".so", "luaopen_mylibrary")
+		if algorithms.os == "Windows" then
+			libinit, err = ie.package.loadlib(MP.."/lib"..modname..".dll", "luaopen_mylibrary")
+		elseif algorithms.os == "Linux" then
+			libinit, err = ie.package.loadlib(MP.."/lib"..modname..".so", "luaopen_mylibrary")
+		else
+			core.log("warning", "["..modname.."]: Cannot determine a shared object file extension on a platform unknown to algorithms")
+			return false
+		end
 	end
 	if not libinit and err then
-		core.log("error", "["..modname.."]: Failed to load shared object file")
-		core.log("error", "["..modname.."]: "..err)
+		core.log("warning", "["..modname.."]: Failed to load shared object file")
+		core.log("warning", "["..modname.."]: "..err)
 		return false
 	end
 
 	local ret = libinit()
 	if ret and ret ~= 0 then
-		core.log("error", "["..modname.."]: Failed to load shared object file")
-		core.log("error", "["..modname.."]: Exited with code: "..tostring(ret))
+		core.log("warning", "["..modname.."]: Failed to load shared object file")
+		core.log("warning", "["..modname.."]: Exited with code: "..tostring(ret))
 		return false
 	end
 	return true
 end
-algorithms.load_library()
+
+if not verbose then
+	local old_core_log = core.log
+	core.log = function() end
+	algorithms.load_library()
+	core.log = old_core_log
+elseif not algorithms.load_library() then
+	core.log("warning", "[algorithms]: algorithms insecure_env.execute will not work")
+end
 
 -- Move privileged functions to a local guarded table
+-- We can't do this immediately because the C module can only store execute in a global table
 local insecure_env = {
 	execute = algorithms.execute
 }
 algorithms.execute = nil
 algorithms.request_insecure_environment = function()
 	local modname = core.get_current_modname()
+	if not ie then
+		core.log("warning", "["..modname.."]: requested insecure_env from algorithms. algorithms cannot provide it because it is not in secure.trusted_mods")
+		return nil
+	end
 	if not trusted_mods[modname] then
 		return nil
 	else

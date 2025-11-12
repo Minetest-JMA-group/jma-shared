@@ -1,19 +1,19 @@
+-- SPDX-License-Identifier: GPL-2.0-or-later
 block_msgs = {}
-if not algorithms.load_library() then
+local modname = core.get_current_modname()
+local modpath = core.get_modpath(modname)
+
+local function disable_backend()
 	block_msgs.is_chat_blocked = function() return false end
-	block_msgs.chat_send_all = function(sender_name, message) core.chat_send_all(message) end
-	return
+	block_msgs.chat_send_all = function(_, message) core.chat_send_all(message) end
 end
 
-local block_cmd = core.registered_chatcommands["block"]
-local cpp_func = block_cmd.func
-block_cmd.func = function(name, param)
-	if core.check_player_privs(param, "moderator") then
-		return false, "You cannot block a moderator"
-	end
-	return cpp_func(name, param)
+local backend_err = dofile(modpath.."/backend.lua")
+if backend_err then
+	core.log("error", "[block_msgs] Failed to initialize backend: "..tostring(backend_err))
+	disable_backend()
+	return
 end
-core.override_chatcommand("block", block_cmd)
 
 function block_msgs.chat_send_all(sender_name, message)
 	for _, player in ipairs(core.get_connected_players()) do

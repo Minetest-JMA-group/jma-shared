@@ -24,9 +24,10 @@ _Functions marked with (C++) depend on the C++ module of this mod. Functions mar
 - table `algorithms.get_xattr_storage()` (Linux) - Call during load time to get a table of "safe" xattr functions. They treat world_path/modname as root and allow operations only under that directory tree. Other than the difference in path interpretation, the API is the same as for their insecure counterparts.
 - number `algorithms.XATTR_CREATE` - constant used with setxattr(2)
 - number `algorithms.XATTR_REPLACE` - constant used with setxattr(2)
+- table `algorithms.errno` - _Exists only_ on Linux! A table mapping error names to error codes. E.g. algorithms.errno.EPERM = 1
 
 ### Insecure Environment API
 
 - string, string, integer `ie_env.execute(argv: table)` (C++) - Execute program argv[1] with arguments argv and return the strings captured on stdout and stderr in that order, and the program's exit code
-- err (string or nil) `ie_env.setxattr(path: string, name: string, value: string or nil, flags (optional): integer or nil)` (Linux) - wrapper around setxattr(2) if value is string. Remove extended attribute if value is nil (flags are ignored then).
-- value (string or nil), err (string or nil) `ie_env.getxattr(path: string, name: string)` (Linux) - wrapper around getxattr(2)
+- err (string or nil), errno (number or nil) `ie_env.setxattr(path: string, name: string, value: string or nil, flags (optional): integer or nil)` (Linux) - wrapper around setxattr(2) if value is string. Remove extended attribute if value is nil (flags are ignored then).
+- value (string or nil), err (string or nil), errno (number or nil) `ie_env.getxattr(path: string, name: string)` (Linux) - wrapper around getxattr(2)

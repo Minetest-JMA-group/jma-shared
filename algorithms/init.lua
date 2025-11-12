@@ -135,8 +135,8 @@ local insecure_env = {
 algorithms.execute = nil
 
 if algorithms.os ~= "Linux" then
-	insecure_env.setxattr = function(path, name, value, flags) return "[algorithms]: Function not implemented" end
-	insecure_env.getxattr = function(path, name) return nil, "[algorithms]: Function not implemented" end
+	insecure_env.setxattr = function(path, name, value, flags) return "[algorithms]: Function not implemented", 38 end
+	insecure_env.getxattr = function(path, name) return nil, "[algorithms]: Function not implemented", 38 end
 	algorithms.get_xattr_storage = function()
 		return {
 			setxattr = insecure_env.setxattr,
@@ -144,6 +144,8 @@ if algorithms.os ~= "Linux" then
 		}
 	end
 else
+	local MP = core.get_modpath("algorithms")
+	algorithms.errno = dofile(MP.."/linuxerrno.lua")
 	local ffi = algorithms.require("ffi")
 	ffi.cdef[[
 		int setxattr(const char *path, const char *name, const void *value, size_t size, int flags);
@@ -153,7 +155,7 @@ else
 		char *strerror(int errnum);
 	]]
 
-	-- Return: err (string or nil)
+	-- Return: err (string or nil), errno (number or nil)
 	insecure_env.setxattr = function(path, name, value, flags)
 		flags = flags or 0
 		local ok, ret
@@ -161,19 +163,19 @@ else
 			ok, ret = pcall(ffi.C.removexattr, path, name)
 		else
 			if type(value) ~= "string" then
-				return "Invalid argument"
+				return "Invalid argument", algorithms.errno.EINVAL
 			end
 			ok, ret = pcall(ffi.C.setxattr, path, name, value, #value, flags)
 		end
 		if not ok then
-			return ret
+			return ret, algorithms.errno.EINVAL
 		end
 		if ret ~= 0 then
 			local errnum = ffi.errno()
-			return ffi.string(ffi.C.strerror(errnum))
+			return ffi.string(ffi.C.strerror(errnum)), errnum
 		end
 	end
-	-- Return: value (string or nil), err (string or nil)
+	-- Return: value (string or nil), err (string or nil), errno (number or nil)
 	insecure_env.getxattr = function(path, name)
 		-- No need to free in Lua; it's freed automatically
 		local buf = ffi.new("uint8_t[?]", MAX_XATTR_SIZE)
@@ -181,12 +183,12 @@ else
 		local ok, ret = pcall(ffi.C.getxattr, path, name, buf, MAX_XATTR_SIZE)
 
 		if not ok then
-			return nil, ret
+			return nil, ret, algorithms.errno.EINVAL
 		end
 		if ret < 0 then
 			local errnum = ffi.errno()
 			local errstr = ffi.string(ffi.C.strerror(errnum))
-			return nil, errstr
+			return nil, errstr, errnum
 		end
 		return ffi.string(buf, ret)
 	end
@@ -223,14 +225,14 @@ else
 			setxattr = function(path, name, value, flags)
 				path = prefix..path
 				if not check_path(path, prefix) then
-					return "Invalid argument"
+					return "Invalid argument", algorithms.errno.EINVAL
 				end
 				return insecure_env.setxattr(path, name, value, flags)
 			end,
 			getxattr = function(path, name)
 				path = prefix..path
 				if not check_path(path, prefix) then
-					return nil, "Invalid argument"
+					return nil, "Invalid argument", algorithms.errno.EINVAL
 				end
 				return insecure_env.getxattr(path, name)
 			end

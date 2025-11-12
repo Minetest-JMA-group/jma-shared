@@ -4,7 +4,7 @@
 - `algorithms.verbose=true|false` - Whether to display errors during load time. Disable if you know what doesn't work and are fine with it, e.g. if you intentionally run algorithms without C++ part and/or without it being listed in secure.trusted_mods. Default: true
 
 ## API reference
-_Functions marked with (C++) depend on the C++ module of this mod. If you can access them, you will find a dummy implementation in their place to avoid crashes. The dummy implementation will just return failure on every call._
+_Functions marked with (C++) depend on the C++ module of this mod. Functions marked with (OSname) depend on that operating system. If you can access them, you will find a dummy implementation in their place to avoid crashes. The dummy implementation will just return failure on every call._
 
 - boolean `algorithms.load_library(libpath: string)` - load library at the path libpath relative to the mod folder, or (default) `lib<modname>.[so|dll]` in the calling mod folder. Return true if successful. Must be called during load time.
 - library `algorithms.require(libname: string)` - A wrapper around ie.require that handles nested require calls. Should be used instead of ie.require directly. Must be called during load time.
@@ -20,7 +20,13 @@ _Functions marked with (C++) depend on the C++ module of this mod. If you can ac
 - modstorage `algorithms.get_mod_storage()` - Return a modstorage userobject and saves it inside algorithms mod so that it doesn't have to be passed as parameter later. Must be called during mod load time.
 - table `algorithms.request_insecure_environment()` - Return a table with privileged functions if the mod is listed in secure.trusted_mods, otherwise return nil
 - string `algorithms.os` - A variable containing the operating system name
+- table `algorithms.bit` - Exported LuaJIT bit module for bitwise operations
+- table `algorithms.get_xattr_storage()` (Linux) - Call during load time to get a table of "safe" xattr functions. They treat world_path/modname as root and allow operations only under that directory tree. Other than the difference in path interpretation, the API is the same as for their insecure counterparts.
+- number `algorithms.XATTR_CREATE` - constant used with setxattr(2)
+- number `algorithms.XATTR_REPLACE` - constant used with setxattr(2)
 
 ### Insecure Environment API
 
 - string, string, integer `ie_env.execute(argv: table)` (C++) - Execute program argv[1] with arguments argv and return the strings captured on stdout and stderr in that order, and the program's exit code
+- err (string or nil) `ie_env.setxattr(path: string, name: string, value: string or nil, flags (optional): integer or nil)` (Linux) - wrapper around setxattr(2) if value is string. Remove extended attribute if value is nil (flags are ignored then).
+- value (string or nil), err (string or nil) `ie_env.getxattr(path: string, name: string)` (Linux) - wrapper around getxattr(2)

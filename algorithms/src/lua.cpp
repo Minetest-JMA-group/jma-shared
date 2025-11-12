@@ -32,7 +32,7 @@ static char **build_argv(lua_State *L, int table_index)
 	return argv;
 }
 
-void read_into_string(int fd, std::string *str)
+static void read_into_string(int fd, std::string *str)
 {
 	char buf[1024];
 	ssize_t ret;
@@ -45,14 +45,14 @@ void read_into_string(int fd, std::string *str)
 	close(fd);
 }
 
-// Return stdout,stderr,exit_code
+// Return: stdout,stderr,exit_code
 // Arguments: argv table
 int execute(lua_State *L)
 {
 	char **argv;
 	if (lua_gettop(L) == 0 || !lua_istable(L, 1) || !(argv = build_argv(L, 1))) {
 		lua_pushstring(L, "");
-		lua_pushstring(L, "Invalid call arguments");
+		lua_pushliteral(L, "Invalid call arguments");
 		lua_pushinteger(L, EINVAL);
 		return 3;
 	}
@@ -61,7 +61,7 @@ int execute(lua_State *L)
 	pid_t pid;
 	if (pipe(stdout_pipefd) || pipe(stderr_pipefd) || (pid = fork()) < 0) {
 		int saved_errno = errno;
-		lua_pushstring(L, "");
+		lua_pushliteral(L, "");
 		lua_pushstring(L, strerror(saved_errno));
 		lua_pushinteger(L, saved_errno);
 		delete[] argv;

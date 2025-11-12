@@ -212,6 +212,7 @@ else
 		path = normalize(path)
 		return path:sub(1, #prefix) == prefix
 	end
+	world_path = normalize(world_path)
 
 	-- Unlike insecure functions, these ones allow only path under world_dir/modname and treat paths as relative to that.
 	algorithms.get_xattr_storage = function()

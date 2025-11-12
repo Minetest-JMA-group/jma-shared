@@ -64,6 +64,7 @@ int execute(lua_State *L)
 		lua_pushstring(L, "");
 		lua_pushstring(L, strerror(saved_errno));
 		lua_pushinteger(L, saved_errno);
+		delete[] argv;
 		return 3;
 	}
 	if (pid == 0) {
@@ -103,6 +104,7 @@ int execute(lua_State *L)
 	lua_pushstring(L, stdout_str.c_str());
 	lua_pushstring(L, stderr_str.c_str());
 	lua_pushinteger(L, info.si_status);
+	delete[] argv;
 	return 3;
 }
 

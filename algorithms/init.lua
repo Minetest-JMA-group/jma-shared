@@ -53,7 +53,7 @@ end
 local jit = algorithms.require("jit")
 if jit then
 	algorithms.os = jit.os
-elseif verbose
+elseif verbose then
 	core.log("warning", "[algorithms]: Cannot determine the current platform")
 end
 

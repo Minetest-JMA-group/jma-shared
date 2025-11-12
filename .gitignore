@@ -8,3 +8,4 @@
 Makefile
 Makefile.*
 build_qt/
+.qtc_clangd/

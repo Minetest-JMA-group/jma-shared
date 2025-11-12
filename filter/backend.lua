@@ -75,11 +75,15 @@ local function migrate_storage()
 	local raw_blacklist = storage:get_string(BLACKLIST_KEY)
 	local decoded = {}
 	if raw_blacklist ~= "" then
-		local ok = core.from_json(raw_blacklist)
-		if type(ok) == "table" then
-			decoded = sanitize_patterns(ok)
+		local parsed, err = core.parse_json(raw_blacklist, nil, true)
+		if type(parsed) == "table" then
+			decoded = sanitize_patterns(parsed)
 		else
-			log("warning", "Legacy blacklist JSON failed to parse. Falling back to file.")
+			local msg = "Failed to parse legacy blacklist JSON"
+			if type(err) == "string" then
+				msg = msg..": "..err
+			end
+			log("warning", msg)
 		end
 	end
 	if #decoded == 0 then

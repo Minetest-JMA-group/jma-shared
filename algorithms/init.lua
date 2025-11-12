@@ -3,7 +3,10 @@
 
 algorithms = {}
 local utf8_simple = utf8_simple
+
+-- Dummy implementations of C++ functions
 algorithms.execute = function(argv_table) return "","[algorithms]: Function not implemented", 38 end
+
 local modstorage = {}
 local already_loaded = {}
 local c_mods = {}
@@ -13,6 +16,13 @@ local settings = core.settings
 -- For messages on startup. Set to false if you're aware what doesn't work and are fine with it.
 local verbose = settings:get_bool("algorithms.verbose", true)
 local list = settings:get("secure.c_mods") or ""
+local world_path = core.get_worldpath()
+-- Attempt to avoid tampering with function used to guard insecure env
+local get_current_modname = core.get_current_modname
+algorithms.XATTR_CREATE = 1
+algorithms.XATTR_REPLACE = 2
+-- Btrfs default nodesize
+local MAX_XATTR_SIZE = 16*1024
 
 for word in list:gmatch("[^,%s]+") do
 	c_mods[word] = true
@@ -29,7 +39,7 @@ list = nil
 -- Use this instead of ie.require directly
 -- Require only secure.c_mods because in practice it's a shared object load like load_library
 algorithms.require = function(libname)
-	local modname = core.get_current_modname()
+	local modname = get_current_modname()
 	if not modname then
 		error("algorithms.require can only be called during load time")
 	end
@@ -59,7 +69,7 @@ end
 
 -- Load the shared library lib<modname>.so in the mod folder of the calling mod, or on path libpath relative to the mod folder
 algorithms.load_library = function(libpath)
-	local modname = core.get_current_modname()
+	local modname = get_current_modname()
 	if not modname then
 		core.log("warning", "Cannot load library. Some mod called algorithms.load_library outside load time")
 		return false
@@ -114,17 +124,127 @@ if not verbose then
 	algorithms.load_library()
 	core.log = old_core_log
 elseif not algorithms.load_library() then
-	core.log("warning", "[algorithms]: algorithms insecure_env.execute will not work")
+	core.log("warning", "[algorithms]: C++ functions will not work")
 end
 
 -- Move privileged functions to a local guarded table
 -- We can't do this immediately because the C module can only store execute in a global table
 local insecure_env = {
-	execute = algorithms.execute
+	execute = algorithms.execute,
 }
 algorithms.execute = nil
+
+if algorithms.os ~= "Linux" then
+	insecure_env.setxattr = function(path, name, value, flags) return "[algorithms]: Function not implemented" end
+	insecure_env.getxattr = function(path, name) return nil, "[algorithms]: Function not implemented" end
+	algorithms.get_xattr_storage = function()
+		return {
+			setxattr = insecure_env.setxattr,
+			getxattr = insecure_env.getxattr
+		}
+	end
+else
+	local ffi = algorithms.require("ffi")
+	ffi.cdef[[
+		int setxattr(const char *path, const char *name, const void *value, size_t size, int flags);
+		int removexattr(const char *path, const char *name);
+		typedef long ssize_t;
+		ssize_t getxattr(const char *path, const char *name, void *value, size_t size);
+		char *strerror(int errnum);
+	]]
+
+	-- Return: err (string or nil)
+	insecure_env.setxattr = function(path, name, value, flags)
+		flags = flags or 0
+		local ok, ret
+		if not value then
+			ok, ret = pcall(ffi.C.removexattr, path, name)
+		else
+			if type(value) ~= "string" then
+				return "Invalid argument"
+			end
+			ok, ret = pcall(ffi.C.setxattr, path, name, value, #value, flags)
+		end
+		if not ok then
+			return ret
+		end
+		if ret ~= 0 then
+			local errnum = ffi.errno()
+			return ffi.string(ffi.C.strerror(errnum))
+		end
+	end
+	-- Return: value (string or nil), err (string or nil)
+	insecure_env.getxattr = function(path, name)
+		-- No need to free in Lua; it's freed automatically
+		local buf = ffi.new("uint8_t[?]", MAX_XATTR_SIZE)
+		-- LuaJIT checks arguments
+		local ok, ret = pcall(ffi.C.getxattr, path, name, buf, MAX_XATTR_SIZE)
+
+		if not ok then
+			return nil, ret
+		end
+		if ret < 0 then
+			local errnum = ffi.errno()
+			local errstr = ffi.string(ffi.C.strerror(errnum))
+			return nil, errstr
+		end
+		return ffi.string(buf, ret)
+	end
+	
+	local function normalize(path)
+		local parts = {}
+		for part in path:gmatch("[^/]+") do
+			if part == ".." then
+				table.remove(parts)
+			elseif part ~= "." and part ~= "" then
+				table.insert(parts, part)
+			end
+		end
+		local prefix = path:sub(1,1) == "/" and "/" or ""
+		return prefix .. table.concat(parts, "/")
+	end
+	local function check_path(path, prefix)
+		if type(path) ~= "string" then
+			return false
+		end
+		path = normalize(path)
+		return path:sub(1, #prefix) == prefix
+	end
+
+	-- Unlike insecure functions, these ones allow only path under world_dir/modname and treat paths as relative to that.
+	algorithms.get_xattr_storage = function()
+		local modname = get_current_modname()
+		if not modname then
+			return nil
+		end
+		local prefix = world_path.."/"..modname.."/"
+		core.mkdir(prefix)
+		return {
+			setxattr = function(path, name, value, flags)
+				path = prefix..path
+				if not check_path(path, prefix) then
+					return "Invalid argument"
+				end
+				return insecure_env.setxattr(path, name, value, flags)
+			end,
+			getxattr = function(path, name)
+				path = prefix..path
+				if not check_path(path, prefix) then
+					return nil, "Invalid argument"
+				end
+				return insecure_env.getxattr(path, name)
+			end
+		}
+	end
+end
+
+algorithms.bit = algorithms.require("bit")
+if not algorithms.bit and verbose then
+	core.log("warning", "[algorithms]: bit module not available")
+end
+
 algorithms.request_insecure_environment = function()
-	local modname = core.get_current_modname()
+	local modname = get_current_modname()
 	if not ie then
 		core.log("warning", "["..modname.."]: requested insecure_env from algorithms. algorithms cannot provide it because it is not in secure.trusted_mods")
 		return nil
@@ -151,7 +271,7 @@ end
 
 -- Return modstorage object, but also save it in modstorage[modname] for later use
 algorithms.get_mod_storage = function()
-	local modname = core.get_current_modname()
+	local modname = get_current_modname()
 	if not modname then
 		error("algorithms.get_mod_storage can only be called during load time")
 	end
@@ -162,7 +282,7 @@ end
 -- Deserialize and return the object stored under the key `key` in either `s` - the modstorage passed as an argument, or modstorage[modname]
 -- If there is no object referenced under the key `key` return `default`
 algorithms.getconfig = function(key, default, s)
-	local modname = core.get_current_modname()
+	local modname = get_current_modname()
 	local storage = s or modstorage[modname]
 	if type(key) ~= "string" or not storage then
 		return default

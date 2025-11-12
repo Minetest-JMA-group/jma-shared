@@ -38,8 +38,11 @@ static void read_into_string(int fd, std::string *str)
 	ssize_t ret;
 
 	while ((ret = read(fd, buf, 1024))) {
-		if (ret < 0)
-			break;
+		if (ret < 0) {
+			if (errno != EINTR)
+				break;
+			continue;
+		}
 		str->append(buf, ret);
 	}
 	close(fd);
@@ -84,8 +87,11 @@ int execute(lua_State *L)
 	std::thread t1(read_into_string, stdout_pipefd[0], &stdout_str);
 	read_into_string(stderr_pipefd[0], &stderr_str);
 	siginfo_t info;
+again:
 	int ret = waitid(P_PID, pid, &info, WEXITED);
 	if (ret < 0) {
+		if (errno == EINTR)
+			goto again;
 		info.si_status = errno;
 		stderr_str += "[algorithms] waitid: ";
 		stderr_str += strerror(info.si_status);

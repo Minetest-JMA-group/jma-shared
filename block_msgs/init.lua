@@ -64,7 +64,7 @@ local function make_checker(old_func)
 		local receiver_name = iter()
 		if block_msgs.is_chat_blocked(sender_name, receiver_name) then
 			core.chat_send_player(sender_name, "You cannot interact with "..receiver_name.."\nThey have blocked you.")
-			return false
+			return true
 		end
 
 		return old_func(sender_name, param)

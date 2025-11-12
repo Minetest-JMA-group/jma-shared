@@ -144,7 +144,7 @@ if algorithms.os ~= "Linux" then
 		}
 	end
 else
-	local MP = core.get_modpath("algorithms")
+	local MP = core.get_modpath(get_current_modname())
 	algorithms.errno = dofile(MP.."/linuxerrno.lua")
 	local ffi = algorithms.require("ffi")
 	ffi.cdef[[

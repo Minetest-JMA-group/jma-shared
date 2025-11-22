@@ -3,6 +3,10 @@ filter = { registered_on_violations = {}, phrase = "Filter mod has detected the 
 local violations = {}
 local last_kicked_time = os.time()
 
+if xban == nil then
+	core.log("warning", "[filter] xban is not available. Won't be able to mute players")
+end
+
 -- Define violation types and their messages
 local violation_types = {
 	blacklisted = {
@@ -11,8 +15,8 @@ local violation_types = {
 		kick_msg = "Please mind your language!",
 		log_msg = "VIOLATION (inappropriate content)",
 		formspec_title = "Please watch your language!",
-		formspec_image = "filter_warning.png"
-	}
+		formspec_image = "filter_warning.png",
+	},
 }
 
 if not core.registered_privileges["filtering"] then
@@ -55,18 +59,29 @@ function filter.mute(name, duration, violation_type, message)
 	core.chat_send_all(name .. " has been temporarily muted for " .. v_type.name .. ".")
 	core.chat_send_player(name, v_type.chat_msg)
 
-	local reason = string.format("%s\"%s\" using blacklist regex: \"%s\"", filter.phrase, message, filter.get_lastreg())
+	local reason = string.format('%s"%s" using blacklist regex: "%s"', filter.phrase, message, filter.get_lastreg())
 
-	xban.mute_player(name, "filter", os.time() + (duration*60), reason)
+	if xban == nil then
+		core.log("warning", "[filter] xban not available so not muting the player")
+	else
+		xban.mute_player(name, "filter", os.time() + (duration * 60), reason)
+	end
 end
-
 function filter.show_warning_formspec(name, violation_type)
 	local v_type = violation_types[violation_type] or violation_types.blacklisted
 
-	local formspec = "size[7,3]bgcolor[#080808BB;true]" .. default.gui_bg .. default.gui_bg_img ..
-		"image[0,0;2,2;" .. v_type.formspec_image .. "]" ..
-		"label[2.3,0.5;" .. v_type.formspec_title .. "]" ..
-		"label[2.3,1.1;" .. v_type.chat_msg .. "]"
+	local formspec = "size[7,3]bgcolor[#080808BB;true]"
+		.. default.gui_bg
+		.. default.gui_bg_img
+		.. "image[0,0;2,2;"
+		.. v_type.formspec_image
+		.. "]"
+		.. "label[2.3,0.5;"
+		.. v_type.formspec_title
+		.. "]"
+		.. "label[2.3,1.1;"
+		.. v_type.chat_msg
+		.. "]"
 
 	if core.global_exists("rules") and rules.show then
 		formspec = formspec .. [[
@@ -88,7 +103,11 @@ function filter.on_violation(name, message, violation_type)
 	local resolution
 	if filter.get_mode() == 0 then
 		if discord and discord.enabled then
-			discord.send_action_report("**filter**: [PERMISSIVE] Message \"%s\" matched using blacklist regex: \"%s\"", message, filter.get_lastreg())
+			discord.send_action_report(
+				'**filter**: [PERMISSIVE] Message "%s" matched using blacklist regex: "%s"',
+				message,
+				filter.get_lastreg()
+			)
 		end
 		resolution = "permissive"
 	end
@@ -113,9 +132,9 @@ function filter.on_violation(name, message, violation_type)
 			resolution = "kicked"
 			core.kick_player(name, v_type.kick_msg)
 			if discord and discord.enabled and (os.time() - last_kicked_time) > discordCooldown then
-				local format_string = "***filter***: Kicked %s for %s \"%s\""
+				local format_string = '***filter***: Kicked %s for %s "%s"'
 				if violation_type == "blacklisted" then
-					format_string = "***filter***: Kicked %s for %s \"%s\" caught with blacklist regex \"%s\""
+					format_string = '***filter***: Kicked %s for %s "%s" caught with blacklist regex "%s"'
 					discord.send_action_report(format_string, name, v_type.name, message, filter.get_lastreg())
 				else
 					discord.send_action_report(format_string, name, v_type.name, message)
@@ -148,7 +167,6 @@ table.insert(core.registered_on_chat_messages, 2, function(name, message)
 		end
 	end
 end)
-
 
 local function make_checker(old_func)
 	return function(name, param)
@@ -193,9 +211,9 @@ local function step()
 			violations[name] = nil
 		end
 	end
-	core.after(10*60, step)
+	core.after(10 * 60, step)
 end
-core.after(10*60, step)
+core.after(10 * 60, step)
 
 if core.global_exists("rules") and rules.show then
 	core.register_on_player_receive_fields(function(player, formname, fields)

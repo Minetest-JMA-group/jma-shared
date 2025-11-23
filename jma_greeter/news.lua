@@ -14,14 +14,18 @@ if core.global_exists("ctf_settings") then
 end
 
 core.register_on_mods_loaded(function()
- 	local content = jma_greeter.load_file(filename)
+	local content = jma_greeter.load_file(filename)
 	if content then
 		news_text = core.formspec_escape(content)
-		core.log("action", "[jma_greeter]: news: " .. filename ..  " loaded")
+		core.log("action", "[jma_greeter]: news: " .. filename .. " loaded")
 	end
 end)
 
 function jma_greeter.show_news(pname, force)
+	local privs = core.get_player_privs(pname)
+	if privs["server"] == true then
+		return
+	end
 	local is_news_disabled
 	if core.global_exists("ctf_settings") then
 		is_news_disabled = ctf_settings.get(core.get_player_by_name(pname), "jma_greeter:news_disable")
@@ -34,19 +38,17 @@ function jma_greeter.show_news(pname, force)
 	end
 
 	local fs = jma_greeter.get_base_formspec({
-		title  = "Server News",
-		size = {x = 11, y = 11},
+		title = "Server News",
+		size = { x = 11, y = 11 },
 		bar_color = "#2d42fc",
-	})
-	.. "box[0,0.7;14,9.1;#00000055]"
-	.. "hypertext[0.1,0.8;10.8,8.9;rules;" .. core.formspec_escape(news_text) .. "]"
-	.. "button_exit[3.75,10;3.5,0.8;;Okay]"
-	.. "checkbox[6,0.35;disable_news;Don't show me this again;" .. is_news_disabled .. "]"
+	}) .. "box[0,0.7;14,9.1;#00000055]" .. "hypertext[0.1,0.8;10.8,8.9;rules;" .. core.formspec_escape(news_text) .. "]" .. "button_exit[3.75,10;3.5,0.8;;Okay]" .. "checkbox[6,0.35;disable_news;Don't show me this again;" .. is_news_disabled .. "]"
 	core.show_formspec(pname, "jma_greeter:news", fs)
 end
 
 core.register_on_player_receive_fields(function(player, form, fields)
-	if form ~= "jma_greeter:news" then return end
+	if form ~= "jma_greeter:news" then
+		return
+	end
 
 	local pname = player:get_player_name()
 
@@ -57,7 +59,10 @@ core.register_on_player_receive_fields(function(player, form, fields)
 			storage:set_int(pname .. ":news_disable", fields.disable_news == "true" and 1 or 0)
 		end
 		if fields.disable_news == "true" then
-			core.chat_send_player(pname, "The news window will no longer be displayed. Use /news to check the news in the future.")
+			core.chat_send_player(
+				pname,
+				"The news window will no longer be displayed. Use /news to check the news in the future."
+			)
 		end
 	end
 
@@ -70,12 +75,12 @@ core.register_chatcommand("news", {
 	func = function(name)
 		jma_greeter.show_news(name, true)
 		return true, "News shown."
-	end
+	end,
 })
 
 core.register_chatcommand("news_editor", {
 	description = "Server rules editor",
-	privs = {server = true},
+	privs = { server = true },
 	func = function(pname)
 		local actions = {
 			on_save = function(fields)
@@ -89,9 +94,9 @@ core.register_chatcommand("news_editor", {
 			on_cancel = function()
 				core.chat_send_player(pname, "Cancelled")
 				jma_greeter.editor_context[pname] = nil
-			end
+			end,
 		}
 		jma_greeter.show_editor(pname, jma_greeter.load_file(filename) or "", "News", actions)
 		return true, "News editor shown"
-	end
+	end,
 })

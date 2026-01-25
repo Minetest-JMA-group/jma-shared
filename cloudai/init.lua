@@ -65,9 +65,9 @@ local function handle_response(context, auto_call)
 
 	-- Now we have a proper response, let's parse it
 	local usage = parsed.usage or {}
-	context._input_tokens = context._input_tokens + (usage.prompt_cache_miss_tokens or 0)
-	context._cached_tokens = context._cached_tokens + (usage.prompt_cache_hit_tokens or 0)
-	context._output_tokens = context._output_tokens + (usage.completion_tokens or 0)
+	context.input_tokens = context.input_tokens + (usage.prompt_cache_miss_tokens or 0)
+	context.cached_tokens = context.cached_tokens + (usage.prompt_cache_hit_tokens or 0)
+	context.output_tokens = context.output_tokens + (usage.completion_tokens or 0)
 
 	if not parsed.choices or not parsed.choices[1] or not parsed.choices[1].message
 	   or not parsed.choices[1].message.role then
@@ -123,9 +123,9 @@ cloudai.get_context = function()
 		return nil, "cloudai is not properly configured to work. Check minetest.conf"
 	end
 	return {
-		_input_tokens = 0,
-		_output_tokens = 0,
-		_cached_tokens = 0,
+		input_tokens = 0,
+		output_tokens = 0,
+		cached_tokens = 0,
 		_system_prompt = "You are an AI assitant",
 		_history = {},
 		_tools = {},	-- The table of ["tool_name"] = tool_definition
@@ -196,6 +196,16 @@ cloudai.get_context = function()
 				end
 			end
 			table.insert(self._formatted_tools, tool)
+			return true
+		end,
+		set_system_prompt = function(self, prompt)
+			if #self._history ~= 0 then
+				return false, "You cannot change the system prompt once the conversation has already begun"
+			end
+			if type(prompt) ~= "string" then
+				return false, "System prompt must be a string"
+			end
+			self._system_prompt = prompt
 			return true
 		end
 	}

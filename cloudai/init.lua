@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- Copyright (c) 2026 Marko Petrović
+
 local working = true
 local http_api = core.request_http_api()
 if not http_api then

@@ -1,11 +1,20 @@
+local working = true
 local http_api = core.request_http_api()
-assert(http_api, "cloudai mod requires http_api. Add to secure.http_mods")
+if not http_api then
+	core.log("cloudai mod requires http_api. Add to secure.http_mods")
+	working = false
+end
 local url = core.settings:get("cloudai.url") or "https://api.deepseek.com/beta/chat/completions"
 local model = core.settings:get("cloudai.model") or "deepseek-chat"
 local timeout = core.settings:get("cloudai.timeout") or 10
 local api_key = core.settings:get("cloudai.api_key")
-assert(api_key, "cloudai mod requires api_key. Add cloudai.api_key")
-local auth_header = "Authorization: Bearer "..api_key
+local auth_header
+if not api_key then
+	core.log("cloudai mod requires api_key. Add cloudai.api_key")
+	working = false
+else
+	auth_header = "Authorization: Bearer "..api_key
+end
 cloudai = {}
 
 -- Callback should add response to history, but we add tool calls
@@ -109,8 +118,10 @@ local function handle_response(context, auto_call)
 	end
 end
 
--- Callback gets history and AI response (nil in case of error, in which case third argument is the error string)
 cloudai.get_context = function()
+	if not working then
+		return nil, "cloudai is not properly configured to work. Check minetest.conf"
+	end
 	return {
 		_input_tokens = 0,
 		_output_tokens = 0,
@@ -144,6 +155,7 @@ cloudai.get_context = function()
 			core.after(0, handle_response, self, true)
 			return true
 		end,
+		-- Callback gets history and AI response (nil in case of error, in which case third argument is the error string)
 		call = function(self, message, callback)
 			if self._handle then
 				local handled, err = handle_response(self)

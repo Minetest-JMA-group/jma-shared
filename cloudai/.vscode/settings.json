@@ -1,6 +1,7 @@
 {
     "Lua.diagnostics.globals": [
         "core",
-        "cloudai"
+        "cloudai",
+        "dump"
     ]
 }

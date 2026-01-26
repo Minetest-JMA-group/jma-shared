@@ -214,6 +214,38 @@ cloudai.get_context = function()
 	}
 end
 
+core.register_privilege("cloudai", "Modify cloudai parameters")
+core.register_chatcommand("cloudai", {
+	description = "Set parameters for cloudai API",
+	params = "<subcommand> <argument>",
+	privs = { cloudai = true },
+	func = function(name, params)
+		local iter = params:gmatch("%S+")
+		local cmd = iter()
+		if not cmd then
+			return false, "Invalid usage. Check /cloudai help"
+		end
+		if cmd == "help" then
+			return true, [[Usage:
+/cloudai help: Print this help message
+/cloudai timeout <new_value>: If the third argument is present, set timeout to <new_value> seconds, otherwise print the current value]]
+		end
+		if cmd == "timeout" then
+			local new_value = iter()
+			if not new_value then
+				return true, "Current timeout: "..tostring(timeout)
+			end
+			local new_timeout = tonumber(new_value)
+			if not new_timeout or new_timeout <= 0 or new_timeout ~= math.ceil(new_timeout) then
+				return false, "New timeout must be a whole number greater than zero"
+			end
+			timeout = new_timeout
+			return true, "New timeout: "..tostring(timeout)
+		end
+		return false, "Invalid usage. Check /cloudai help"
+	end
+})
+
 -- Below is a simple example of how this could be used:
 --[[
 test = {}

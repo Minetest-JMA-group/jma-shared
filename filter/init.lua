@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- Copyright (c) 2026 Marko Petrović
+
 local discordCooldown = 0
 filter = { registered_on_violations = {}, phrase = "Filter mod has detected the player writing a bad message: " }
 local violations = {}

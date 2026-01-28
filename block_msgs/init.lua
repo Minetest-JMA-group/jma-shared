@@ -1,4 +1,6 @@
--- SPDX-License-Identifier: GPL-2.0-or-later
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- Copyright (c) 2026 Marko Petrović
+
 block_msgs = {}
 local modname = core.get_current_modname()
 local modpath = core.get_modpath(modname)

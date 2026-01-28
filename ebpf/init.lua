@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- Copyright (c) 2026 Marko Petrović
+
 local ie = algorithms.request_insecure_environment()
 if not ie then
 	core.log("error", "The ebpf mod cannot work without being listed in secure.trusted_mods")

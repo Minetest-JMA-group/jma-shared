@@ -1,7 +1,25 @@
 {
-    "Lua.diagnostics.globals": [
-        "core",
-        "cloudai",
-        "dump"
-    ]
+	"Lua.runtime.version": "LuaJIT",
+	"Lua.diagnostics.globals": [
+		"core",
+		"cloudai",
+		"dump",
+		"xban",
+		"discord",
+		"ctf_settings",
+		"sfinv",
+		"ctf_modebase",
+		"vector",
+		"VoxelArea",
+		"default",
+		"email",
+		"rules",
+		"ctf_api",
+		"ItemStack",
+		"regex"
+	],
+	"Lua.diagnostics.disable": [
+		"redundant-parameter",
+		"duplicate-set-field"
+	]
 }

@@ -8,6 +8,13 @@ local storage = core.get_mod_storage()
 local VERSION_KEY = "version"
 local VERSION = 2
 
+local discordCooldown = 0
+local violations = {}
+local last_kicked_time = os.time()
+
+local mode = storage:contains("mode") and storage:get_int("mode") or 1
+filter = { registered_on_violations = {}, phrase = "Filter mod has detected the player writing a bad message: " }
+
 -- Store version if not present (fresh install)
 if not storage:contains(VERSION_KEY) then
 	storage:set_int(VERSION_KEY, VERSION)
@@ -35,13 +42,6 @@ if not blacklist_ctx then
 
 	return
 end
-
-local discordCooldown = 0
-filter = { registered_on_violations = {}, phrase = "Filter mod has detected the player writing a bad message: " }
-local violations = {}
-local last_kicked_time = os.time()
-
-local mode = storage:contains("mode") and storage:get_int("mode") or 1
 
 -- Define violation types and their messages
 local violation_types = {

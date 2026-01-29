@@ -1,14 +1,47 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
+local modname = core.get_current_modname()
+local modpath = core.get_modpath(modname)
+local storage = core.get_mod_storage()
+
+local VERSION_KEY = "version"
+local VERSION = 2
+
+-- Store version if not present (fresh install)
+if not storage:contains(VERSION_KEY) then
+	storage:set_int(VERSION_KEY, VERSION)
+end
+
+-- Create regex context for blacklist management
+local blacklist_ctx = regex.create({
+	storage = storage,
+	path = modpath .. "/blacklist",
+	list_name = "blacklist",
+	storage_key = "blacklist",
+	help_prefix = "The filter works by matching regex patterns from a blacklist with each message.\nIf a match is found, the message is blocked.\n\nList of possible commands:\ngetenforce: Get the current filter mode\nsetenforce <mode>: Set new filter mode\n",
+	logger = function(level, message)
+		core.log(level, "[filter] " .. message)
+	end
+})
+
+-- If regex context creation failed
+if not blacklist_ctx then
+	core.log("error", "[filter] Failed to create regex context")
+
+	function filter.check_message()
+		return true
+	end
+
+	return
+end
+
 local discordCooldown = 0
 filter = { registered_on_violations = {}, phrase = "Filter mod has detected the player writing a bad message: " }
 local violations = {}
 local last_kicked_time = os.time()
 
-if xban == nil then
-	core.log("warning", "[filter] xban is not available. Won't be able to mute players")
-end
+local mode = storage:contains("mode") and storage:get_int("mode") or 1
 
 -- Define violation types and their messages
 local violation_types = {
@@ -26,35 +59,41 @@ if not core.registered_privileges["filtering"] then
 	core.register_privilege("filtering", "Filter manager")
 end
 
-local modpath = core.get_modpath(core.get_current_modname())
-local backend_ok, backend_err = pcall(dofile, modpath .. "/backend.lua")
-if not backend_ok then
-	core.log("error", "[filter] Failed to load backend: " .. backend_err)
-
-	function filter.check_message()
-		return true
-	end
-
-	return
+local function log(level, message)
+	core.log(level, "[filter] " .. message)
 end
+
+-- ==================== Filter Core Functions ====================
 
 function filter.register_on_violation(func)
 	table.insert(filter.registered_on_violations, func)
 end
 
--- Return true if message is fine. false if it should be blocked.
--- Also returns the violation type if blocked
 function filter.check_message(message)
 	if type(message) ~= "string" then
 		return false, "invalid_type"
 	end
 
-	if filter.is_blacklisted(message) then
+	if blacklist_ctx:match(message) then
 		return false, "blacklisted"
 	end
 
 	return true
 end
+
+function filter.is_blacklisted(message)
+	return blacklist_ctx:match(message)
+end
+
+function filter.get_lastreg()
+	return blacklist_ctx:get_last_match() or ""
+end
+
+function filter.get_mode()
+	return mode
+end
+
+-- ==================== Violation Handling ====================
 
 function filter.mute(name, duration, violation_type, message)
 	local v_type = violation_types[violation_type] or violation_types.blacklisted
@@ -65,11 +104,12 @@ function filter.mute(name, duration, violation_type, message)
 	local reason = string.format('%s"%s" using blacklist regex: "%s"', filter.phrase, message, filter.get_lastreg())
 
 	if xban == nil then
-		core.log("warning", "[filter] xban not available so not muting the player")
+		log("warning", "xban not available so not muting the player")
 	else
 		xban.mute_player(name, "filter", os.time() + (duration * 60), reason)
 	end
 end
+
 function filter.show_warning_formspec(name, violation_type)
 	local v_type = violation_types[violation_type] or violation_types.blacklisted
 
@@ -148,15 +188,11 @@ function filter.on_violation(name, message, violation_type)
 	end
 
 	local logmsg = "[filter] " .. v_type.log_msg .. " (" .. resolution .. "): <" .. name .. "> " .. message
-	core.log("action", logmsg)
-
-	local email_to = core.settings:get("filter.email_to")
-	if email_to and core.global_exists("email") then
-		email.send_mail(name, email_to, logmsg)
-	end
+	log("action", logmsg)
 end
 
--- Insert this check after xban checks whether the player is muted
+-- ==================== Chat Message Handling ====================
+
 table.insert(core.registered_on_chat_messages, 2, function(name, message)
 	if message:sub(1, 1) == "/" then
 		return
@@ -186,14 +222,14 @@ local function make_checker(old_func)
 end
 
 for name, def in pairs(core.registered_chatcommands) do
-	if (def.privs and def.privs.shout) or xban.cmd_list[name] then
+	if (def.privs and def.privs.shout) or (xban and xban.cmd_list and xban.cmd_list[name]) then
 		def.func = make_checker(def.func)
 	end
 end
 
 local old_register_chatcommand = core.register_chatcommand
 function core.register_chatcommand(name, def)
-	if (def.privs and def.privs.shout) or xban.cmd_list[name] then
+	if (def.privs and def.privs.shout) or (xban and xban.cmd_list and xban.cmd_list[name]) then
 		def.func = make_checker(def.func)
 	end
 	return old_register_chatcommand(name, def)
@@ -201,11 +237,85 @@ end
 
 local old_override_chatcommand = core.override_chatcommand
 function core.override_chatcommand(name, def)
-	if (def.privs and def.privs.shout) or xban.cmd_list[name] then
+	if (def.privs and def.privs.shout) or (xban and xban.cmd_list and xban.cmd_list[name]) then
 		def.func = make_checker(def.func)
 	end
 	return old_override_chatcommand(name, def)
 end
+
+-- ==================== Console Command Handler ====================
+
+local function set_mode(new_mode)
+	if new_mode ~= 0 then
+		new_mode = 1
+	end
+	if mode == new_mode then
+		return false, "Filter mode already set to " .. (mode == 1 and "Enforcing" or "Permissive")
+	end
+	mode = new_mode
+	storage:set_int("mode", mode)
+	return true
+end
+
+local function filter_console(name, param)
+	param = param or ""
+	local params = {}
+	for word in param:gmatch("%S+") do
+		table.insert(params, word)
+	end
+
+	if #params == 0 then
+		return false, "Usage: /filter <command> <args>\nCheck /filter help"
+	end
+
+	local cmd = params[1]
+
+	-- Handle filter-specific commands
+	if cmd == "getenforce" then
+		return true, mode == 1 and "Enforcing" or "Permissive"
+
+	elseif cmd == "setenforce" then
+		if params[2] then
+			local value = params[2]:lower()
+			if value == "1" or value == "enforcing" then
+				local changed, msg = set_mode(1)
+				if changed then
+					log("action", name .. " set mode to Enforcing")
+					return true, "New filter mode: Enforcing"
+				end
+				return false, msg
+			elseif value == "0" or value == "permissive" then
+				local changed, msg = set_mode(0)
+				if changed then
+					log("action", name .. " set mode to Permissive")
+					return true, "New filter mode: Permissive"
+				end
+				return false, msg
+			end
+		end
+		return false, "Usage: /filter setenforce [ Enforcing | Permissive | 1 | 0 ]"
+
+	else
+		-- Delegate all other commands to the regex context
+		local success, message = blacklist_ctx:handle_command(name, param)
+
+		-- If the regex context doesn't recognize the command
+		if not success and message == nil then
+			return false, "Unknown command. Check /filter help"
+		end
+
+		return success, message
+	end
+end
+
+core.register_chatcommand("filter", {
+	description = "filter management console",
+	params = "<command> <args>",
+	privs = { filtering = true },
+	func = filter_console,
+})
+
+-- ==================== Cleanup and UI Integration ====================
 
 local function step()
 	for name, v in pairs(violations) do
@@ -225,3 +335,6 @@ if core.global_exists("rules") and rules.show then
 		end
 	end)
 end
+
+-- Log startup
+log("action", "Filter mod initialized with " .. tostring(#blacklist_ctx:get_patterns()) .. " blacklist entries")

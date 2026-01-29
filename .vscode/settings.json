@@ -19,7 +19,9 @@
 		"regex",
 		"filter",
 		"algorithms",
-		"chat_lib"
+		"chat_lib",
+		"ai_filter",
+		"essentials"
 	],
 	"Lua.diagnostics.disable": [
 		"redundant-parameter",

@@ -174,6 +174,15 @@ local function create_ai_context(player_name, message, pattern)
 	context:add_tool({
 		name = "get_history",
 		func = function(args)
+			-- Parse manually and remove strict since DeepSeek API has some known bug currently
+			-- It makes it return invalid JSON in strict mode here
+			if type(args) == "string" then
+				local first_number = args:match("-?%d+")
+				if not first_number then
+					return {error = "Missing 'messages' parameter"}
+				end
+				args = { messages = first_number }
+			end
 			if not args or not args.messages then
 				return {error = "Missing 'messages' parameter"}
 			end
@@ -190,7 +199,7 @@ local function create_ai_context(player_name, message, pattern)
 			}
 		end,
 		description = "Get additional chat history for context (use ONLY if necessary)",
-		strict = true,
+		strict = false,
 		properties = {
 			messages = {
 				type = "integer",

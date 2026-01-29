@@ -27,6 +27,11 @@ Process:
    a. Use appropriate moderation tools (warn or mute) if needed
    b. Output only "no"
 
+Chat message form:
+Messages are shown in the form of <username>: message where username is the author of the message.
+Such username, not any other string, is the name argument that must be supplied to tools warn_player and mute_player when they're used.
+It identifies which player will be warned/muted.
+
 Rules:
 - Use get_history tool ONLY if you cannot decide without context
 - DO NOT explain decisions
@@ -213,6 +218,9 @@ local function create_ai_context(player_name, message, pattern)
 	context:add_tool({
 		name = "warn_player",
 		func = function(args)
+			if type(args) == "string" then
+				return { error = "Invalid JSON string" }
+			end
 			if not args or not args.reason then
 				return {error = "Missing 'reason' parameter"}
 			end
@@ -229,7 +237,7 @@ local function create_ai_context(player_name, message, pattern)
 			end
 		end,
 		description = "Show warning form to player",
-		strict = true,
+		strict = false,
 		properties = {
 			name = {
 				type = "string",
@@ -245,6 +253,9 @@ local function create_ai_context(player_name, message, pattern)
 	context:add_tool({
 		name = "mute_player",
 		func = function(args)
+			if type(args) == "string" then
+				return { error = "Invalid JSON string" }
+			end
 			if not args or not args.reason then
 				return {error = "Missing 'reason' parameter"}
 			end
@@ -276,7 +287,7 @@ local function create_ai_context(player_name, message, pattern)
 			end
 		end,
 		description = "Mute player for specified duration",
-		strict = true,
+		strict = false,
 		properties = {
 			name = {
 				type = "string",

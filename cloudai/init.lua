@@ -7,7 +7,7 @@ if not http_api then
 	core.log("cloudai mod requires http_api. Add to secure.http_mods")
 	working = false
 end
-local url = core.settings:get("cloudai.url") or "https://api.deepseek.com/beta/chat/completions"
+local url = core.settings:get("cloudai.url") or "https://api.deepseek.com/chat/completions"
 local model = core.settings:get("cloudai.model") or "deepseek-chat"
 local timeout = core.settings:get("cloudai.timeout") or 10
 local api_key = core.settings:get("cloudai.api_key")

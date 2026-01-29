@@ -50,7 +50,6 @@ regex_ctx = regex.create({
 List of available commands:
 stats: Show AI filter statistics
 clear_history: Clear stored chat history
-
 ]],
 	logger = function(level, message)
 		core.log(level, "[ai_filter] " .. message)

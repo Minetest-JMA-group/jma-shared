@@ -48,15 +48,15 @@ function regex.create(options)
 		path = options.path
 	}
 
-	-- Internal help string that uses list_name
-	context.internal_help = [[
-export: Export ]] .. context.list_name .. [[ to a file in mod folder
+	local template = [[
+export: Export $LIST to a file in mod folder
 help: Print this help menu
-dump: Dump current ]] .. context.list_name .. [[ to chat
-last: Get the regex pattern that was last matched from ]] .. context.list_name .. [[
-reload: Reload ]] .. context.list_name .. [[ from file in mod folder
-add <regex>: Add regex to ]] .. context.list_name .. [[
-rm <regex>: Remove regex from ]] .. context.list_name
+dump: Dump current $LIST to chat
+last: Get the regex pattern that was last matched from $LIST
+reload: Reload $LIST from file in mod folder
+add <regex>: Add regex to $LIST
+rm <regex>: Remove regex from $LIST]]
+	context.internal_help = template:gsub("%$LIST", context.list_name)
 
 	function context:compile()
 		local valid_patterns = {}
@@ -186,9 +186,6 @@ rm <regex>: Remove regex from ]] .. context.list_name
 		param = param or ""
 
 		local cmd = param:match("^%s*(%S+)")
-		if not cmd then
-			return false, "No command specified"
-		end
 
 		if cmd == "add" then
 			local regex = param:sub(#cmd + 1):match("^%s*(.-)%s*$")

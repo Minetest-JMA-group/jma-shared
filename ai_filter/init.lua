@@ -45,7 +45,13 @@ regex_ctx = regex.create({
 	path = modpath .. "/ai_triggers",
 	list_name = "ai_triggers",
 	storage_key = "ai_triggers",
-	help_prefix = "AI Filter - These regex patterns trigger AI moderation.\n\n",
+	help_prefix = [[AI Filter - These regex patterns trigger AI moderation.
+
+List of available commands:
+stats: Show AI filter statistics
+clear_history: Clear stored chat history
+
+]],
 	logger = function(level, message)
 		core.log(level, "[ai_filter] " .. message)
 	end
@@ -82,7 +88,8 @@ local function get_last_messages(n)
 	for i = 1, count do
 		local idx = (history_index - i - 1) % ai_filter.HISTORY_SIZE + 1
 		if chat_history[idx] then
-			table.insert(result, 1, chat_history[idx]) -- Insert at beginning to maintain chronological order
+			 -- Insert at beginning to maintain chronological order
+			table.insert(result, 1, chat_history[idx])
 		end
 	end
 
@@ -290,7 +297,7 @@ local function process_message(name, message)
 	local success, err = context:call(prompt, handle_ai_response)
 	if not success then
 		core.log("warning", "[ai_filter] Failed to call AI: " .. tostring(err))
-		ai_calls[name] = nil
+		-- Don't clear ai_calls[name] on failure - keep rate limiting
 	end
 
 	return true
@@ -315,64 +322,58 @@ core.register_chatcommand("ai_filter", {
 	params = "<command> <args>",
 	privs = { filtering = true },
 	func = function(name, param)
-		local success, message = regex_ctx:handle_command(name, param)
+		local cmd = param:match("^%s*(%S+)")
 
-		if not success and message == nil then
-			local cmd = param:match("^%s*(%S+)")
+		if cmd == "stats" then
+			local history_count = 0
+			for _ in pairs(chat_history) do
+				history_count = history_count + 1
+			end
 
-			if cmd == "stats" then
-				local history_count = 0
-				for _ in pairs(chat_history) do
-					history_count = history_count + 1
+			local triggers_count = #regex_ctx:get_patterns()
+			local ai_calls_count = 0
+			for _, time in pairs(ai_calls) do
+				if os.time() - time < 3600 then
+					ai_calls_count = ai_calls_count + 1
 				end
+			end
 
-				local triggers_count = #regex_ctx:get_patterns()
-				local ai_calls_count = 0
-				for _, time in pairs(ai_calls) do
-					if os.time() - time < 3600 then
-						ai_calls_count = ai_calls_count + 1
-					end
-				end
-
-				local stats = string.format([[
+			local stats = string.format([[
 AI Filter Statistics:
 - Stored chat messages: %d/%d
 - Trigger patterns: %d
 - AI calls (last hour): %d
 - Config: history_size=%d, initial_messages=%d
 ]],
-					history_count, ai_filter.HISTORY_SIZE,
-					triggers_count,
-					ai_calls_count,
-					ai_filter.HISTORY_SIZE, ai_filter.INITIAL_MESSAGES
-				)
+				history_count, ai_filter.HISTORY_SIZE,
+				triggers_count,
+				ai_calls_count,
+				ai_filter.HISTORY_SIZE, ai_filter.INITIAL_MESSAGES
+			)
 
-				return true, stats
+			return true, stats
 
-			elseif cmd == "clear_history" then
-				chat_history = {}
-				history_index = 1
-				return true, "Chat history cleared"
+		elseif cmd == "clear_history" then
+			chat_history = {}
+			history_index = 1
+			return true, "Chat history cleared"
+		end
 
-			elseif cmd == "help" then
-				local help = [[AI Filter Commands:
-All regex commands (add, rm, dump, last, reload, export, help) work as in filter mod.
-
-Additional commands:
-stats: Show AI filter statistics
-clear_history: Clear stored chat history
-help: Show this help
-
-Usage: /ai_filter <command> <args>]]
-				return true, help
-			else
-				return false, "Unknown command. Use /ai_filter help"
-			end
+		local success, message = regex_ctx:handle_command(name, param)
+		if not success and message == nil then
+			return false, "Unknown command. Use /ai_filter help"
 		end
 
 		return success, message
 	end,
 })
+
+core.register_on_leaveplayer(function(player)
+	local player_name = player:get_player_name()
+	if player_name and ai_calls[player_name] then
+		ai_calls[player_name] = nil
+	end
+end)
 
 local function cleanup_ai_calls()
 	local now = os.time()

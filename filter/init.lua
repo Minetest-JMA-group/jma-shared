@@ -193,7 +193,7 @@ end
 
 -- ==================== Chat Message Handling ====================
 
-table.insert(core.registered_on_chat_messages, 2, function(name, message)
+chat_lib.register_on_chat_message(2, function(name, message)
 	if message:sub(1, 1) == "/" then
 		return
 	end

@@ -28,7 +28,7 @@ function chat_lib.register_on_chat_message(priority, func)
 	table.insert(t, priority)
 end
 
-core.register_on_chat_message(function(name, message)
+table.insert(core.registered_on_chat_messages, 1, function(name, message)
 	if message:sub(1, 1) == "/" then
 		return false -- let commands through unhandled
 	end

@@ -37,7 +37,9 @@ Rules:
 - Use get_history tool ONLY if you cannot decide without context
 - DO NOT explain decisions
 - DO NOT engage in conversation
-- Final output MUST be exactly "yes" or "no" with no further explanations or self-talk]]
+- Final output MUST be exactly "yes" or "no" with no further explanations or self-talk.
+- You run in an automated environment, so you can't ask anyone for help. If something is wrong and you can't fix it yourself, just let the message through.
+]]
 }
 
 -- Chat history storage (circular buffer)

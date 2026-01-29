@@ -145,14 +145,14 @@ rm <regex>: Remove regex from ]] .. context.list_name
 
 		table.insert(self.patterns, 1, pattern)
 		table.insert(self.compiled_patterns, 1, matcher)
-		
+
 		self:save()
 		return true
 	end
 
 	function context:remove(pattern)
 		local indices_to_remove = {}
-		
+
 		-- First collect indices to remove
 		for i, p in ipairs(self.patterns) do
 			if p == pattern then

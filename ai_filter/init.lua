@@ -31,7 +31,7 @@ Rules:
 - Use get_history tool ONLY if you cannot decide without context
 - DO NOT explain decisions
 - DO NOT engage in conversation
-- Final output MUST be exactly "yes" or "no" on its own line]]
+- Final output MUST be exactly "yes" or "no" with no further explanations or self-talk]]
 }
 
 -- Chat history storage (circular buffer)
@@ -224,7 +224,7 @@ local function create_ai_context(player_name, message, pattern)
 		properties = {
 			name = {
 				type = "string",
-				description = "Player name to warn (defaults to current player)"
+				description = "Player name to warn"
 			},
 			reason = {
 				type = "string",
@@ -271,7 +271,7 @@ local function create_ai_context(player_name, message, pattern)
 		properties = {
 			name = {
 				type = "string",
-				description = "Player name to mute (defaults to current player)"
+				description = "Player name to mute"
 			},
 			duration = {
 				type = "integer",
@@ -289,14 +289,9 @@ local function create_ai_context(player_name, message, pattern)
 	local initial_history = get_last_messages(ai_filter.INITIAL_MESSAGES)
 	local formatted_history = format_history(initial_history)
 
-	local prompt = string.format([[Player "%s" sent a message that matched pattern: "%s"
-
-Recent chat history:
+	local prompt = string.format([[Recent chat history:
 %s
-
-Current message from %s: "%s"
-
-Analyze this message. Use tools only if necessary. At the end, output exactly "yes" or "no" to indicate if the message should be allowed.]],
+Current message from %s: "%s"]],
 		player_name, pattern, formatted_history, player_name, message
 	)
 

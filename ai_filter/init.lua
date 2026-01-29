@@ -194,7 +194,9 @@ local function create_ai_context(player_name, message, pattern)
 		properties = {
 			messages = {
 				type = "integer",
-				description = "Number of previous messages to retrieve (1-50)"
+				description = "Number of previous messages to retrieve",
+				minimum = 1,
+				maximum = 15
 			}
 		}
 	})
@@ -273,7 +275,9 @@ local function create_ai_context(player_name, message, pattern)
 			},
 			duration = {
 				type = "integer",
-				description = "Mute duration in minutes (1-1440)"
+				description = "Mute duration in minutes",
+				minimum = 1,
+				maximum = 1440
 			},
 			reason = {
 				type = "string",

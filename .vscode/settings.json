@@ -16,7 +16,9 @@
 		"rules",
 		"ctf_api",
 		"ItemStack",
-		"regex"
+		"regex",
+		"filter",
+		"algorithms"
 	],
 	"Lua.diagnostics.disable": [
 		"redundant-parameter",

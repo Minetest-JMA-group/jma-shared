@@ -1,5 +1,6 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2023-2025 Marko Petrović
+---@diagnostic disable: need-check-nil
 
 algorithms = {}
 local utf8_simple = utf8_simple
@@ -32,6 +33,7 @@ list = settings:get("secure.trusted_mods") or ""
 for word in list:gmatch("[^,%s]+") do
 	trusted_mods[word] = true
 end
+---@diagnostic disable-next-line: cast-local-type
 list = nil
 
 

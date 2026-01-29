@@ -3,8 +3,42 @@
 
 chat_lib = {
 	registered_on_chat_send_all = {},
-	registered_on_chat_send_player = {}
+	registered_on_chat_send_player = {},
+	registered_on_chat_message = {},
+	registered_on_chat_message_sorted_priorities = {}
 }
+
+function chat_lib.register_on_chat_message(priority, func)
+	if type(priority) ~= "number" or type(func) ~= "function" then
+		error("chat_lib.register_on_chat_message called with invalid types of arguments")
+	end
+	if chat_lib.registered_on_chat_message[priority] then
+		error("chat_lib.register_on_chat_message: Tried to register two callbacks with the same priority")
+	end
+	chat_lib.registered_on_chat_message[priority] = func
+
+	local t = chat_lib.registered_on_chat_message_sorted_priorities
+	for i = 1, #t do
+		if priority < t[i] then
+			table.insert(t, i, priority)
+			return
+		end
+	end
+	-- In the case priority is larger than all existing values, just insert it at the end
+	table.insert(t, priority)
+end
+
+core.register_on_chat_message(function(name, message)
+	if message:sub(1, 1) == "/" then
+		return false -- let commands through unhandled
+	end
+	for _, v in ipairs(chat_lib.registered_on_chat_message_sorted_priorities) do
+		if chat_lib.registered_on_chat_message[v](name, message) then
+			return true
+		end
+	end
+	return false
+end)
 
 function chat_lib.register_on_chat_send_all(func)
 	table.insert(chat_lib.registered_on_chat_send_all, func)

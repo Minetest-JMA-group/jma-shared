@@ -18,7 +18,8 @@
 		"ItemStack",
 		"regex",
 		"filter",
-		"algorithms"
+		"algorithms",
+		"chat_lib"
 	],
 	"Lua.diagnostics.disable": [
 		"redundant-parameter",

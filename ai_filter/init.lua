@@ -1,6 +1,6 @@
----@diagnostic disable: need-check-nil
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
+---@diagnostic disable: need-check-nil
 
 local modname = core.get_current_modname()
 local modpath = core.get_modpath(modname)

@@ -23,7 +23,9 @@ end
 -- Return a regex context or nil and error
 -- options.storage: modstorage object for storing patterns
 -- options.path: string, full path to the regex list file
--- options.storage_key: string, storage key name (default: "regex_list")
+-- options.storage_key: string, storage key name (default: options.list_name)
+-- options.list_name: string, name of the list (e.g., "blacklist", "whitelist", default "regex_list")
+-- options.help_prefix: string, prefix to show before help text
 -- options.logger: function(level, message), custom logger (default: core.log wrapper)
 function regex.create(options)
 	options = options or {}
@@ -36,13 +38,25 @@ function regex.create(options)
 		patterns = {},
 		compiled_patterns = {},
 		last_match = "",
-		storage_key = options.storage_key or "regex_list",
+		list_name = options.list_name or "regex_list",
+		storage_key = options.storage_key or options.list_name,
+		help_prefix = options.help_prefix or "",
 		logger = options.logger or function(level, message)
 			core.log(level, "[regex] " .. message)
 		end,
 		storage = options.storage,
 		path = options.path
 	}
+
+	-- Internal help string that uses list_name
+	context.internal_help = [[
+export: Export ]] .. context.list_name .. [[ to a file in mod folder
+help: Print this help menu
+dump: Dump current ]] .. context.list_name .. [[ to chat
+last: Get the regex pattern that was last matched from ]] .. context.list_name .. [[
+reload: Reload ]] .. context.list_name .. [[ from file in mod folder
+add <regex>: Add regex to ]] .. context.list_name .. [[
+rm <regex>: Remove regex from ]] .. context.list_name
 
 	function context:compile()
 		local valid_patterns = {}
@@ -238,6 +252,9 @@ function regex.create(options)
 				return true, "Patterns exported"
 			end
 			return true, err or "Failed to export"
+
+		elseif cmd == "help" then
+			return true, self.help_prefix .. self.internal_help
 		end
 
 		return false, nil

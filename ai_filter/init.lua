@@ -4,7 +4,7 @@
 
 local modname = core.get_current_modname()
 local modpath = core.get_modpath(modname)
-local storage = core.get_modstorage()
+local storage = core.get_mod_storage()
 local is_discord = core.global_exists("discord")
 local is_xban = core.global_exists("xban")
 local is_essentials = core.global_exists("essentials")

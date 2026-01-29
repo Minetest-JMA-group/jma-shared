@@ -26,6 +26,7 @@ Process:
 2. If the message violates rules:
    a. Use appropriate moderation tools (warn or mute) if needed
    b. Output only "no"
+Keep in mind that this is a Minetest server with PvP enabled, so messages like "kill him" could be appropriate in context.
 
 Chat message form:
 Messages are shown in the form of <username>: message where username is the author of the message.

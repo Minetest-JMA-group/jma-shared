@@ -106,7 +106,8 @@ nameban - Manage username restrictions using regex patterns
 Subcommands:
   blacklist <command> [args] - Manage blacklist patterns
   whitelist <command> [args] - Manage whitelist patterns
-  mode <permissive|enforcing> - Set operation mode
+  getenforce                 - Get current enforcement mode
+  setenforce <mode>          - Set enforcement mode (enforcing/permissive/1/0)
   reload                     - Reload both lists from files
   export                     - Export both lists to files
   check <username>           - Check if a username would be allowed
@@ -129,9 +130,6 @@ Use /nameban blacklist help or /nameban whitelist help for more info.
 						-- If a pattern was added or removed, check online players and report to Discord
 						if list_cmd == "add" or list_cmd == "rm" then
 							check_online_players()
-							report_to_discord("nameban: %s %s pattern: %s", name,
-								list_cmd == "add" and "added" or "removed",
-								rest:match("%S+%s+(.+)") or "unknown pattern")
 						end
 						return true, result
 					else
@@ -144,39 +142,44 @@ Use /nameban blacklist help or /nameban whitelist help for more info.
 				end
 			end
 
-		elseif subcommand == "mode" then
-			local mode_param = rest:match("^%s*(%S+)%s*$")
+		elseif subcommand == "getenforce" then
+			local mode_text = mode == 1 and "Enforcing" or "Permissive"
+			return true, "Current mode: " .. mode_text
 
-			if mode_param == "permissive" then
-				if mode == 0 then
-					return false, "Mode is already permissive"
-				end
-				mode = 0
-				storage:set_int("mode", 0)
-				ACTION("Nameban mode set to permissive by %s", name)
-				report_to_discord("nameban: %s set mode to permissive", name)
-				return true, "Nameban mode set to permissive"
+		elseif subcommand == "setenforce" then
+			rest = rest:lower()
 
-			elseif mode_param == "enforcing" then
-				if mode == 1 then
-					return false, "Mode is already enforcing"
-				end
-				mode = 1
-				storage:set_int("mode", 1)
-				ACTION("Nameban mode set to enforcing by %s", name)
-				report_to_discord("nameban: %s set mode to enforcing", name)
-				check_online_players()
-				return true, "Nameban mode set to enforcing"
-
+			local new_mode
+			if rest == "1" or rest == "enforcing" then
+				new_mode = 1
+			elseif rest == "0" or rest == "permissive" then
+				new_mode = 0
 			else
-				return false, "Usage: /nameban mode <permissive|enforcing>"
+				return false, "Usage: /nameban setenforce <enforcing|permissive|1|0>"
+			end
+
+			if new_mode ~= mode then
+				mode = new_mode
+				storage:set_int("mode", mode)
+				local mode_text = mode == 1 and "Enforcing" or "Permissive"
+				ACTION("%s set mode to %s", name, mode_text)
+				report_to_discord("nameban: %s set mode to %s", name, mode_text)
+
+				-- In enforcing mode, check all online players
+				if mode == 1 then
+					check_online_players()
+				end
+
+				return true, "New filter mode: " .. mode_text
+			else
+				local mode_text = mode == 1 and "Enforcing" or "Permissive"
+				return true, "Mode is already set to: " .. mode_text
 			end
 
 		elseif subcommand == "reload" then
 			blacklist:load_file()
 			whitelist:load_file()
 			ACTION("Both lists reloaded from files by %s", name)
-			report_to_discord("nameban: %s reloaded both lists from files", name)
 			check_online_players()
 			return true, "Both lists reloaded from files"
 
@@ -186,7 +189,6 @@ Use /nameban blacklist help or /nameban whitelist help for more info.
 
 			if ok1 and ok2 then
 				ACTION("Both lists exported to files by %s", name)
-				report_to_discord("nameban: %s exported both lists to files", name)
 				return true, "Both lists exported to files"
 			else
 				local errors = {}
@@ -214,7 +216,6 @@ Use /nameban blacklist help or /nameban whitelist help for more info.
 
 		elseif subcommand == "scan" then
 			ACTION("Scanning online players by %s", name)
-			report_to_discord("nameban: %s scanned online players", name)
 			check_online_players()
 			return true, "Scanned all online players"
 

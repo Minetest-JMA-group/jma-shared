@@ -401,10 +401,6 @@ end
 
 -- Accumulate chat messages
 chat_lib.register_on_chat_message(4, function(name, message)
-	if message:sub(1, 1) == "/" then
-		return false
-	end
-
 	-- Always add to history
 	add_to_history(name, message)
 

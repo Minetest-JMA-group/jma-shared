@@ -544,6 +544,24 @@ AI Watcher Status:
             process_batch()
             return true, string.format("Processing batch of %d messages", count)
             
+        elseif cmd == "dump" then
+            local dump_text = string.format("Current message buffer (%d messages):\n", #message_buffer)
+            
+            if #message_buffer == 0 then
+                dump_text = dump_text .. "(empty)"
+            else
+                for i, msg in ipairs(message_buffer) do
+                    dump_text = dump_text .. string.format("%d. [%s] <%s>: %s\n",
+                        i,
+                        os.date("%H:%M", msg.time),
+                        msg.name,
+                        msg.message
+                    )
+                end
+            end
+            
+            return true, dump_text
+            
         elseif cmd == "abort" then
             -- Note: We can't actually abort an ongoing AI call, but we can clear the pending flag
             if pending_scan then
@@ -584,6 +602,7 @@ AI Watcher Status:
   interval <seconds>    - Set scan interval (1-3600)
   batch <size>          - Set minimum batch size (1-100)
   process [force]       - Process current batch immediately
+  dump                  - Show current messages waiting in buffer
   abort                 - Cancel pending scan (if not yet started)
   clear <what>          - Clear: buffer, stats, or history
   help                  - Show this help]]
@@ -595,28 +614,6 @@ AI Watcher Status:
         end
     end
 })
-
--- Cleanup on player leave
-core.register_on_leaveplayer(function(player)
-    local player_name = player:get_player_name()
-    if not player_name then return end
-    
-    -- Clean up any pending messages from this player in buffer
-    local removed = 0
-    for i = #message_buffer, 1, -1 do
-        if message_buffer[i].name == player_name then
-            table.remove(message_buffer, i)
-            removed = removed + 1
-        end
-    end
-    
-    if removed > 0 then
-        core.log("verbose", string.format(
-            "[ai_filter_watcher] Removed %d messages from buffer for player %s",
-            removed, player_name
-        ))
-    end
-end)
 
 -- Initialization
 core.after(0, function()

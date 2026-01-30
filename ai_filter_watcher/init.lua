@@ -400,7 +400,7 @@ Review these messages and take moderation actions if needed.]],
 end
 
 -- Accumulate chat messages
-chat_lib.register_on_chat_message(2, function(name, message)
+chat_lib.register_on_chat_message(4, function(name, message)
 	if message:sub(1, 1) == "/" then
 		return false
 	end

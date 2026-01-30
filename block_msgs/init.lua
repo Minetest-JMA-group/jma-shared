@@ -34,6 +34,7 @@ chat_lib.register_on_chat_message(100, function(sender_name, message)
 		if core.registered_on_chat_messages[i](sender_name, message) then
 			return true
 		end
+		i = i + 1
 	end
 
 	local formatted_message = core.format_chat_message(sender_name, message)

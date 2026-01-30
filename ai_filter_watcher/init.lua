@@ -152,7 +152,7 @@ Process:
 1. Review the batch of messages provided below
 2. If all messages are acceptable: Do nothing (no output needed)
 3. If any message within the current batch violates rules:
-   a. Use appropriate moderation tools (warn or mute) on the offending player(s)
+   a. Use appropriate moderation tool (warn or mute, NOT both on one player) on the offending player(s)
    b. You may take multiple actions if multiple players violated rules
 
 Important notes:

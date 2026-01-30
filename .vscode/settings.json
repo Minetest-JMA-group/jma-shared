@@ -22,7 +22,8 @@
 		"chat_lib",
 		"ai_filter",
 		"essentials",
-		"ai_filter_watcher"
+		"ai_filter_watcher",
+		"block_msgs"
 	],
 	"Lua.diagnostics.disable": [
 		"redundant-parameter",

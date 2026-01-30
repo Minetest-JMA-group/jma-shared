@@ -26,33 +26,14 @@ function block_msgs.chat_send_all(sender_name, message)
 	end
 end
 
-local our_index = 0
-local our_callback_ref
-local our_callback = function(sender_name, message)
-	if core.registered_on_chat_messages[our_index] ~= our_callback_ref then
-		-- Some mod inserted themselves into the table and messed our index, or we haven't found it yet
-		for i, v in ipairs(core.registered_on_chat_messages) do
-			if v == our_callback_ref then
-				our_index = i
-				break
-			end
-			our_index = 0
-		end
-		if our_index == 0 then
-			error("block_msgs can't find its own callback in core.registered_on_chat_messages")
-		end
-	end
-
-	-- Call other callbacks so that we're last
-	local i = our_index + 1
+chat_lib.register_on_chat_message(100, function(sender_name, message)
+	-- Now we know that we ran after moderation mods, but before everything else
+	-- Call other callbacks so that we're last. chat_lib itself is 1
+	local i = 2
 	while core.registered_on_chat_messages[i] do
 		if core.registered_on_chat_messages[i](sender_name, message) then
 			return true
 		end
-	end
-
-	if message:sub(1, 1) == "/" then
-		return false -- let commands through unhandled
 	end
 
 	local formatted_message = core.format_chat_message(sender_name, message)
@@ -60,9 +41,7 @@ local our_callback = function(sender_name, message)
 	core.log("action", "CHAT: <"..sender_name..">: "..message)
 
 	return true
-end
-our_callback_ref = our_callback
-core.register_on_chat_message(our_callback)
+end)
 
 local directed_chatcomms = {
 	["msg"] = true,

@@ -5,7 +5,6 @@
 local modname = core.get_current_modname()
 local modpath = core.get_modpath(modname)
 local storage = core.get_mod_storage()
-local is_discord = core.global_exists("discord")
 local is_xban = core.global_exists("xban")
 local is_essentials = core.global_exists("essentials")
 
@@ -139,12 +138,10 @@ local function release_pending_message(pending_id, approved, tag)
 			pending.name, pending.message
 		))
 
-		if is_discord then
-			discord.send_action_report(string.format(
-				"**AI Filter**: Message from <%s> approved and released: \"%s\"",
-				pending.name, pending.message
-			))
-		end
+		relays.send_action_report(
+			"**AI Filter**: Message from <%s> approved and released: \"%s\"",
+			pending.name, pending.message
+		)
 	end
 
 	pending_messages[pending_id] = nil
@@ -157,9 +154,10 @@ local function log_ai_call(player_name, message, pattern)
 
 	core.log("action", "[ai_filter] " .. log_msg)
 
-	if is_discord then
-		discord.send_action_report("**AI Filter**: " .. log_msg)
-	end
+	relays.send_action_report(
+		"**AI Filter**: AI moderation triggered for <%s>: '%s' (matched pattern: '%s')",
+		player_name, message, pattern
+	)
 end
 
 local function log_skipped_call(player_name, message, pattern)
@@ -169,9 +167,10 @@ local function log_skipped_call(player_name, message, pattern)
 
 	core.log("verbose", "[ai_filter] " .. log_msg)
 
-	if is_discord then
-		discord.send_action_report("**AI Filter**: " .. log_msg)
-	end
+	relays.send_action_report(
+		"**AI Filter**: AI moderation skipped for <%s>: rate limited (matched pattern: '%s')",
+		player_name, pattern
+	)
 end
 
 local function create_ai_context(player_name, message, pattern)
@@ -340,12 +339,10 @@ local function handle_ai_response(pending_id, history, response, error)
 			))
 			pending_messages[pending_id] = nil
 
-			if is_discord then
-				discord.send_action_report(string.format(
-					"**AI Filter**: Message from <%s> blocked: \"%s\"",
-					pending.name, pending.message
-				))
-			end
+			relays.send_action_report(
+				"**AI Filter**: Message from <%s> blocked: \"%s\"",
+				pending.name, pending.message
+			)
 		else
 			core.log("warning", string.format(
 				"[ai_filter] AI returned invalid response for <%s>: %s",

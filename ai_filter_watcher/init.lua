@@ -5,7 +5,6 @@
 local modname = core.get_current_modname()
 local modpath = core.get_modpath(modname)
 local storage = core.get_mod_storage()
-local is_discord = core.global_exists("discord")
 local is_xban = core.global_exists("xban")
 local is_essentials = core.global_exists("essentials")
 
@@ -29,6 +28,7 @@ local message_buffer = {}
 -- Chat history storage (circular buffer)
 local chat_history = {}
 local history_index = 1
+local history_count = 0  -- Track how many messages are actually stored
 
 -- Statistics
 local watcher_stats = {
@@ -44,29 +44,45 @@ local is_processing = false
 local pending_scan = false  -- Flag to indicate we should scan when current processing finishes
 local active_call_id = 0
 
+-- Initialize the ring buffer
+for i = 1, HISTORY_SIZE do
+	chat_history[i] = {}
+end
+
 local function add_to_history(name, message)
 	if WATCHER_MODE == ai_filter_watcher.MODES.DISABLED then
 		return
 	end
 
-	local entry = {
+	chat_history[history_index] = {
 		name = name,
 		message = message,
 		time = os.time()
 	}
 
-	chat_history[history_index] = entry
-	history_index = (history_index % HISTORY_SIZE) + 1
+	history_index = history_index % HISTORY_SIZE + 1
+
+	-- Update the count (but don't exceed the buffer size)
+	if history_count < HISTORY_SIZE then
+		history_count = history_count + 1
+	end
 end
 
 local function get_last_messages(n)
 	local result = {}
-	local count = math.min(n, HISTORY_SIZE)
+	local count = math.min(n, history_count)  -- Use actual count of stored messages
 
-	for i = 1, count do
-		local idx = (history_index - i - 1) % HISTORY_SIZE + 1
-		if chat_history[idx] then
-			table.insert(result, 1, chat_history[idx])
+	-- Start from the most recent message and go backwards
+	for i = 0, count - 1 do
+		-- Calculate index going backwards through the ring buffer
+		local idx = history_index - 1 - i
+		if idx <= 0 then
+			idx = idx + HISTORY_SIZE
+		end
+
+		-- Only add if the entry has content
+		if chat_history[idx] and chat_history[idx].name then
+			table.insert(result, 1, chat_history[idx])  -- Insert at beginning to maintain chronological order
 		end
 	end
 
@@ -152,7 +168,7 @@ Process:
 1. Review the batch of messages provided below
 2. If all messages are acceptable: Do nothing (no output needed)
 3. If any message within the current batch violates rules:
-   a. Use appropriate moderation tool (warn or mute, NOT both on one player) on the offending player(s)
+   a. Use appropriate moderation tools (warn or mute) on the offending player(s)
    b. You may take multiple actions if multiple players violated rules
 
 Important notes:
@@ -244,10 +260,10 @@ Important notes:
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
 
-			core.log("action", "[ai_filter_watcher] " .. result_message)
-
-			if is_discord and WATCHER_MODE == ai_filter_watcher.MODES.ENABLED then
-				discord.send_action_report("**AI Watcher**: " .. result_message)
+			-- In enabled mode, essentials logs on its own
+			if WATCHER_MODE == ai_filter_watcher.MODES.PERMISSIVE then
+				core.log("action", "[ai_filter_watcher] " .. result_message)
+				relays.send_action_report("**AI Watcher**: %s", result_message)
 			end
 
 			return {
@@ -319,10 +335,10 @@ Important notes:
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
 
-			core.log("action", "[ai_filter_watcher] " .. result_message)
-
-			if is_discord and WATCHER_MODE == ai_filter_watcher.MODES.ENABLED then
-				discord.send_action_report("**AI Watcher**: " .. result_message)
+			-- In enabled mode, xban logs on its own
+			if WATCHER_MODE == ai_filter_watcher.MODES.PERMISSIVE then
+				core.log("action", "[ai_filter_watcher] " .. result_message)
+				relays.send_action_report("**AI Watcher**: %s", result_message)
 			end
 
 			return {
@@ -371,6 +387,8 @@ Review these messages and take moderation actions if needed.]],
 				"[ai_filter_watcher] AI error for batch call %d: %s",
 				call_id, tostring(error)
 			))
+			-- Also send error to relays
+			relays.send_action_report("**AI Watcher**: Batch %d error: %s", call_id, tostring(error))
 		elseif response and response.content then
 			core.log("verbose", string.format(
 				"[ai_filter_watcher] AI completed processing batch %d",
@@ -391,6 +409,9 @@ Review these messages and take moderation actions if needed.]],
 			"[ai_filter_watcher] Failed to call AI for batch %d: %s",
 			call_id, tostring(err)
 		))
+		-- Send failure to relays
+		relays.send_action_report("**AI Watcher**: Failed to call AI for batch %d: %s", call_id, tostring(err))
+
 		is_processing = false
 
 		-- Still check for pending scan
@@ -466,7 +487,7 @@ AI Watcher Status:
 - Mode: %s
 - Scan interval: %d seconds
 - Min batch size: %d messages
-- History size: %d messages
+- History size: %d messages (stored: %d)
 - Currently processing: %s
 - Pending scan: %s
 - Message buffer: %d messages
@@ -481,6 +502,7 @@ AI Watcher Status:
 				SCAN_INTERVAL,
 				MIN_BATCH_SIZE,
 				HISTORY_SIZE,
+				history_count,
 				is_processing and "Yes (call_id: " .. active_call_id .. ")" or "No",
 				pending_scan and "Yes" or "No",
 				#message_buffer,
@@ -500,6 +522,7 @@ AI Watcher Status:
 			end
 
 			WATCHER_MODE = mode
+			relays.send_action_report("**AI Watcher**: Mode changed to %s by %s", mode, name)
 			return true, string.format("Watcher mode set to: %s", mode)
 
 		elseif cmd == "interval" then
@@ -510,6 +533,7 @@ AI Watcher Status:
 
 			SCAN_INTERVAL = interval
 			time_acc = 0 -- Reset timer
+			--relays.send_action_report("**AI Watcher**: Scan interval changed to %d seconds by %s", interval, name)
 			return true, string.format("Scan interval set to: %d seconds", interval)
 
 		elseif cmd == "batch" then
@@ -519,6 +543,7 @@ AI Watcher Status:
 			end
 
 			MIN_BATCH_SIZE = size
+			--relays.send_action_report("**AI Watcher**: Min batch size changed to %d messages by %s", size, name)
 			return true, string.format("Minimum batch size set to: %d messages", size)
 
 		elseif cmd == "process" then
@@ -532,6 +557,7 @@ AI Watcher Status:
 
 			if is_processing then
 				pending_scan = true
+				--relays.send_action_report("**AI Watcher**: Manual process requested but already processing batch %d", active_call_id)
 				return true, string.format(
 					"Already processing batch %d. New scan will start when current batch finishes.",
 					active_call_id
@@ -539,6 +565,7 @@ AI Watcher Status:
 			end
 
 			local count = #message_buffer
+			--relays.send_action_report("**AI Watcher**: Manual process started for %d messages by %s", count, name)
 			process_batch()
 			return true, string.format("Processing batch of %d messages", count)
 
@@ -564,6 +591,7 @@ AI Watcher Status:
 			-- Note: We can't actually abort an ongoing AI call, but we can clear the pending flag
 			if pending_scan then
 				pending_scan = false
+				relays.send_action_report("**AI Watcher**: Pending scan cancelled by %s", name)
 				return true, "Pending scan cancelled"
 			else
 				return false, "No pending scan to abort"
@@ -575,6 +603,7 @@ AI Watcher Status:
 			if what == "buffer" then
 				local count = #message_buffer
 				message_buffer = {}
+				relays.send_action_report("**AI Watcher**: Cleared %d messages from buffer by %s", count, name)
 				return true, string.format("Cleared %d messages from buffer", count)
 			elseif what == "stats" then
 				watcher_stats = {
@@ -584,10 +613,17 @@ AI Watcher Status:
 					last_scan_time = 0,
 					last_action_time = 0
 				}
+				relays.send_action_report("**AI Watcher**: Statistics cleared by %s", name)
 				return true, "Statistics cleared"
 			elseif what == "history" then
 				chat_history = {}
 				history_index = 1
+				history_count = 0
+				-- Re-initialize the ring buffer
+				for i = 1, HISTORY_SIZE do
+					chat_history[i] = {}
+				end
+				relays.send_action_report("**AI Watcher**: Chat history cleared by %s", name)
 				return true, "Chat history cleared"
 			else
 				return false, "Usage: /ai_watcher clear <buffer|stats|history>"
@@ -619,6 +655,10 @@ core.after(0, function()
 		"[ai_filter_watcher] Initialized (mode: %s, interval: %ds, batch: %d)",
 		WATCHER_MODE, SCAN_INTERVAL, MIN_BATCH_SIZE
 	))
+
+	-- Send initialization message to relays
+	relays.send_action_report("**AI Watcher**: Initialized (mode: %s, interval: %ds, batch: %d)",
+		WATCHER_MODE, SCAN_INTERVAL, MIN_BATCH_SIZE)
 
 	core.log("info", string.format([[
 [ai_filter_watcher] Configuration (set in minetest.conf):

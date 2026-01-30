@@ -26,7 +26,6 @@ function block_msgs.chat_send_all(sender_name, message)
 	end
 end
 
-local registered_on_chat_messages_snapshot = {}
 local our_index = 0
 local our_callback_ref
 local our_callback = function(sender_name, message)
@@ -63,12 +62,7 @@ local our_callback = function(sender_name, message)
 	return true
 end
 our_callback_ref = our_callback
-
 core.register_on_chat_message(our_callback)
-
-for _, func in ipairs(core.registered_on_chat_messages) do
-	registered_on_chat_messages_snapshot[func] = true
-end
 
 local directed_chatcomms = {
 	["msg"] = true,

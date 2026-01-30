@@ -21,7 +21,8 @@
 		"algorithms",
 		"chat_lib",
 		"ai_filter",
-		"essentials"
+		"essentials",
+		"ai_filter_watcher"
 	],
 	"Lua.diagnostics.disable": [
 		"redundant-parameter",

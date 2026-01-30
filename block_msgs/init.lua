@@ -27,14 +27,28 @@ function block_msgs.chat_send_all(sender_name, message)
 end
 
 local registered_on_chat_messages_snapshot = {}
-
-core.register_on_chat_message(function(sender_name, message)
-	-- Call other callbacks so that we're last
-	for _, func in ipairs(core.registered_on_chat_messages) do
-		if not registered_on_chat_messages_snapshot[func] then
-			if func(sender_name, message) then
-				return true
+local our_index = 0
+local our_callback_ref
+local our_callback = function(sender_name, message)
+	if core.registered_on_chat_messages[our_index] ~= our_callback_ref then
+		-- Some mod inserted themselves into the table and messed our index, or we haven't found it yet
+		for i, v in ipairs(core.registered_on_chat_messages) do
+			if v == our_callback_ref then
+				our_index = i
+				break
 			end
+			our_index = 0
+		end
+		if our_index == 0 then
+			error("block_msgs can't find its own callback in core.registered_on_chat_messages")
+		end
+	end
+
+	-- Call other callbacks so that we're last
+	local i = our_index + 1
+	while core.registered_on_chat_messages[i] do
+		if core.registered_on_chat_messages[i](sender_name, message) then
+			return true
 		end
 	end
 
@@ -47,7 +61,10 @@ core.register_on_chat_message(function(sender_name, message)
 	core.log("action", "CHAT: <"..sender_name..">: "..message)
 
 	return true
-end)
+end
+our_callback_ref = our_callback
+
+core.register_on_chat_message(our_callback)
 
 for _, func in ipairs(core.registered_on_chat_messages) do
 	registered_on_chat_messages_snapshot[func] = true

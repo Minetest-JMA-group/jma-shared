@@ -5,8 +5,8 @@ relays = {}
 
 local is_xmpp = core.global_exists("xmpp_relay")
 local is_discord = core.global_exists("discord") and discord.enabled
-local xmpp_action_log = "aclog@jmaminetest.mooo.com"
-local xmpp_report_log = "reportlog@jmaminetest.mooo.com"
+local xmpp_action_log = "aclog@conference.jmaminetest.mooo.com"
+local xmpp_report_log = "reportlog@conference.jmaminetest.mooo.com"
 
 relays.send_action_report = function(message, ...)
 	local final_msg = string.format(message, ...)

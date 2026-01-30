@@ -18,13 +18,6 @@ end
 
 local ACTION = make_logger("action")
 local WARNING = make_logger("warning")
-local is_discord = core.global_exists("discord")
-
-local function report_to_discord(message, ...)
-	if is_discord then
-		discord.send_action_report(message, ...)
-	end
-end
 
 local blacklist = regex.create({
 	storage = storage,
@@ -69,11 +62,11 @@ local function check_username(name)
 
 		if mode == 1 then
 			ACTION("User %s denied via blacklist [ENFORCING]", name)
-			report_to_discord("nameban: User %s denied via blacklist [ENFORCING]", name)
+			relays.send_action_report("nameban: User %s denied via blacklist [ENFORCING]", name)
 			return msg
 		else
 			ACTION("User %s would have been denied via blacklist [PERMISSIVE]", name)
-			report_to_discord("nameban: User %s would have been denied via blacklist [PERMISSIVE]", name)
+			relays.send_action_report("nameban: User %s would have been denied via blacklist [PERMISSIVE]", name)
 			return nil
 		end
 	end
@@ -163,7 +156,7 @@ Use /nameban blacklist help or /nameban whitelist help for more info.
 				storage:set_int("mode", mode)
 				local mode_text = mode == 1 and "Enforcing" or "Permissive"
 				ACTION("%s set mode to %s", name, mode_text)
-				report_to_discord("nameban: %s set mode to %s", name, mode_text)
+				relays.send_action_report("nameban: %s set mode to %s", name, mode_text)
 
 				-- In enforcing mode, check all online players
 				if mode == 1 then

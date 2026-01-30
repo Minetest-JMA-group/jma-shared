@@ -8,7 +8,7 @@ local storage = core.get_mod_storage()
 local VERSION_KEY = "version"
 local VERSION = 2
 
-local discordCooldown = 0
+local relayCooldown = 0
 local violations = {}
 local last_kicked_time = os.time()
 
@@ -145,13 +145,11 @@ function filter.on_violation(name, message, violation_type)
 
 	local resolution
 	if filter.get_mode() == 0 then
-		if discord and discord.enabled then
-			discord.send_action_report(
-				'**filter**: [PERMISSIVE] Message "%s" matched using blacklist regex: "%s"',
-				message,
-				filter.get_lastreg()
-			)
-		end
+		relays.send_action_report(
+			'**filter**: [PERMISSIVE] Message "%s" matched using blacklist regex: "%s"',
+			message,
+			filter.get_lastreg()
+		)
 		resolution = "permissive"
 	end
 
@@ -174,13 +172,13 @@ function filter.on_violation(name, message, violation_type)
 		else
 			resolution = "kicked"
 			core.kick_player(name, v_type.kick_msg)
-			if discord and discord.enabled and (os.time() - last_kicked_time) > discordCooldown then
+			if (os.time() - last_kicked_time) > relayCooldown then
 				local format_string = '***filter***: Kicked %s for %s "%s"'
 				if violation_type == "blacklisted" then
 					format_string = '***filter***: Kicked %s for %s "%s" caught with blacklist regex "%s"'
-					discord.send_action_report(format_string, name, v_type.name, message, filter.get_lastreg())
+					relays.send_action_report(format_string, name, v_type.name, message, filter.get_lastreg())
 				else
-					discord.send_action_report(format_string, name, v_type.name, message)
+					relays.send_action_report(format_string, name, v_type.name, message)
 				end
 				last_kicked_time = os.time()
 			end

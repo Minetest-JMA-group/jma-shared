@@ -73,9 +73,7 @@ core.register_chatcommand("ebpf", {
 				msg = "[ebpf]\n"..stdout
 			end
 			core.log("action", msg)
-			if discord then
-				discord.send_action_report("%s", msg)
-			end
+			relays.send_action_report("%s", msg)
 		end
 		if argv[2] == "ban" then
 			local msg
@@ -85,9 +83,7 @@ core.register_chatcommand("ebpf", {
 				msg = string.format("[ebpf]: %s banned for %s\nReason: %s", argv[3], algorithms.time_to_string(tonumber(argv[4])), argv[5])
 			end
 			core.log("action", msg)
-			if discord then
-				discord.send_action_report("%s", msg)
-			end
+			relays.send_action_report("%s", msg)
 		end
 		return true, "Command successful\n"..stdout
 	end

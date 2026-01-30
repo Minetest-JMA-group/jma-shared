@@ -23,7 +23,9 @@
 		"ai_filter",
 		"essentials",
 		"ai_filter_watcher",
-		"block_msgs"
+		"block_msgs",
+		"relays",
+		"xmpp_relay"
 	],
 	"Lua.diagnostics.disable": [
 		"redundant-parameter",

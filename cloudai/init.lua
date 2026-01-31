@@ -271,6 +271,30 @@ core.register_chatcommand("cloudai", {
 			timeout = new_timeout
 			return true, "New timeout: "..tostring(timeout)
 		end
+		if cmd == "model" then
+			local new_value = iter()
+			if not new_value then
+				return true, "Current model: "..tostring(model)
+			end
+
+			if type(new_value) ~= "string" or #new_value == 0 then
+				return false, "Model must be a non-empty string"
+			end
+			model = new_value
+			return true, "New model: "..tostring(model)
+		end
+		if cmd == "url" then
+			local new_value = iter()
+			if not new_value then
+				return true, "Current URL: "..tostring(url)
+			end
+
+			if type(new_value) ~= "string" or #new_value == 0 then
+				return false, "URL must be a non-empty string"
+			end
+			url = new_value
+			return true, "New URL: "..tostring(url)
+		end
 		return false, "Invalid usage. Check /cloudai help"
 	end
 })

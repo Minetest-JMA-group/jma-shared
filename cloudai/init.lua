@@ -32,6 +32,9 @@ local function handle_response(context, auto_call)
 		end
 	end
 	context._handle = nil  -- The request has completed, successfully or not
+	if context._destroyed then
+		return false, "Context destroyed, not triggering callback"
+	end
 	if not response.succeeded then
 		local err = "Unknown error"
 		if response.timeout then
@@ -75,11 +78,20 @@ local function handle_response(context, auto_call)
 	if not parsed.choices or not parsed.choices[1] or not parsed.choices[1].message
 	   or not parsed.choices[1].message.role then
 		context._callback(context._history, nil, "Malformed response")
+		context._callback = nil
 	else
 		if parsed.choices[1].finish_reason == "tool_calls" then
 			local msg = parsed.choices[1].message
 			table.insert(context._history, msg)
 			for _, tool_call in ipairs(msg.tool_calls) do
+				if context._max_steps_now then
+					context._max_steps_now = context._max_steps_now - 1
+					if context._max_steps_now < 0 then
+						context._callback(context._history, nil, "Exceeded the maximum number of tool calls")
+						context._callback = nil
+						return true
+					end
+				end
 				local name = tool_call["function"].name
 				local args = tool_call["function"].arguments
 				local json_args, err = core.parse_json(args, nil, true)
@@ -135,6 +147,9 @@ cloudai.get_context = function()
 		_formatted_tools = {},	-- Array of tool definitions formatted for API payload
 		_handle = nil,      -- Active HTTP request
 		_callback = nil,    -- Callback to call when the request completes
+		_destroyed = false,	-- If set, this context is not usable anymore
+		_max_steps = nil,	-- How many tool calls may the AI make before giving a response
+		_max_steps_now = nil,	-- How many steps are left available for the current prompt
 		_make_request = function(self)	-- After everything was made ready, this is called to form and send the request
 			local payload = {
 				model = model,
@@ -160,6 +175,9 @@ cloudai.get_context = function()
 		end,
 		-- Callback gets history and AI response (nil in case of error, in which case third argument is the error string)
 		call = function(self, message, callback)
+			if self._destroyed then
+				return false, "Cannot use a destroyed context"
+			end
 			if self._handle then
 				local handled, err = handle_response(self)
 				if not handled then
@@ -171,6 +189,7 @@ cloudai.get_context = function()
 			end
 			table.insert(self._history, {role = "user", content = message})
 			self._callback = callback
+			self._max_steps_now = self._max_steps
 			return self:_make_request()
 		end,
 		add_tool = function(self, tool_definition)
@@ -210,6 +229,16 @@ cloudai.get_context = function()
 			end
 			self._system_prompt = prompt
 			return true
+		end,
+		set_max_steps = function(self, new_max_steps)
+			if type(new_max_steps) ~= "number" then
+				return false, "Max steps must be a number"
+			end
+			self._max_steps = new_max_steps
+			return true
+		end,
+		destroy = function(self)
+			self._destroyed = true
 		end
 	}
 end

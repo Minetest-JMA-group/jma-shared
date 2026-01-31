@@ -1,6 +1,6 @@
 local tos_url = "https://github.com/Minetest-JMA-group/information"
 local kick_message =
-	"You must accept the Terms of Service to play on this server.\nSince you have declined, you cannot join at this time.\nIf you change your mind, please reconnect and accept the TOS."
+	"You must accept the Terms of Service to play on this server.\nSince you have declined, you cannot join at this time.\nIf you change your mind, please reconnect and accept the TOS. Send an e-mail to loki@jma-sig.de including all your usernames to request a deletion of your data."
 local storage = core.get_mod_storage()
 local pending_confirmations = {}
 local confirmation_timeout = 10

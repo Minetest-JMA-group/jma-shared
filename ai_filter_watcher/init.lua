@@ -14,6 +14,7 @@ local WATCHER_MODE = core.settings:get("ai_filter_watcher.mode") or "enabled" --
 local SCAN_INTERVAL = tonumber(core.settings:get("ai_filter_watcher.scan_interval")) or 60 -- seconds
 local MIN_BATCH_SIZE = tonumber(core.settings:get("ai_filter_watcher.min_batch_size")) or 5 -- messages
 local HISTORY_SIZE = tonumber(core.settings:get("ai_filter_watcher.history_size")) or 100
+local HISTORY_TRACKING_TIME = tonumber(core.settings:get("ai_filter_watcher.history_tracking_time")) or 86400 -- seconds (default: 1 day)
 
 ai_filter_watcher = {
 	MODES = {
@@ -39,6 +40,14 @@ local watcher_stats = {
 	last_action_time = 0
 }
 
+-- Player moderation history
+local player_history = {}
+local player_history_loaded = false
+
+-- System prompt
+local system_prompt = ""
+local system_prompt_file = modpath .. "/system_prompt.txt"
+
 -- Serial processing control
 local is_processing = false
 local pending_scan = false  -- Flag to indicate we should scan when current processing finishes
@@ -47,6 +56,149 @@ local active_call_id = 0
 -- Initialize the ring buffer
 for i = 1, HISTORY_SIZE do
 	chat_history[i] = {}
+end
+
+-- Load system prompt from file
+local function load_system_prompt()
+	local file = io.open(system_prompt_file, "r")
+	if file then
+		system_prompt = file:read("*a")
+		file:close()
+		core.log("action", "[ai_filter_watcher] System prompt loaded from file")
+		return true
+	else
+		core.log("error", "[ai_filter_watcher] System prompt file not found: " .. system_prompt_file)
+		WATCHER_MODE = ai_filter_watcher.MODES.DISABLED
+		WATCHER_ENABLED = false
+		return false
+	end
+end
+
+-- Load player history from storage
+local function load_player_history()
+	local data = storage:get("player_history")
+	if data then
+		player_history = core.deserialize(data) or {}
+		core.log("verbose", string.format(
+			"[ai_filter_watcher] Loaded moderation history for %d players",
+			#player_history
+		))
+	else
+		player_history = {}
+	end
+	player_history_loaded = true
+end
+
+-- Save player history to storage
+local function save_player_history()
+	storage:set("player_history", core.serialize(player_history))
+end
+
+-- Clean up old player history entries
+local function cleanup_player_history()
+	local now = os.time()
+	local cutoff = now - HISTORY_TRACKING_TIME
+	local removed = 0
+
+	for player_name, history in pairs(player_history) do
+		local new_history = {}
+		for _, entry in ipairs(history) do
+			if entry.time >= cutoff then
+				table.insert(new_history, entry)
+			else
+				removed = removed + 1
+			end
+		end
+
+		if #new_history == 0 then
+			player_history[player_name] = nil
+		else
+			player_history[player_name] = new_history
+		end
+	end
+
+	if removed > 0 then
+		save_player_history()
+		core.log("verbose", string.format(
+			"[ai_filter_watcher] Cleaned up %d old moderation history entries",
+			removed
+		))
+	end
+end
+
+-- Add a moderation action to player history
+local function add_to_player_history(player_name, action_type, duration, reason)
+	if not player_history_loaded then
+		load_player_history()
+	end
+
+	if not player_history[player_name] then
+		player_history[player_name] = {}
+	end
+
+	table.insert(player_history[player_name], {
+		time = os.time(),
+		type = action_type,
+		duration = duration,
+		reason = reason
+	})
+
+	-- Keep only recent history
+	if #player_history[player_name] > 50 then
+		table.remove(player_history[player_name], 1)
+	end
+
+	save_player_history()
+end
+
+-- Get player's recent moderation history
+local function get_player_moderation_history(player_name)
+	if not player_history_loaded then
+		load_player_history()
+	end
+
+	local now = os.time()
+	local cutoff = now - HISTORY_TRACKING_TIME
+	local player_data = player_history[player_name] or {}
+	local recent_history = {}
+
+	for _, entry in ipairs(player_data) do
+		if entry.time >= cutoff then
+			table.insert(recent_history, entry)
+		end
+	end
+
+	return recent_history
+end
+
+-- Format player history for AI
+local function format_player_history(history)
+	if #history == 0 then
+		return "No recent moderation history."
+	end
+
+	local lines = {}
+	for _, entry in ipairs(history) do
+		local time_ago = os.time() - entry.time
+		local time_str = ""
+		
+		if time_ago < 3600 then
+			time_str = string.format("%d minutes ago", math.floor(time_ago / 60))
+		elseif time_ago < 86400 then
+			time_str = string.format("%d hours ago", math.floor(time_ago / 3600))
+		else
+			time_str = string.format("%d days ago", math.floor(time_ago / 86400))
+		end
+
+		if entry.type == "warn" then
+			table.insert(lines, string.format("- Warned %s for: %s", time_str, entry.reason))
+		elseif entry.type == "mute" then
+			table.insert(lines, string.format("- Muted for %d minutes %s for: %s", 
+				entry.duration or 0, time_str, entry.reason))
+		end
+	end
+
+	return "Recent moderation history:\n" .. table.concat(lines, "\n")
 end
 
 local function add_to_history(name, message)
@@ -155,34 +307,7 @@ local function process_batch()
 	-- Create AI context
 	local context = cloudai.get_context()
 
-	local system_prompt = [[You are an AI moderator reviewing a batch of chat messages that have already been sent.
-
-Your task: Review the messages and determine if any players should be warned or muted for violating rules.
-
-Available tools (use if needed):
-1. get_history(messages) - Get additional chat history for context (use ONLY if necessary)
-2. warn_player(name, reason) - Warn a player for a rule violation
-3. mute_player(name, duration, reason) - Mute a player (duration in minutes)
-
-Process:
-1. Review the batch of messages provided below
-2. If all messages are acceptable: Do nothing (no output needed)
-3. If any message within the current batch violates rules:
-   a. Use appropriate moderation tools (warn or mute) on the offending player(s)
-   b. You may take multiple actions if multiple players violated rules
-
-Important notes:
-- These messages have ALREADY been sent to chat, you cannot block them.
-- Your role is RETROACTIVE moderation: punish violations that already occurred.
-- This is a Minetest server with PvP enabled, so messages like "kill him", "shoot him", "catch him and kill him" can be appropriate.
-- Most of the players are teens. You should not be too strict, but punish things that cross the line.
-- Messages are shown as [time] <username>: message
-- Use get_history tool ONLY if you cannot decide without additional context.
-- You can't take actions for messages in the output of get_history, as those have already been processed earlier, and can be requested only for context, if necessary.
-- DO NOT explain your decisions.
-- DO NOT engage in conversation.
-- When done, do not output anything - just stop.]]
-
+	-- Use the loaded system prompt
 	context:set_system_prompt(system_prompt)
 
 	-- Add tools
@@ -225,6 +350,36 @@ Important notes:
 	})
 
 	context:add_tool({
+		name = "get_player_history",
+		func = function(args)
+			if type(args) == "string" then
+				return { error = "Invalid JSON string" }
+			end
+
+			local player_name = args.name
+			if not player_name then
+				return {error = "Missing 'name' parameter"}
+			end
+
+			local history = get_player_moderation_history(player_name)
+			return {
+				success = true,
+				player = player_name,
+				history = format_player_history(history),
+				count = #history
+			}
+		end,
+		description = "Get recent moderation history (warns and mutes) for a player",
+		strict = false,
+		properties = {
+			name = {
+				type = "string",
+				description = "Player name to get history for"
+			}
+		}
+	})
+
+	context:add_tool({
 		name = "warn_player",
 		func = function(args)
 			if type(args) == "string" then
@@ -248,6 +403,8 @@ Important notes:
 					essentials.show_warn_formspec(player_name, reason, "AI Watcher")
 					action_taken = true
 					result_message = string.format("Warned player '%s' for: %s", player_name, reason)
+					-- Add to player history
+					add_to_player_history(player_name, "warn", nil, reason)
 				else
 					return {error = "Essentials mod not available"}
 				end
@@ -255,6 +412,8 @@ Important notes:
 				-- Permissive mode: just log
 				action_taken = false
 				result_message = string.format("[PERMISSIVE] Would have warned player '%s' for: %s", player_name, reason)
+				-- Still add to history for consistency
+				add_to_player_history(player_name, "warn", nil, reason)
 			end
 
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
@@ -319,6 +478,8 @@ Important notes:
 						action_taken = true
 						result_message = string.format("Muted player '%s' for %d minutes: %s",
 							player_name, duration, reason)
+						-- Add to player history
+						add_to_player_history(player_name, "mute", duration, reason)
 					else
 						return {error = err}
 					end
@@ -330,6 +491,8 @@ Important notes:
 				action_taken = false
 				result_message = string.format("[PERMISSIVE] Would have muted player '%s' for %d minutes: %s",
 					player_name, duration, reason)
+				-- Still add to history for consistency
+				add_to_player_history(player_name, "mute", duration, reason)
 			end
 
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
@@ -369,13 +532,33 @@ Important notes:
 		}
 	})
 
-	-- Format prompt with batch
+	-- Format prompt with batch - automatically include moderation history for players in the batch
+	-- Collect unique player names from the batch
+	local unique_players = {}
+	for _, msg in ipairs(batch_to_process) do
+		unique_players[msg.name] = true
+	end
+
+	-- Build player history section for the prompt
+	local player_history_section = ""
+	for player_name in pairs(unique_players) do
+		local history = get_player_moderation_history(player_name)
+		if #history > 0 then
+			player_history_section = player_history_section .. 
+				string.format("\n--- Moderation history for player '%s' ---\n%s", 
+					player_name, format_player_history(history))
+		end
+	end
+
+	-- Create the final prompt
 	local prompt = string.format([[Batch of %d recent messages (already sent to chat):
+%s
 %s
 
 Review these messages and take moderation actions if needed.]],
 		#batch_to_process,
-		formatted_batch
+		formatted_batch,
+		player_history_section
 	)
 
 	local success, err = context:call(prompt, function(history, response, error)
@@ -439,33 +622,43 @@ end)
 
 -- Periodic batch processing
 local time_acc = 0
+local cleanup_acc = 0
 core.register_globalstep(function(dtime)
 	if WATCHER_MODE == ai_filter_watcher.MODES.DISABLED then
 		return
 	end
 
 	time_acc = time_acc + dtime
-	if time_acc < SCAN_INTERVAL then
-		return
+	cleanup_acc = cleanup_acc + dtime
+
+	-- Check for batch processing
+	if time_acc >= SCAN_INTERVAL then
+		time_acc = 0
+
+		-- Check if we should process
+		if #message_buffer >= MIN_BATCH_SIZE then
+			if is_processing then
+				-- Mark that we have pending work for when current processing finishes
+				pending_scan = true
+				core.log("verbose", "[ai_filter_watcher] Scan requested but busy, marking as pending")
+			else
+				-- Start processing immediately
+				process_batch()
+			end
+		else
+			core.log("verbose", string.format(
+				"[ai_filter_watcher] Buffer too small (%d/%d), skipping scan",
+				#message_buffer, MIN_BATCH_SIZE
+			))
+		end
 	end
 
-	time_acc = 0
-
-	-- Check if we should process
-	if #message_buffer >= MIN_BATCH_SIZE then
-		if is_processing then
-			-- Mark that we have pending work for when current processing finishes
-			pending_scan = true
-			core.log("verbose", "[ai_filter_watcher] Scan requested but busy, marking as pending")
-		else
-			-- Start processing immediately
-			process_batch()
+	-- Clean up old history every hour
+	if cleanup_acc >= 3600 then
+		cleanup_acc = 0
+		if player_history_loaded then
+			cleanup_player_history()
 		end
-	else
-		core.log("verbose", string.format(
-			"[ai_filter_watcher] Buffer too small (%d/%d), skipping scan",
-			#message_buffer, MIN_BATCH_SIZE
-		))
 	end
 end)
 
@@ -482,6 +675,16 @@ core.register_chatcommand("ai_watcher", {
 		local cmd = param:match("^%s*(%S+)") or "status"
 
 		if cmd == "status" then
+			-- Count unique players in history
+			local unique_players = 0
+			local total_entries = 0
+			if player_history_loaded then
+				for player_name, history in pairs(player_history) do
+					unique_players = unique_players + 1
+					total_entries = total_entries + #history
+				end
+			end
+
 			local status_text = string.format([[
 AI Watcher Status:
 - Mode: %s
@@ -491,6 +694,7 @@ AI Watcher Status:
 - Currently processing: %s
 - Pending scan: %s
 - Message buffer: %d messages
+- Moderation history: %d players, %d total entries
 - Statistics:
   • Scans performed: %d
   • Messages processed: %d
@@ -506,6 +710,8 @@ AI Watcher Status:
 				is_processing and "Yes (call_id: " .. active_call_id .. ")" or "No",
 				pending_scan and "Yes" or "No",
 				#message_buffer,
+				unique_players,
+				total_entries,
 				watcher_stats.scans_performed,
 				watcher_stats.messages_processed,
 				watcher_stats.actions_taken,
@@ -533,7 +739,6 @@ AI Watcher Status:
 
 			SCAN_INTERVAL = interval
 			time_acc = 0 -- Reset timer
-			--relays.send_action_report("**AI Watcher**: Scan interval changed to %d seconds by %s", interval, name)
 			return true, string.format("Scan interval set to: %d seconds", interval)
 
 		elseif cmd == "batch" then
@@ -543,7 +748,6 @@ AI Watcher Status:
 			end
 
 			MIN_BATCH_SIZE = size
-			--relays.send_action_report("**AI Watcher**: Min batch size changed to %d messages by %s", size, name)
 			return true, string.format("Minimum batch size set to: %d messages", size)
 
 		elseif cmd == "process" then
@@ -557,7 +761,6 @@ AI Watcher Status:
 
 			if is_processing then
 				pending_scan = true
-				--relays.send_action_report("**AI Watcher**: Manual process requested but already processing batch %d", active_call_id)
 				return true, string.format(
 					"Already processing batch %d. New scan will start when current batch finishes.",
 					active_call_id
@@ -565,7 +768,6 @@ AI Watcher Status:
 			end
 
 			local count = #message_buffer
-			--relays.send_action_report("**AI Watcher**: Manual process started for %d messages by %s", count, name)
 			process_batch()
 			return true, string.format("Processing batch of %d messages", count)
 
@@ -625,8 +827,37 @@ AI Watcher Status:
 				end
 				relays.send_action_report("**AI Watcher**: Chat history cleared by %s", name)
 				return true, "Chat history cleared"
+			elseif what == "player_history" then
+				player_history = {}
+				save_player_history()
+				relays.send_action_report("**AI Watcher**: Player moderation history cleared by %s", name)
+				return true, "Player moderation history cleared"
 			else
-				return false, "Usage: /ai_watcher clear <buffer|stats|history>"
+				return false, "Usage: /ai_watcher clear <buffer|stats|history|player_history>"
+			end
+
+		elseif cmd == "player_history" then
+			local player_name = param:match("%s+(%S+)")
+			if not player_name then
+				return false, "Usage: /ai_watcher player_history <player_name>"
+			end
+
+			local history = get_player_moderation_history(player_name)
+			if #history == 0 then
+				return true, string.format("No recent moderation history for player '%s'", player_name)
+			end
+
+			local history_text = string.format("Moderation history for '%s' (last %d hours):\n",
+				player_name, math.floor(HISTORY_TRACKING_TIME / 3600))
+			history_text = history_text .. format_player_history(history)
+			return true, history_text
+
+		elseif cmd == "reload_prompt" then
+			if load_system_prompt() then
+				relays.send_action_report("**AI Watcher**: System prompt reloaded by %s", name)
+				return true, "System prompt reloaded successfully"
+			else
+				return false, "Failed to reload system prompt (watcher disabled)"
 			end
 
 		elseif cmd == "help" then
@@ -638,7 +869,9 @@ AI Watcher Status:
   process [force]       - Process current batch immediately
   dump                  - Show current messages waiting in buffer
   abort                 - Cancel pending scan (if not yet started)
-  clear <what>          - Clear: buffer, stats, or history
+  clear <what>          - Clear: buffer, stats, history, or player_history
+  player_history <name> - Show moderation history for a player
+  reload_prompt         - Reload the system prompt from file
   help                  - Show this help]]
 
 			return true, help
@@ -651,6 +884,19 @@ AI Watcher Status:
 
 -- Initialization
 core.after(0, function()
+	-- Load system prompt - if fails, watcher is disabled
+	if not load_system_prompt() then
+		core.log("error", "[ai_filter_watcher] System prompt file not found. AI Watcher disabled.")
+		relays.send_action_report("**AI Watcher**: Disabled - system prompt file not found")
+		return
+	end
+
+	-- Load player history
+	load_player_history()
+
+	-- Initial cleanup
+	cleanup_player_history()
+
 	core.log("action", string.format(
 		"[ai_filter_watcher] Initialized (mode: %s, interval: %ds, batch: %d)",
 		WATCHER_MODE, SCAN_INTERVAL, MIN_BATCH_SIZE
@@ -667,12 +913,14 @@ core.after(0, function()
   ai_filter_watcher.scan_interval = %d (default: 60) seconds
   ai_filter_watcher.min_batch_size = %d (default: 5) messages
   ai_filter_watcher.history_size = %d (default: 100)
+  ai_filter_watcher.history_tracking_time = %d (default: 86400) seconds
 
 Use /ai_watcher command to change settings at runtime.]],
 		tostring(WATCHER_ENABLED),
 		WATCHER_MODE,
 		SCAN_INTERVAL,
 		MIN_BATCH_SIZE,
-		HISTORY_SIZE
+		HISTORY_SIZE,
+		HISTORY_TRACKING_TIME
 	))
 end)

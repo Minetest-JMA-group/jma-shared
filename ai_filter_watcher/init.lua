@@ -45,11 +45,6 @@ ai_filter_watcher = {
 	}
 }
 
--- Initialize the ring buffer
-for i = 1, HISTORY_SIZE do
-	chat_history[i] = {}
-end
-
 -- Load system prompt from file
 local function load_system_prompt()
 	local file = io.open(system_prompt_file, "r")
@@ -235,19 +230,39 @@ local function get_last_messages(n)
 	end
 	
 	local result = {}
+	local result_index = 1
 	
-	-- Fill array in reverse order, starting from the end
-	for i = count, 1, -1 do
-		local idx = history_index - (count - i + 1)
-		if idx <= 0 then
-			idx = idx + HISTORY_SIZE
+	-- Start from the most recent message and work backwards
+	local current_idx = history_index - 1
+	if current_idx <= 0 then
+		current_idx = current_idx + HISTORY_SIZE
+	end
+	
+	-- Collect messages in reverse chronological order
+	while result_index <= count do
+		local entry = chat_history[current_idx]
+		if entry then  -- Only include if not nil (slot was written to)
+			result[result_index] = entry
+			result_index = result_index + 1
 		end
 		
-		if chat_history[idx] and chat_history[idx].name then
-			result[i] = chat_history[idx]
-		else
-			result[i] = nil
+		-- Move to previous position with wrap-around
+		current_idx = current_idx - 1
+		if current_idx <= 0 then
+			current_idx = current_idx + HISTORY_SIZE
 		end
+		
+		-- Safety check: prevent infinite loop
+		if current_idx == history_index then
+			-- We've wrapped all the way around
+			break
+		end
+	end
+	
+	-- Reverse the array to get chronological order (oldest to newest)
+	for i = 1, math.floor(#result / 2) do
+		local j = #result - i + 1
+		result[i], result[j] = result[j], result[i]
 	end
 	
 	return result
@@ -644,12 +659,14 @@ chat_lib.register_on_chat_message(4, function(name, message)
 	-- Always add to history
 	add_to_history(name, message)
 
-	-- Add to buffer for batch processing
-	table.insert(message_buffer, {
-		name = name,
-		message = message,
-		time = os.time()
-	})
+	-- Only add to buffer for batch processing if not disabled
+	if WATCHER_MODE ~= ai_filter_watcher.MODES.DISABLED then
+		table.insert(message_buffer, {
+			name = name,
+			message = message,
+			time = os.time()
+		})
+	end
 
 	return false -- Never block messages in watcher mode
 end)
@@ -870,10 +887,6 @@ AI Watcher Status:
 				chat_history = {}
 				history_index = 1
 				history_count = 0
-				-- Re-initialize the ring buffer
-				for i = 1, HISTORY_SIZE do
-					chat_history[i] = {}
-				end
 				relays.send_action_report("**AI Watcher**: Chat history cleared by %s", name)
 				return true, "Chat history cleared"
 			elseif what == "player_history" then

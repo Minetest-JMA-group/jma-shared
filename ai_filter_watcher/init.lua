@@ -344,6 +344,8 @@ local function process_batch()
 	-- Use the loaded system prompt
 	context:set_system_prompt(system_prompt)
 
+	context:set_max_steps(10)
+
 	-- Add tools
 	context:add_tool({
 		name = "get_history",

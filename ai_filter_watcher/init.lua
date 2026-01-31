@@ -93,7 +93,7 @@ end
 
 -- Save player history to storage
 local function save_player_history()
-	storage:set("player_history", core.serialize(player_history))
+	storage:set_string("player_history", core.serialize(player_history))
 end
 
 -- Clean up old player history entries

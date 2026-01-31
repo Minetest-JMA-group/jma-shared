@@ -291,14 +291,15 @@ local function process_batch()
 		return
 	end
 
-	if #message_buffer < MIN_BATCH_SIZE then
+	-- Allow batch processing to happen when force-called on smaller number of messages
+	--[[if #message_buffer < MIN_BATCH_SIZE then
 		core.log("verbose", string.format(
 			"[ai_filter_watcher] Skipping scan: only %d messages in buffer (need %d)",
 			#message_buffer, MIN_BATCH_SIZE
 		))
 		is_processing = false
 		return
-	end
+	end]]
 
 	-- Set processing flag immediately
 	is_processing = true

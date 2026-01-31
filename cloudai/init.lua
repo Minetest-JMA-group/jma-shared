@@ -257,7 +257,9 @@ core.register_chatcommand("cloudai", {
 		if cmd == "help" then
 			return true, [[Usage:
 /cloudai help: Print this help message
-/cloudai timeout <new_value>: If the third argument is present, set timeout to <new_value> seconds, otherwise print the current value]]
+/cloudai timeout <new_value>: If the second argument is present, set timeout to <new_value> seconds, otherwise print the current value
+/cloudai model <new_value>: If the second argument is present, set model to <new_value>, otherwise print the current value
+/cloudai url <new_value>: If the second argument is present, set URL to <new_value>, otherwise print the current value]]
 		end
 		if cmd == "timeout" then
 			local new_value = iter()

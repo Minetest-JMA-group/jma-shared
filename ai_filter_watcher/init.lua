@@ -9,12 +9,33 @@ local is_xban = core.global_exists("xban")
 local is_essentials = core.global_exists("essentials")
 
 -- Configuration with defaults
-local WATCHER_ENABLED = core.settings:get_bool("ai_filter_watcher.enabled", true)
 local WATCHER_MODE = core.settings:get("ai_filter_watcher.mode") or "enabled" -- "enabled", "permissive", "disabled"
 local SCAN_INTERVAL = tonumber(core.settings:get("ai_filter_watcher.scan_interval")) or 60 -- seconds
 local MIN_BATCH_SIZE = tonumber(core.settings:get("ai_filter_watcher.min_batch_size")) or 5 -- messages
 local HISTORY_SIZE = tonumber(core.settings:get("ai_filter_watcher.history_size")) or 100
 local HISTORY_TRACKING_TIME = tonumber(core.settings:get("ai_filter_watcher.history_tracking_time")) or 86400 -- seconds (default: 1 day)
+
+-- State variables
+local PROMPT_READY = false
+local message_buffer = {}
+local chat_history = {}
+local history_index = 1
+local history_count = 0
+local watcher_stats = {
+	scans_performed = 0,
+	messages_processed = 0,
+	actions_taken = 0,
+	last_scan_time = 0,
+	last_action_time = 0
+}
+local player_history = {}
+local player_history_loaded = false
+local system_prompt = ""
+local system_prompt_file = modpath .. "/system_prompt.txt"
+local is_processing = false
+local pending_scan = false
+local active_call_id = 0
+local active_context = nil
 
 ai_filter_watcher = {
 	MODES = {
@@ -23,35 +44,6 @@ ai_filter_watcher = {
 		DISABLED = "disabled"	 -- No AI processing
 	}
 }
-
--- Message accumulation buffer
-local message_buffer = {}
--- Chat history storage (circular buffer)
-local chat_history = {}
-local history_index = 1
-local history_count = 0  -- Track how many messages are actually stored
-
--- Statistics
-local watcher_stats = {
-	scans_performed = 0,
-	messages_processed = 0,
-	actions_taken = 0,
-	last_scan_time = 0,
-	last_action_time = 0
-}
-
--- Player moderation history
-local player_history = {}
-local player_history_loaded = false
-
--- System prompt
-local system_prompt = ""
-local system_prompt_file = modpath .. "/system_prompt.txt"
-
--- Serial processing control
-local is_processing = false
-local pending_scan = false  -- Flag to indicate we should scan when current processing finishes
-local active_call_id = 0
 
 -- Initialize the ring buffer
 for i = 1, HISTORY_SIZE do
@@ -64,14 +56,29 @@ local function load_system_prompt()
 	if file then
 		system_prompt = file:read("*a")
 		file:close()
+		PROMPT_READY = true
 		core.log("action", "[ai_filter_watcher] System prompt loaded from file")
 		return true
 	else
 		core.log("error", "[ai_filter_watcher] System prompt file not found: " .. system_prompt_file)
+		system_prompt = ""
+		PROMPT_READY = false
 		WATCHER_MODE = ai_filter_watcher.MODES.DISABLED
-		WATCHER_ENABLED = false
 		return false
 	end
+end
+
+-- Abort any ongoing AI processing
+local function abort_current_processing()
+	if is_processing and active_context then
+		core.log("action", "[ai_filter_watcher] Aborting ongoing AI processing")
+		active_context:destroy()
+		active_context = nil
+	end
+	
+	is_processing = false
+	pending_scan = false
+	active_call_id = active_call_id + 1
 end
 
 -- Load player history from storage
@@ -171,7 +178,7 @@ local function get_player_moderation_history(player_name)
 	return recent_history
 end
 
--- Format player history for AI
+-- Format player history for AI (optimized with table.concat)
 local function format_player_history(history)
 	if #history == 0 then
 		return "No recent moderation history."
@@ -220,24 +227,29 @@ local function add_to_history(name, message)
 	end
 end
 
+-- Optimized get_last_messages with direct array assignment
 local function get_last_messages(n)
+	local count = math.min(n, history_count)
+	if count == 0 then
+		return {}
+	end
+	
 	local result = {}
-	local count = math.min(n, history_count)  -- Use actual count of stored messages
-
-	-- Start from the most recent message and go backwards
-	for i = 0, count - 1 do
-		-- Calculate index going backwards through the ring buffer
-		local idx = history_index - 1 - i
+	
+	-- Fill array in reverse order, starting from the end
+	for i = count, 1, -1 do
+		local idx = history_index - (count - i + 1)
 		if idx <= 0 then
 			idx = idx + HISTORY_SIZE
 		end
-
-		-- Only add if the entry has content
+		
 		if chat_history[idx] and chat_history[idx].name then
-			table.insert(result, 1, chat_history[idx])  -- Insert at beginning to maintain chronological order
+			result[i] = chat_history[idx]
+		else
+			result[i] = nil
 		end
 	end
-
+	
 	return result
 end
 
@@ -255,8 +267,7 @@ end
 
 local function process_batch()
 	if WATCHER_MODE == ai_filter_watcher.MODES.DISABLED then
-		is_processing = false
-		pending_scan = false
+		abort_current_processing()
 		return
 	end
 
@@ -277,12 +288,8 @@ local function process_batch()
 	-- Set processing flag immediately
 	is_processing = true
 
-	-- Create a copy of the buffer and clear it
-	local batch_to_process = {}
-	for i, msg in ipairs(message_buffer) do
-		---@diagnostic disable-next-line: undefined-field
-		batch_to_process[i] = table.copy(msg)
-	end
+	-- Move the buffer reference and clear it
+	local batch_to_process = message_buffer
 	message_buffer = {}
 
 	if #batch_to_process == 0 then
@@ -305,7 +312,19 @@ local function process_batch()
 	local formatted_batch = format_history(batch_to_process)
 
 	-- Create AI context
-	local context = cloudai.get_context()
+	local context, err = cloudai.get_context()
+	if not context then
+		core.log("error", string.format("[ai_filter_watcher] Failed to get AI context for batch %d: %s", 
+			call_id, tostring(err)))
+		is_processing = false
+		if pending_scan then
+			pending_scan = false
+			process_batch()
+		end
+		return
+	end
+	
+	active_context = context
 
 	-- Use the loaded system prompt
 	context:set_system_prompt(system_prompt)
@@ -539,10 +558,17 @@ local function process_batch()
 		unique_players[msg.name] = true
 	end
 
-	-- Build player history section for the prompt
+	-- Build player history section for the prompt (with caching)
 	local player_history_section = ""
+	local history_cache = {}  -- Cache for this batch
+
 	for player_name in pairs(unique_players) do
-		local history = get_player_moderation_history(player_name)
+		-- Check cache first
+		if not history_cache[player_name] then
+			history_cache[player_name] = get_player_moderation_history(player_name)
+		end
+		
+		local history = history_cache[player_name]
 		if #history > 0 then
 			player_history_section = player_history_section .. 
 				string.format("\n--- Moderation history for player '%s' ---\n%s", 
@@ -562,6 +588,9 @@ Review these messages and take moderation actions if needed.]],
 	)
 
 	local success, err = context:call(prompt, function(history, response, error)
+		-- Clear the active context reference
+		active_context = nil
+		
 		-- Mark processing as complete
 		is_processing = false
 
@@ -583,7 +612,9 @@ Review these messages and take moderation actions if needed.]],
 		if pending_scan then
 			pending_scan = false
 			core.log("verbose", "[ai_filter_watcher] Processing pending scan after completion")
-			process_batch()
+			core.after(0.1, function()
+				process_batch()
+			end)
 		end
 	end)
 
@@ -595,12 +626,15 @@ Review these messages and take moderation actions if needed.]],
 		-- Send failure to relays
 		relays.send_action_report("**AI Watcher**: Failed to call AI for batch %d: %s", call_id, tostring(err))
 
+		active_context = nil
 		is_processing = false
 
 		-- Still check for pending scan
 		if pending_scan then
 			pending_scan = false
-			process_batch()
+			core.after(0.1, function()
+				process_batch()
+			end)
 		end
 	end
 end
@@ -688,6 +722,7 @@ core.register_chatcommand("ai_watcher", {
 			local status_text = string.format([[
 AI Watcher Status:
 - Mode: %s
+- System prompt: %s
 - Scan interval: %d seconds
 - Min batch size: %d messages
 - History size: %d messages (stored: %d)
@@ -703,6 +738,7 @@ AI Watcher Status:
   • Last action: %s
 ]],
 				WATCHER_MODE,
+				PROMPT_READY and "Loaded" or "Missing/Invalid",
 				SCAN_INTERVAL,
 				MIN_BATCH_SIZE,
 				HISTORY_SIZE,
@@ -725,6 +761,16 @@ AI Watcher Status:
 			local mode = param:match("%s+(%S+)")
 			if not mode or not (mode == "enabled" or mode == "permissive" or mode == "disabled") then
 				return false, "Usage: /ai_watcher mode <enabled|permissive|disabled>"
+			end
+
+			-- If trying to enable but prompt isn't ready
+			if (mode == "enabled" or mode == "permissive") and not PROMPT_READY then
+				return false, "Cannot enable watcher: system prompt not loaded. Use '/ai_watcher reload_prompt' first."
+			end
+			
+			-- If disabling, abort any ongoing processing
+			if mode == "disabled" and WATCHER_MODE ~= "disabled" then
+				abort_current_processing()
 			end
 
 			WATCHER_MODE = mode
@@ -790,13 +836,16 @@ AI Watcher Status:
 			return true, dump_text
 
 		elseif cmd == "abort" then
-			-- Note: We can't actually abort an ongoing AI call, but we can clear the pending flag
-			if pending_scan then
+			if is_processing then
+				abort_current_processing()
+				relays.send_action_report("**AI Watcher**: Current processing aborted by %s", name)
+				return true, "Ongoing AI processing aborted"
+			elseif pending_scan then
 				pending_scan = false
 				relays.send_action_report("**AI Watcher**: Pending scan cancelled by %s", name)
 				return true, "Pending scan cancelled"
 			else
-				return false, "No pending scan to abort"
+				return false, "No processing or pending scan to abort"
 			end
 
 		elseif cmd == "clear" then
@@ -857,7 +906,7 @@ AI Watcher Status:
 				relays.send_action_report("**AI Watcher**: System prompt reloaded by %s", name)
 				return true, "System prompt reloaded successfully"
 			else
-				return false, "Failed to reload system prompt (watcher disabled)"
+				return false, "Failed to reload system prompt"
 			end
 
 		elseif cmd == "help" then
@@ -868,7 +917,7 @@ AI Watcher Status:
   batch <size>          - Set minimum batch size (1-100)
   process [force]       - Process current batch immediately
   dump                  - Show current messages waiting in buffer
-  abort                 - Cancel pending scan (if not yet started)
+  abort                 - Abort ongoing processing or cancel pending scan
   clear <what>          - Clear: buffer, stats, history, or player_history
   player_history <name> - Show moderation history for a player
   reload_prompt         - Reload the system prompt from file
@@ -884,13 +933,9 @@ AI Watcher Status:
 
 -- Initialization
 core.after(0, function()
-	-- Load system prompt - if fails, watcher is disabled
-	if not load_system_prompt() then
-		core.log("error", "[ai_filter_watcher] System prompt file not found. AI Watcher disabled.")
-		relays.send_action_report("**AI Watcher**: Disabled - system prompt file not found")
-		return
-	end
-
+	-- Load system prompt - if fails, watcher starts disabled
+	load_system_prompt()
+	
 	-- Load player history
 	load_player_history()
 
@@ -898,17 +943,16 @@ core.after(0, function()
 	cleanup_player_history()
 
 	core.log("action", string.format(
-		"[ai_filter_watcher] Initialized (mode: %s, interval: %ds, batch: %d)",
-		WATCHER_MODE, SCAN_INTERVAL, MIN_BATCH_SIZE
+		"[ai_filter_watcher] Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d)",
+		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE
 	))
 
 	-- Send initialization message to relays
-	relays.send_action_report("**AI Watcher**: Initialized (mode: %s, interval: %ds, batch: %d)",
-		WATCHER_MODE, SCAN_INTERVAL, MIN_BATCH_SIZE)
+	relays.send_action_report("**AI Watcher**: Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d)",
+		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE)
 
 	core.log("info", string.format([[
 [ai_filter_watcher] Configuration (set in minetest.conf):
-  ai_filter_watcher.enabled = %s (default: true)
   ai_filter_watcher.mode = %s (default: enabled) [enabled|permissive|disabled]
   ai_filter_watcher.scan_interval = %d (default: 60) seconds
   ai_filter_watcher.min_batch_size = %d (default: 5) messages
@@ -916,7 +960,6 @@ core.after(0, function()
   ai_filter_watcher.history_tracking_time = %d (default: 86400) seconds
 
 Use /ai_watcher command to change settings at runtime.]],
-		tostring(WATCHER_ENABLED),
 		WATCHER_MODE,
 		SCAN_INTERVAL,
 		MIN_BATCH_SIZE,

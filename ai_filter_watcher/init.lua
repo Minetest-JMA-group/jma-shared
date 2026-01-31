@@ -70,7 +70,7 @@ local function abort_current_processing()
 		active_context:destroy()
 		active_context = nil
 	end
-	
+
 	is_processing = false
 	pending_scan = false
 	active_call_id = active_call_id + 1
@@ -183,7 +183,7 @@ local function format_player_history(history)
 	for _, entry in ipairs(history) do
 		local time_ago = os.time() - entry.time
 		local time_str = ""
-		
+
 		if time_ago < 3600 then
 			time_str = string.format("%d minutes ago", math.floor(time_ago / 60))
 		elseif time_ago < 86400 then
@@ -195,7 +195,7 @@ local function format_player_history(history)
 		if entry.type == "warn" then
 			table.insert(lines, string.format("- Warned %s for: %s", time_str, entry.reason))
 		elseif entry.type == "mute" then
-			table.insert(lines, string.format("- Muted for %d minutes %s for: %s", 
+			table.insert(lines, string.format("- Muted for %d minutes %s for: %s",
 				entry.duration or 0, time_str, entry.reason))
 		end
 	end
@@ -228,16 +228,16 @@ local function get_last_messages(n)
 	if count == 0 then
 		return {}
 	end
-	
+
 	local result = {}
 	local result_index = 1
-	
+
 	-- Start from the most recent message and work backwards
 	local current_idx = history_index - 1
 	if current_idx <= 0 then
 		current_idx = current_idx + HISTORY_SIZE
 	end
-	
+
 	-- Collect messages in reverse chronological order
 	while result_index <= count do
 		local entry = chat_history[current_idx]
@@ -245,26 +245,26 @@ local function get_last_messages(n)
 			result[result_index] = entry
 			result_index = result_index + 1
 		end
-		
+
 		-- Move to previous position with wrap-around
 		current_idx = current_idx - 1
 		if current_idx <= 0 then
 			current_idx = current_idx + HISTORY_SIZE
 		end
-		
+
 		-- Safety check: prevent infinite loop
 		if current_idx == history_index then
 			-- We've wrapped all the way around
 			break
 		end
 	end
-	
+
 	-- Reverse the array to get chronological order (oldest to newest)
 	for i = 1, math.floor(#result / 2) do
 		local j = #result - i + 1
 		result[i], result[j] = result[j], result[i]
 	end
-	
+
 	return result
 end
 
@@ -329,7 +329,7 @@ local function process_batch()
 	-- Create AI context
 	local context, err = cloudai.get_context()
 	if not context then
-		core.log("error", string.format("[ai_filter_watcher] Failed to get AI context for batch %d: %s", 
+		core.log("error", string.format("[ai_filter_watcher] Failed to get AI context for batch %d: %s",
 			call_id, tostring(err)))
 		is_processing = false
 		if pending_scan then
@@ -338,7 +338,7 @@ local function process_batch()
 		end
 		return
 	end
-	
+
 	active_context = context
 
 	-- Use the loaded system prompt
@@ -584,11 +584,11 @@ local function process_batch()
 		if not history_cache[player_name] then
 			history_cache[player_name] = get_player_moderation_history(player_name)
 		end
-		
+
 		local history = history_cache[player_name]
 		if #history > 0 then
-			player_history_section = player_history_section .. 
-				string.format("\n--- Moderation history for player '%s' ---\n%s", 
+			player_history_section = player_history_section ..
+				string.format("\n--- Moderation history for player '%s' ---\n%s",
 					player_name, format_player_history(history))
 		end
 	end
@@ -607,7 +607,7 @@ Review these messages and take moderation actions if needed.]],
 	local success, err = context:call(prompt, function(history, response, error)
 		-- Clear the active context reference
 		active_context = nil
-		
+
 		-- Mark processing as complete
 		is_processing = false
 
@@ -786,7 +786,7 @@ AI Watcher Status:
 			if (mode == "enabled" or mode == "permissive") and not PROMPT_READY then
 				return false, "Cannot enable watcher: system prompt not loaded. Use '/ai_watcher reload_prompt' first."
 			end
-			
+
 			-- If disabling, abort any ongoing processing
 			if mode == "disabled" and WATCHER_MODE ~= "disabled" then
 				abort_current_processing()
@@ -950,7 +950,7 @@ AI Watcher Status:
 core.after(0, function()
 	-- Load system prompt - if fails, watcher starts disabled
 	load_system_prompt()
-	
+
 	-- Load player history
 	load_player_history()
 

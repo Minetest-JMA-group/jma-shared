@@ -38,5 +38,6 @@ _Functions marked with (C++) depend on the C++ module of this mod. Functions mar
 - err (string or nil), errno (number or nil) `ie_env.signal(signum: integer, action: sighandler_t)` (Linux) - Wrapper around signal(2). Only accepts SIG_DFL or SIG_IGN as action. Use `algorithms.signal.*` for SIG_DFL, SIG_IGN, and SIG_ERR constants.
 - new fd (number or nil), err (string or nil), errno (number or nil) `ie_env.open(path: string, flags: integer, mode (optional): integer)` (Linux) - Wrapper around open(2). Accepts optional mode argument for O_CREAT.
 - err (string or nil), errno (number or nil) `ie_env.close(fd: integer)` (Linux) - Wrapper around close(2).
+- err (string or nil), errno (number or nil) `ie_env.unlink(path: string)` (Linux) - Wrapper around unlink(2).
 
 **Constants:** `algorithms.errno.*`, `algorithms.signal.*`, and `algorithms.fcntl.*` are available for error numbers, signal actions, and fcntl commands respectively.

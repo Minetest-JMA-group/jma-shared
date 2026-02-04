@@ -178,6 +178,7 @@ else
 		sighandler_t signal(int signum, sighandler_t handler);
 		int open(const char *pathname, int flags, ...);
 		int close(int fd);
+		int unlink(const char *path);
 	]]
 	algorithms.signal.SIG_DFL = ffi.cast("sighandler_t", 0)
 	algorithms.signal.SIG_IGN = ffi.cast("sighandler_t", 1)
@@ -362,6 +363,19 @@ else
 			return "Invalid argument", algorithms.errno.EINVAL
 		end
 		local ret = ffi.C.close(fd)
+		if ret == -1 then
+			local errnum = ffi.errno()
+			local errstr = ffi.string(ffi.C.strerror(errnum))
+			return errstr, errnum
+		end
+	end
+
+	-- Return: err (string or nil), errno (number or nil)
+	insecure_env.unlink = function(path)
+		if type(path) ~= "string" then
+			return "Invalid argument", algorithms.errno.EINVAL
+		end
+		local ret = ffi.C.unlink(path)
 		if ret == -1 then
 			local errnum = ffi.errno()
 			local errstr = ffi.string(ffi.C.strerror(errnum))

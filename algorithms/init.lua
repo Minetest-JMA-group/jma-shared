@@ -169,6 +169,7 @@ else
 		int removexattr(const char *path, const char *name);
 		typedef long ssize_t;
 		ssize_t getxattr(const char *path, const char *name, void *value, size_t size);
+		typedef unsigned int mode_t;
 		int mkfifo(const char *pathname, mode_t mode);
 		ssize_t read(int fd, void *buf, size_t count);
 		ssize_t write(int fd, const void *buf, size_t count);

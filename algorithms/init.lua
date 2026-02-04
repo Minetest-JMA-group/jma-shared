@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- Copyright (c) 2023-2025 Marko Petrović
+-- Copyright (c) 2023-2026 Marko Petrović
 ---@diagnostic disable: need-check-nil
 
 algorithms = {}
@@ -137,56 +137,82 @@ local insecure_env = {
 algorithms.execute = nil
 
 if algorithms.os ~= "Linux" then
-	insecure_env.setxattr = function(path, name, value, flags) return "[algorithms]: Function not implemented", 38 end
-	insecure_env.getxattr = function(path, name) return nil, "[algorithms]: Function not implemented", 38 end
+	local dummy = function() return "[algorithms]: Function not implemented", 38 end
+	insecure_env.setxattr = dummy
+	insecure_env.getxattr = dummy
+	insecure_env.write = dummy
+	insecure_env.read = dummy
+	insecure_env.fcntl = dummy
+	insecure_env.mkfifo = dummy
+	insecure_env.signal = dummy
+	insecure_env.open = dummy
+	insecure_env.close = dummy
 	algorithms.get_xattr_storage = function()
 		return {
 			setxattr = insecure_env.setxattr,
 			getxattr = insecure_env.getxattr
 		}
 	end
+
+	algorithms.errno = {}
+	algorithms.fcntl = {}
+	algorithms.signal = {}
 else
 	local MP = core.get_modpath(get_current_modname())
 	algorithms.errno = dofile(MP.."/linuxerrno.lua")
+	algorithms.fcntl = dofile(MP.."/linuxfcntl.lua")
+	algorithms.signal = dofile(MP.."/linuxsignal.lua")
+
 	local ffi = algorithms.require("ffi")
 	ffi.cdef[[
 		int setxattr(const char *path, const char *name, const void *value, size_t size, int flags);
 		int removexattr(const char *path, const char *name);
 		typedef long ssize_t;
 		ssize_t getxattr(const char *path, const char *name, void *value, size_t size);
+		int mkfifo(const char *pathname, mode_t mode);
+		ssize_t read(int fd, void *buf, size_t count);
+		ssize_t write(int fd, const void *buf, size_t count);
+		int fcntl(int fd, int cmd, ...);
 		char *strerror(int errnum);
+		typedef void (*sighandler_t)(int);
+		sighandler_t signal(int signum, sighandler_t handler);
+		int open(const char *pathname, int flags, ...);
+		int close(int fd);
 	]]
+	algorithms.signal.SIG_DFL = ffi.cast("sighandler_t", 0)
+	algorithms.signal.SIG_IGN = ffi.cast("sighandler_t", 1)
+	algorithms.signal.SIG_ERR = ffi.cast("sighandler_t", -1)
 
 	-- Return: err (string or nil), errno (number or nil)
 	insecure_env.setxattr = function(path, name, value, flags)
 		flags = flags or 0
-		local ok, ret
+		if type(path) ~= "string" or type(name) ~= "string" or type(flags) ~= "number" or flags ~= math.floor(flags) then
+			return "Invalid argument", algorithms.errno.EINVAL
+		end
+		local ret
 		if not value then
-			ok, ret = pcall(ffi.C.removexattr, path, name)
+			ret = ffi.C.removexattr(path, name)
 		else
 			if type(value) ~= "string" then
 				return "Invalid argument", algorithms.errno.EINVAL
 			end
-			ok, ret = pcall(ffi.C.setxattr, path, name, value, #value, flags)
-		end
-		if not ok then
-			return ret, algorithms.errno.EINVAL
+			ret = ffi.C.setxattr(path, name, value, #value, flags)
 		end
 		if ret ~= 0 then
 			local errnum = ffi.errno()
 			return ffi.string(ffi.C.strerror(errnum)), errnum
 		end
 	end
+
 	-- Return: value (string or nil), err (string or nil), errno (number or nil)
 	insecure_env.getxattr = function(path, name)
+		if type(path) ~= "string" or type(name) ~= "string" then
+			return nil, "Invalid argument", algorithms.errno.EINVAL
+		end
 		-- No need to free in Lua; it's freed automatically
 		local buf = ffi.new("uint8_t[?]", MAX_XATTR_SIZE)
-		-- LuaJIT checks arguments
-		local ok, ret = pcall(ffi.C.getxattr, path, name, buf, MAX_XATTR_SIZE)
 
-		if not ok then
-			return nil, ret, algorithms.errno.EINVAL
-		end
+		local ret = ffi.C.getxattr(path, name, buf, MAX_XATTR_SIZE)
 		if ret < 0 then
 			local errnum = ffi.errno()
 			local errstr = ffi.string(ffi.C.strerror(errnum))
@@ -194,7 +220,155 @@ else
 		end
 		return ffi.string(buf, ret)
 	end
-	
+
+	-- Return: err (string or nil), errno (number or nil)
+	insecure_env.mkfifo = function(path, mode)
+		if type(path) ~= "string" or type(mode) ~= "number" or mode ~= math.floor(mode) then
+			return "Invalid argument", algorithms.errno.EINVAL
+		end
+		local ret = ffi.C.mkfifo(path, mode)
+		if ret ~= 0 then
+			local errnum = ffi.errno()
+			return ffi.string(ffi.C.strerror(errnum)), errnum
+		end
+	end
+
+	-- Return: data (string or nil(on EOF or error)), err (string or nil), errno (number or nil)
+	insecure_env.read = function(fd, size)
+		if type(fd) ~= "number" or type(size) ~= "number" or fd ~= math.floor(fd) or size ~= math.floor(size) then
+			return nil, "Invalid argument", algorithms.errno.EINVAL
+		end
+		if size <= 0 then
+			return "", nil, nil
+		end
+
+		-- No need to free in Lua; it's freed automatically
+		local buf = ffi.new("uint8_t[?]", size)
+		local ret = ffi.C.read(fd, buf, size)
+
+		if ret < 0 then
+			local errnum = ffi.errno()
+			local errstr = ffi.string(ffi.C.strerror(errnum))
+			return nil, errstr, errnum
+		end
+		if ret == 0 then
+			return nil, nil, nil -- EOF
+		end
+		return ffi.string(buf, ret)
+	end
+
+	-- Return: bytes_written (number or nil), err (string or nil), errno (number or nil)
+	insecure_env.write = function(fd, buf)
+		if type(buf) ~= "string" or type(fd) ~= "number" or fd ~= math.floor(fd) then
+			return nil, "Invalid argument", algorithms.errno.EINVAL
+		end
+		if #buf == 0 then
+			return 0, nil, nil
+		end
+
+		local ret = ffi.C.write(fd, buf, #buf)
+
+		if ret < 0 then
+			local errnum = ffi.errno()
+			local errstr = ffi.string(ffi.C.strerror(errnum))
+			return nil, errstr, errnum
+		end
+		return ret
+	end
+
+	-- Variadic fcntl implementation
+	-- Return: result (number or nil), err (string or nil), errno (number or nil)
+	insecure_env.fcntl = function(fd, op, ...)
+		if type(fd) ~= "number" or type(op) ~= "number" or fd ~= math.floor(fd) or op ~= math.floor(op) then
+			return nil, "Invalid argument", algorithms.errno.EINVAL
+		end
+		local args = {...}
+		local arg_count = select('#', ...)
+
+		local ret
+		if arg_count == 0 then
+			ret = ffi.C.fcntl(fd, op)
+		elseif arg_count == 1 then
+			local arg = args[1]
+			if type(arg) == "number" and arg == math.floor(arg) then
+				ret = ffi.C.fcntl(fd, op, arg)
+			end
+		elseif arg_count == 2 then
+			local arg1, arg2 = args[1], args[2]
+			if type(arg1) == "number" and type(arg2) == "number" and arg1 == math.floor(arg1) and arg2 == math.floor(arg2) then
+				ret = ffi.C.fcntl(fd, op, arg1, arg2)
+			end
+		else
+			return nil, "Too many arguments for fcntl", algorithms.errno.EINVAL
+		end
+
+		if not ret then
+			return nil, "Invalid argument", algorithms.errno.EINVAL
+		end
+		if ret < 0 then
+			local errnum = ffi.errno()
+			local errstr = ffi.string(ffi.C.strerror(errnum))
+			return nil, errstr, errnum
+		end
+		return ret
+	end
+
+	-- Return: err (string or nil), errno (number or nil)
+	insecure_env.signal = function(signum, action)
+		if type(signum) ~= "number" or signum ~= math.floor(signum)
+		   or (action ~= algorithms.signal.SIG_DFL and action ~= algorithms.signal.SIG_IGN) then
+			return "Invalid argument", algorithms.errno.EINVAL
+		end
+		local ret = ffi.C.signal(signum, action)
+		if ret == algorithms.signal.SIG_ERR then
+			local errnum = ffi.errno()
+			local errstr = ffi.string(ffi.C.strerror(errnum))
+			return errstr, errnum
+		end
+	end
+
+	-- Return: new fd (number or nil), err (string or nil), errno (number or nil)
+	insecure_env.open = function(path, flags, ...)
+		if type(path) ~= "string" or type(flags) ~= "number" or flags ~= math.floor(flags) then
+			return nil, "Invalid argument", algorithms.errno.EINVAL
+		end
+		local args = {...}
+		local arg_count = select('#', ...)
+		if arg_count > 1 then
+			return nil, "Invalid argument", algorithms.errno.EINVAL
+		end
+
+		local ret
+		if arg_count == 1 then
+			local mode = args[1]
+			if type(mode) ~= "number" or mode ~= math.floor(mode) then
+				return nil, "Invalid argument", algorithms.errno.EINVAL
+			end
+			ret = ffi.C.open(path, flags, mode)
+		else
+			ret = ffi.C.open(path, flags)
+		end
+		if ret < 0 then
+			local errnum = ffi.errno()
+			local errstr = ffi.string(ffi.C.strerror(errnum))
+			return nil, errstr, errnum
+		end
+		return ret
+	end
+
+	-- Return: err (string or nil), errno (number or nil)
+	insecure_env.close = function(fd)
+		if type(fd) ~= "number" or fd ~= math.floor(fd) then
+			return "Invalid argument", algorithms.errno.EINVAL
+		end
+		local ret = ffi.C.close(fd)
+		if ret == -1 then
+			local errnum = ffi.errno()
+			local errstr = ffi.string(ffi.C.strerror(errnum))
+			return errstr, errnum
+		end
+	end
+
 	local function normalize(path)
 		local parts = {}
 		for part in path:gmatch("[^/]+") do

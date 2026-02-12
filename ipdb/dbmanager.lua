@@ -1,0 +1,214 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- Copyright (c) 2026 Marko Petrović
+local modpath = core.get_modpath(core.get_current_modname())
+local dbpath = core.get_worldpath() .. "/ipdb.sqlite"
+local schema_path = modpath .. "/schema.sql"
+local dbmanager = {}
+local ipdb
+local sqlite
+
+dbmanager.init_ipdb = function(sqlite_param)
+	sqlite = sqlite_param
+	local db, errcode, errmsg = sqlite.open(dbpath)
+	if not db then
+		core.log("error", string.format("[ipdb]: Failed to open database (%s): %s", errmsg, dbpath))
+		return nil
+	end
+	local ret = db:exec("PRAGMA foreign_keys = ON;")
+	if ret ~= sqlite.OK then
+		core.log("error", "[ipdb]: Failed to enable foreign keys")
+		db:close()
+		return nil
+	end
+
+	local version
+	for val in db:urows("PRAGMA user_version;") do
+		version = val
+		break
+	end
+
+	if version == 0 then
+		local f = io.open(schema_path, "rb")
+		if not f then
+			core.log("error", "[ipdb]: Failed to open schema file: " .. schema_path)
+			db:close()
+			return nil
+		end
+		local sql = f:read("*a")
+		f:close()
+
+		if not sql or #sql == 0 then
+			core.log("error", "[ipdb]: Schema file is empty or unreadable: " .. schema_path)
+			db:close()
+			return nil
+		end
+
+		local ret = db:exec(sql)
+		if ret ~= sqlite.OK then
+			core.log("error", "[ipdb]: Failed to execute schema: " .. schema_path)
+			db:close()
+			return nil
+		end
+		core.log("action", "[ipdb]: Schema applied successfully, version set to 1")
+	elseif version ~= 1 then
+		core.log("error", "[ipdb]: Unknown database version")
+		db:close()
+		return nil
+	end
+
+	ipdb = db
+	return db
+end
+
+local user_check
+-- Search for the given username and return the row as Lua key-value table if it exists
+dbmanager.user_exists = function(username)
+	if not user_check then
+		user_check = ipdb:prepare("SELECT * FROM Usernames WHERE name = ?;")
+	else
+		user_check:reset()
+	end
+	local ret = user_check:bind(1, username)
+	if ret ~= sqlite.OK then error(ret) end
+	for result in user_check:nrows() do
+		return result
+	end
+end
+
+local ip_check
+-- Search for the given IP and return the row as Lua key-value table if it exists
+dbmanager.ip_exists = function(ip)
+	if not ip_check then
+		ip_check = ipdb:prepare("SELECT * FROM IPs WHERE ip = ?;")
+	else
+		ip_check:reset()
+	end
+	local ret = ip_check:bind(1, ip)
+	if ret ~= sqlite.OK then error(ret) end
+	for result in ip_check:nrows() do
+		return result
+	end
+end
+
+local new_entry_stmt
+-- Create a new user entry and return its id
+dbmanager.new_entry = function()
+	if not new_entry_stmt then
+		new_entry_stmt = ipdb:prepare("INSERT INTO UserEntry (last_seen) VALUES (CURRENT_TIMESTAMP);")
+	else
+		new_entry_stmt:reset()
+	end
+	local ret = new_entry_stmt:step()
+	if ret ~= sqlite.DONE then error(ret) end
+	return new_entry_stmt:last_insert_rowid()
+end
+
+local update_entry_time
+local update_name_time
+local update_ip_time
+-- Update last_seen time for given entries
+dbmanager.update_last_seen = function(entryid, nameid, ipid)
+	local now = os.date("!%Y-%m-%d %H:%M:%S")
+	if entryid then
+		if not update_entry_time then
+			update_entry_time = ipdb:prepare("UPDATE UserEntry SET last_seen = ? WHERE id = ?")
+		else
+			update_entry_time:reset()
+		end
+		local ret = update_entry_time:bind_values(now, entryid)
+		if ret ~= sqlite.OK then error(ret) end
+		ret = update_entry_time:step()
+		if ret ~= sqlite.DONE then error(ret) end
+	end
+	if nameid then
+		if not update_name_time then
+			update_name_time = ipdb:prepare("UPDATE Usernames SET last_seen = ? WHERE id = ?")
+		else
+			update_name_time:reset()
+		end
+		local ret = update_name_time:bind_values(now, nameid)
+		if ret ~= sqlite.OK then error(ret) end
+		ret = update_name_time:step()
+		if ret ~= sqlite.DONE then error(ret) end
+	end
+	if ipid then
+		if not update_ip_time then
+			update_ip_time = ipdb:prepare("UPDATE IPs SET last_seen = ? WHERE id = ?")
+		else
+			update_ip_time:reset()
+		end
+		local ret = update_ip_time:bind_values(now, entryid)
+		if ret ~= sqlite.OK then error(ret) end
+		ret = update_ip_time:step()
+		if ret ~= sqlite.DONE then error(ret) end
+	end
+end
+
+-- Return a table { ips = {}, names = {}} with a list of ips and names belonging to this entry.
+local get_ips
+local get_names
+dbmanager.get_all_identifiers = function(entryid)
+	local res = { ips = {}, names = {} }
+	if not get_ips then
+		get_ips = ipdb:prepare("SELECT ip FROM IPs WHERE userentry_id = ?")
+		get_names = ipdb:prepare("SELECT name FROM Usernames WHERE userentry_id = ?")
+	else
+		get_ips:reset()
+		get_names:reset()
+	end
+	local ret = get_ips:bind(1, entryid)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = get_names:bind(1, entryid)
+	if ret ~= sqlite.OK then error(ret) end
+
+	for result in get_ips:nrows() do
+		table.insert(res.ips, result.ip)
+	end
+	for result in get_names:nrows() do
+		table.insert(res.names, result.name)
+	end
+	return res
+end
+
+local insert_ip
+-- Return the id of the new IP row
+dbmanager.add_ip = function(entryid, ip)
+	if not insert_ip then
+		insert_ip = ipdb:prepare("INSERT INTO IPs (userentry_id, ip, last_seen) VALUES (?, ?, CURRENT_TIMESTAMP)")
+	else
+		insert_ip:reset()
+	end
+	local ret = insert_ip:bind_values(entryid, ip)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = insert_ip:step()
+	if ret ~= sqlite.DONE then error(ret) end
+	return insert_ip:last_insert_rowid()
+end
+
+local insert_name
+dbmanager.add_name = function(entryid, name)
+	if not insert_name then
+		insert_name = ipdb:prepare("INSERT INTO Usernames (userentry_id, name, last_seen) VALUES (?, ?, CURRENT_TIMESTAMP)")
+	else
+		insert_name:reset()
+	end
+	local ret = insert_name:bind_values(entryid, name)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = insert_name:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+local delete_entry
+dbmanager.delete_entry = function(entryid)
+	if not delete_entry then
+		delete_entry = ipdb:prepare("DELETE FROM UserEntry WHERE id = ?")
+	else
+		delete_entry:reset()
+	end
+	local ret = delete_entry:bind(1, entryid)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = delete_entry:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+return dbmanager

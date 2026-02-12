@@ -4,7 +4,8 @@ PRAGMA user_version = 1;
 CREATE TABLE UserEntry (
 	id INTEGER PRIMARY KEY,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	last_seen TEXT NOT NULL
+	last_seen TEXT NOT NULL,
+	no_merging INTEGER
 ) STRICT;
 
 CREATE TABLE Usernames (
@@ -43,4 +44,35 @@ INSERT INTO Metadata (key, value) VALUES ('no_new_entries', 'false');
 CREATE INDEX idx_usernames_userentry ON Usernames(userentry_id);
 CREATE INDEX idx_ips_userentry ON IPs(userentry_id);
 CREATE INDEX idx_modstorage_user_mod_key ON Modstorage(userentry_id, modname, key);
+
+-- Trigger for when Usernames are deleted
+CREATE TRIGGER cleanup_userentry_after_username_delete
+AFTER DELETE ON Usernames
+BEGIN
+    DELETE FROM UserEntry
+    WHERE id = OLD.userentry_id
+    AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
+    AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
+END;
+
+-- Trigger for when IPs are deleted
+CREATE TRIGGER cleanup_userentry_after_ip_delete
+AFTER DELETE ON IPs
+BEGIN
+    DELETE FROM UserEntry
+    WHERE id = OLD.userentry_id
+    AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
+    AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
+END;
+
+-- Trigger for when Usernames are updated (if they change userentry_id)
+CREATE TRIGGER cleanup_userentry_after_username_update
+AFTER UPDATE OF userentry_id ON Usernames
+BEGIN
+    DELETE FROM UserEntry
+    WHERE id = OLD.userentry_id
+    AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
+    AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
+END;
+
 COMMIT;

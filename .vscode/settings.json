@@ -25,7 +25,8 @@
 		"ai_filter_watcher",
 		"block_msgs",
 		"relays",
-		"xmpp_relay"
+		"xmpp_relay",
+		"ipdb"
 	],
 	"Lua.diagnostics.disable": [
 		"redundant-parameter",

@@ -211,4 +211,31 @@ dbmanager.delete_entry = function(entryid)
 	if ret ~= sqlite.DONE then error(ret) end
 end
 
+local set_no_newentries
+local get_no_newentries
+dbmanager.no_newentries = function(newval)
+	if newval ~= nil then
+		if not set_no_newentries then
+			set_no_newentries = ipdb:prepare("UPDATE Metadata SET value = ? WHERE key = 'no_new_entries'")
+		else
+			set_no_newentries:reset()
+		end
+		newval = newval and "true" or "false"
+		local ret = set_no_newentries:bind(1, newval)
+		if ret ~= sqlite.OK then error(ret) end
+		ret = set_no_newentries:step()
+		if ret ~= sqlite.DONE then error(ret) end
+	else
+		if not get_no_newentries then
+			get_no_newentries = ipdb:prepare("SELECT value FROM Metadata WHERE key = 'no_new_entries'")
+		else
+			get_no_newentries:reset()
+		end
+		local ret = get_no_newentries:step()
+		if ret ~= sqlite.ROW then error(ret) end
+		local no_newentries = get_no_newentries:get_value(0)
+		return no_newentries == "true"
+	end
+end
+
 return dbmanager

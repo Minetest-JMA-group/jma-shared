@@ -64,23 +64,38 @@ end
 local requested_by
 
 core.register_chatcommand("qrestart", {
-	params = "",
+	params = "[players]",
 	description = "Request a server restart after the match",
 	privs = {dev = true},
 	func = function(name, param)
 		requested_by = name
 		ctf_modebase.restart_on_next_match = true
-		return true, "Ok. The server will be restarted after the match."
+
+		local players = tonumber(param)
+		if players then
+			ctf_modebase.restart_max_players = players
+			ctf_modebase.restart_on_next_match = false
+		end
+
+		if not players then
+			core.log("[server_restart] Restart queued by "..name.." after match end")
+			return true, "Ok. The server will be restarted after the match."
+		else
+			core.log("[server_restart] Restart queued by "..name.." when there are >="..players.." players online")
+			return true, "Ok. The server will be restarted when there are >="..players.." players online."
+		end
 	end
 })
 
 core.register_chatcommand("qcancel", {
 	description = "Cancel scheduled server restart",
 	privs = {dev = true},
-	func = function()
+	func = function(name)
 		if ctf_modebase.restart_on_next_match then
 			requested_by = nil
 			ctf_modebase.restart_on_next_match = false
+			ctf_modebase.restart_max_players = nil
+			core.log("[server_restart] Restart cancelled by "..name)
 			return true, "Cancelled."
 		end
 		return false, "Nothing to cancel"
@@ -90,5 +105,14 @@ core.register_chatcommand("qcancel", {
 ctf_api.register_on_match_end(function()
 	if ctf_modebase.restart_on_next_match then
 		server_restart.request_restart(requested_by, 3)
+	end
+
+	if ctf_modebase.restart_max_players then
+		local players = core.get_connected_players()
+		if not (ctf_modebase.restart_max_players >= #players) then
+			core.log("[server_restart] Not restarting yet")
+		else
+			server_restart.request_restart(requested_by, 3)
+		end
 	end
 end)

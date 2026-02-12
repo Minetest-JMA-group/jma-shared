@@ -75,4 +75,14 @@ BEGIN
     AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
 END;
 
+-- Trigger for when IPs are updated (if they change userentry_id)
+CREATE TRIGGER cleanup_userentry_after_ip_update
+AFTER UPDATE OF userentry_id ON IPs
+BEGIN
+    DELETE FROM UserEntry
+    WHERE id = OLD.userentry_id
+    AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
+    AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
+END;
+
 COMMIT;

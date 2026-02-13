@@ -1,8 +1,27 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
+
+ipdb = {}
+
+local function register_dummmies()
+	ipdb.register_new_ids = function(name, ip)
+		core.log("error", "[ipdb]: ipdb.register_new_ids called while ipdb is disabled")
+	end
+	ipdb.register_merger = function(func)
+		local msg = "[ipdb]: ipdb.register_merger called while ipdb is disabled"
+		core.log("error", msg)
+		return msg
+	end
+	ipdb.get_mod_storage = function(func)
+		local msg = "[ipdb]: ipdb.get_mod_storage called while ipdb is disabled"
+		core.log("error", msg)
+		return nil, msg
+	end
+end
 local sqlite = algorithms.require("lsqlite3")
 if not sqlite then
 	core.log("[ipdb]: lsqlite3 needed for operation. Make sure that the library is installed and ipdb is added to secure.c_mods or secure.trusted_mods")
+	register_dummmies()
 	return
 end
 
@@ -11,12 +30,9 @@ local dbmanager = dofile(modpath .. "/dbmanager.lua")
 local db = dbmanager.init_ipdb(sqlite)
 local no_newentries
 local mergers = {}
-ipdb = {}
 if not db then
 	core.log("error", "[ipdb]: Database initialization failed, mod cannot function")
-	ipdb.register_new_ids = function(name, ip)
-		core.log("error", "[ipdb]: ipdb.register_new_ids called while ipdb is disabled")
-	end
+	register_dummmies()
 	return
 end
 

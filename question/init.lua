@@ -28,7 +28,8 @@ end
 
 local mod_storage = ipdb.get_mod_storage(merger)
 if not mod_storage then
-	error("[question] Failed to initialize ipdb mod storage")
+	core.log("error", "[question]: Failed to initialize ipdb mod storage")
+	return
 end
 
 local function is_ipv4(str)

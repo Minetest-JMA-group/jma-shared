@@ -268,7 +268,7 @@ core.register_chatcommand("question_migrate", {
 							sample_name[uid] = playername
 						end
 					else
-						core.log("warning", "[question] No ipdb entry for " .. playername .. " during migration, skipping.")
+						core.log("warning", "[question]: No ipdb entry for " .. playername .. " during migration, skipping.")
 					end
 				end
 			end

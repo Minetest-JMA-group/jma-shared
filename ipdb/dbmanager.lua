@@ -14,7 +14,7 @@ dbmanager.init_ipdb = function(sqlite_param)
 		core.log("error", string.format("[ipdb]: Failed to open database (%s): %s", errmsg, dbpath))
 		return nil
 	end
-	local ret = db:exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode=WAL;")
+	local ret = db:exec("PRAGMA foreign_keys = ON")
 	if ret ~= sqlite.OK then
 		core.log("error", "[ipdb]: Failed to enable foreign keys and set journal mode")
 		db:close()

@@ -48,7 +48,7 @@ local function merge_modstorage(entrysrcid, entrydestid)
 		if next(desttable) == nil then
 			-- We need to reassociate srctable to destid userentry
 			dbmanager.update_modstorage(modname, entrysrcid, entrydestid)
-			return
+			goto continue
 		end
 		-- We passed the simple situations, now we need to actually call the custom merger to decide what to do
 		-- First erase dest modstorage as we are about to replace it
@@ -122,6 +122,7 @@ local function register_new_ids(name, ip)
 	if not ok then
 		log(err_or_ret)
 		db:exec("ROLLBACK")
+		return "The server has experienced an internal database error, please try again..."
 	else
 		err = db:exec("COMMIT")
 		if err ~= sqlite.OK then log(err); db:exec("ROLLBACK") end

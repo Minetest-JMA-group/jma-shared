@@ -29,7 +29,7 @@ CREATE TABLE Modstorage (
 	modname TEXT NOT NULL,
 	userentry_id INTEGER NOT NULL REFERENCES UserEntry(id) ON DELETE CASCADE,
 	key TEXT NOT NULL,
-	data BLOB NOT NULL,
+	data ANY NOT NULL,
 	UNIQUE (userentry_id, modname, key)
 ) STRICT;
 

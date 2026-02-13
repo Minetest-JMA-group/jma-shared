@@ -5,7 +5,7 @@ CREATE TABLE UserEntry (
 	id INTEGER PRIMARY KEY,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	last_seen TEXT NOT NULL,
-	no_merging INTEGER
+	no_merging INTEGER	-- 1 if set, NULL if not
 ) STRICT;
 
 CREATE TABLE Usernames (

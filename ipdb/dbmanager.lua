@@ -238,4 +238,93 @@ dbmanager.no_newentries = function(newval)
 	end
 end
 
+local set_merge_perm
+-- Set no_merging flag in entry
+dbmanager.set_merge_allowance = function(entryid, allowed)
+	local no_merging = nil
+	if not allowed then no_merging = 1 end
+
+	if not set_merge_perm then
+		set_merge_perm = ipdb:prepare("UPDATE UserEntry SET no_merging = ? WHERE id = ?")
+	else
+		set_merge_perm:reset()
+	end
+	local ret = set_merge_perm:bind_values(no_merging, entryid)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = set_merge_perm:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+local check_merge_blocked
+dbmanager.can_merge = function(entryid1, entryid2)
+	if not check_merge_blocked then
+		check_merge_blocked = ipdb:prepare("SELECT COUNT(*) FROM UserEntry WHERE id IN (?, ?) AND no_merging = 1;")
+	else
+		check_merge_blocked:reset()
+	end
+
+	local ret = check_merge_blocked:bind_values(entryid1, entryid2)
+	if ret ~= sqlite.OK then error(ret) end
+
+	ret = check_merge_blocked:step()
+	if ret ~= sqlite.ROW then error(ret) end
+
+	local blocked_count = check_merge_blocked:get_value(0)
+	return blocked_count == 0
+end
+
+local remove_ip
+dbmanager.remove_ip = function(ipid)
+	if not remove_ip then
+		remove_ip = ipdb:prepare("DELETE FROM IPs WHERE id = ?")
+	else
+		remove_ip:reset()
+	end
+	local ret = remove_ip:bind(1, ipid)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = remove_ip:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+local remove_name
+dbmanager.remove_name = function(nameid)
+	if not remove_name then
+		remove_name = ipdb:prepare("DELETE FROM Usernames WHERE id = ?")
+	else
+		remove_name:reset()
+	end
+	local ret = remove_name:bind(1, nameid)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = remove_name:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+local reassociate_ip
+local reassociate_name
+-- Change the userentry_id of an IP row and/or a Username row to the given new entry ID
+dbmanager.reassociate = function(newentryid, nameid, ipid)
+	if ipid then
+		if not reassociate_ip then
+			reassociate_ip = ipdb:prepare("UPDATE IPs SET userentry_id = ? WHERE id = ?")
+		else
+			reassociate_ip:reset()
+		end
+		local ret = reassociate_ip:bind_values(newentryid, ipid)
+		if ret ~= sqlite.OK then error(ret) end
+		ret = reassociate_ip:step()
+		if ret ~= sqlite.DONE then error(ret) end
+	end
+	if nameid then
+		if not reassociate_name then
+			reassociate_name = ipdb:prepare("UPDATE Usernames SET userentry_id = ? WHERE id = ?")
+		else
+			reassociate_name:reset()
+		end
+		local ret = reassociate_name:bind_values(newentryid, nameid)
+		if ret ~= sqlite.OK then error(ret) end
+		ret = reassociate_name:step()
+		if ret ~= sqlite.DONE then error(ret) end
+	end
+end
+
 return dbmanager

@@ -376,8 +376,7 @@ local function modstorage_getcontext(modname, id, getter)
 		get_string = modstorage_get_string,
 		finalize = modstorage_finalize
 	}
-	local meta = getmetatable(context)
-	meta.__gc = modstorage_finalize
+	local meta = { __gc = modstorage_finalize }
 	setmetatable(context, meta)
 	return context
 end

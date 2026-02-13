@@ -45,7 +45,7 @@ dbmanager.init_ipdb = function(sqlite_param)
 
 		local ret = db:exec(sql)
 		if ret ~= sqlite.OK then
-			core.log("error", "[ipdb]: Failed to execute schema: " .. schema_path)
+			core.log("error", string.format("[ipdb]: Failed to execute schema (%i): %s", ret, schema_path))
 			db:close()
 			return nil
 		end

@@ -59,7 +59,7 @@ core.register_chatcommand("ipdb_migrate", {
 				end
 			end
 			return true, string.format(
-				"Migrated %d euban entries, created %d name‑IP links.",
+				"Migrated %d euban entries, created %d name-IP links.",
 				entries_done, links_created
 			)
 		end

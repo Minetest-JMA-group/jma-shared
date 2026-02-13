@@ -200,6 +200,9 @@ core.register_chatcommand("ipdb", {
 				else
 					return true, "Auto-generation of new user entries is allowed now."
 				end
+			else
+				local state = no_newentries and "not allowed" or "allowed"
+				return true, "Auto-generation of new user entries is currently " .. state .. "."
 			end
 		end
 

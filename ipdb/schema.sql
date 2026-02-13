@@ -1,4 +1,3 @@
-PRAGMA journal_mode=WAL;
 BEGIN TRANSACTION;
 PRAGMA user_version = 1;
 

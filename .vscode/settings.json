@@ -26,7 +26,8 @@
 		"block_msgs",
 		"relays",
 		"xmpp_relay",
-		"ipdb"
+		"ipdb",
+		"EUBan"
 	],
 	"Lua.diagnostics.disable": [
 		"redundant-parameter",

@@ -257,3 +257,5 @@ core.register_chatcommand("ipdb", {
 		end
 	end
 })
+
+dofile(modpath .. "/migration.lua")

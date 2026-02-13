@@ -327,4 +327,37 @@ dbmanager.reassociate = function(newentryid, nameid, ipid)
 	end
 end
 
+local modstorage_insert
+local modstorage_insert_stmt = [[INSERT INTO Modstorage (userentry_id, modname, key, data)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(userentry_id, modname, key) 
+DO UPDATE SET data = excluded.data]]
+dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value)
+	if not modstorage_insert then
+		modstorage_insert = ipdb:prepare(modstorage_insert_stmt)
+	else
+		modstorage_insert:reset()
+	end
+	local ret = modstorage_insert:bind_values(userentry_id, modname, key, value)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = modstorage_insert:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+local modstorage_get
+dbmanager.get_from_modstorage = function(userentry_id, modname, key)
+	if not modstorage_get then
+		modstorage_get = ipdb:prepare("SELECT data FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ?")
+	else
+		modstorage_get:reset()
+	end
+	local ret = modstorage_get:bind_values(userentry_id, modname, key)
+	if ret ~= sqlite.OK then error(ret) end
+
+	ret = modstorage_insert:step()
+	if ret == sqlite.DONE then return nil end
+	if ret ~= sqlite.ROW then error(ret) end
+	return modstorage_get:get_value(0)
+end
+
 return dbmanager

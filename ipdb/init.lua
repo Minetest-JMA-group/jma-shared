@@ -259,3 +259,119 @@ core.register_chatcommand("ipdb", {
 })
 
 dofile(modpath .. "/migration.lua")
+
+local mergers = {}
+
+ipdb.register_merger = function(func)
+	if type(func) ~= "function" then
+		return "Argument must be a function(entry1, entry2)"
+	end
+	local modname = core.get_current_modname()
+	if not modname then
+		return "ipdb.register_merger can only be called at load time"
+	end
+	mergers[modname] = func
+end
+
+local function modstorage_set_string(self, key, value)
+	if type(self) ~= "table" or type(key) ~= "string" or type(value) ~= "string" or
+	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
+	   self._userentry_id ~= math.floor(self._userentry_id) then
+		return "Invalid argument"
+	end
+	local ok, ret = pcall(dbmanager.insert_into_modstorage, self._userentry_id, self._modname, key, value)
+	if not ok then
+		log(ret)
+		db:exec("ROLLBACK")
+		return "Internal error"
+	end
+end
+
+local function modstorage_get_string(self, key)
+	if type(self) ~= "table" or type(key) ~= "string" or
+	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
+	   self._userentry_id ~= math.floor(self._userentry_id) then
+		return nil, "Invalid argument"
+	end
+	local ok, ret = pcall(dbmanager.get_from_modstorage, self._userentry_id, self._modname, key)
+	if not ok then
+		log(ret)
+		db:exec("ROLLBACK")
+		return "Internal error"
+	end
+end
+
+local is_in_transaction = false
+
+local function modstorage_finalize()
+	if not is_in_transaction then return end
+	local err = db:exec("COMMIT")
+	if err ~= sqlite.OK then log(err); return "Internal error" end
+	is_in_transaction = false
+end
+
+local function modstorage_getcontext(modname, id, getter)
+	if is_in_transaction then
+		return nil, "Database locked by another context"
+	end
+	is_in_transaction = true
+	local err = db:exec("BEGIN")
+	if err ~= sqlite.OK then log(err); return nil, "Internal error" end
+
+	local ok, ident = pcall(getter, id)
+	if not ok then
+		log(ident)
+		db:exec("ROLLBACK")
+		return nil, "Internal error"
+	end
+	if not ident then
+		modstorage_finalize()
+		return nil, "This id is unknown to ipdb"
+	end
+	local context = {
+		_modname = modname,
+		_userentry_id = ident.userentry_id,
+		set_string = modstorage_set_string,
+		get_string = modstorage_get_string,
+		finalize = modstorage_finalize
+	}
+	local meta = getmetatable(context)
+	meta.__gc = modstorage_finalize
+	setmetatable(context, meta)
+	return context
+end
+
+ipdb.get_mod_storage = function(func)
+	if func and type(func) ~= "function" then
+		return nil, "If supplied, the argument must be a function(entry1, entry2)"
+	end
+	local modname = core.get_current_modname()
+	if not modname then
+		return nil, "ipdb.get_mod_storage can only be called at load time"
+	end
+	if func then mergers[modname] = func end
+	if not mergers[modname] then
+		return nil, "A merger function must be registered before you can use the modstorage"
+	end
+	return {
+		_modname = modname,
+		get_context_by_name = function(self, name)
+			if type(name) ~= "string" then
+				return nil, "Argument must be a username"
+			end
+			if type(self) ~= "table" or type(self._modname) ~= "string" then
+				return nil, "Corrupted modstorage"
+			end
+			return modstorage_getcontext(self._modname, name, dbmanager.user_exists)
+		end,
+		get_context_by_ip = function(self, ip)
+			if type(ip) ~= "string" or not is_ipv4(ip) then
+				return nil, "Argument must be an IP address"
+			end
+			if type(self) ~= "table" or type(self._modname) ~= "string" then
+				return nil, "Corrupted modstorage"
+			end
+			return modstorage_getcontext(self._modname, ip, dbmanager.ip_exists)
+		end,
+	}
+end

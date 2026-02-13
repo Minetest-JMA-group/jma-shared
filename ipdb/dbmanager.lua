@@ -137,7 +137,7 @@ dbmanager.update_last_seen = function(entryid, nameid, ipid)
 		else
 			update_ip_time:reset()
 		end
-		local ret = update_ip_time:bind_values(now, entryid)
+		local ret = update_ip_time:bind_values(now, ipid)
 		if ret ~= sqlite.OK then error(ret) end
 		ret = update_ip_time:step()
 		if ret ~= sqlite.DONE then error(ret) end
@@ -332,6 +332,7 @@ local modstorage_insert_stmt = [[INSERT INTO Modstorage (userentry_id, modname, 
 VALUES (?, ?, ?, ?)
 ON CONFLICT(userentry_id, modname, key) 
 DO UPDATE SET data = excluded.data]]
+-- Insert a value into modstorage table, potentially replacing the old one
 dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value)
 	if not modstorage_insert then
 		modstorage_insert = ipdb:prepare(modstorage_insert_stmt)
@@ -345,6 +346,7 @@ dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value)
 end
 
 local modstorage_get
+-- Get the value associated with the given key in modstorage table
 dbmanager.get_from_modstorage = function(userentry_id, modname, key)
 	if not modstorage_get then
 		modstorage_get = ipdb:prepare("SELECT data FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ?")
@@ -354,10 +356,80 @@ dbmanager.get_from_modstorage = function(userentry_id, modname, key)
 	local ret = modstorage_get:bind_values(userentry_id, modname, key)
 	if ret ~= sqlite.OK then error(ret) end
 
-	ret = modstorage_insert:step()
+	ret = modstorage_get:step()
 	if ret == sqlite.DONE then return nil end
 	if ret ~= sqlite.ROW then error(ret) end
 	return modstorage_get:get_value(0)
+end
+
+local modstorage_get_all
+-- Get all key-value pairs associated with given user entry and modname
+dbmanager.get_all_modstorage = function(userentry_id, modname)
+    if not modstorage_get_all then
+        modstorage_get_all = ipdb:prepare("SELECT key, data FROM Modstorage WHERE userentry_id = ? AND modname = ?")
+    else
+        modstorage_get_all:reset()
+    end
+
+    local ret = modstorage_get_all:bind_values(userentry_id, modname)
+    if ret ~= sqlite.OK then error(ret) end
+
+    local results = {}
+    while true do
+        ret = modstorage_get_all:step()
+        if ret == sqlite.DONE then
+            break
+        elseif ret ~= sqlite.ROW then
+            error(ret)
+        end
+        local key = modstorage_get_all:get_value(0)
+        local data = modstorage_get_all:get_value(1)
+        results[key] = data
+    end
+
+    return results
+end
+
+local modstorage_update
+-- Reassociate modstorage to a new entry
+dbmanager.update_modstorage = function(modname, old_userentry_id, new_userentry_id)
+    if not modstorage_update then
+        modstorage_update = ipdb:prepare("UPDATE Modstorage SET userentry_id = ? WHERE userentry_id = ? AND modname = ?")
+    else
+        modstorage_update:reset()
+    end
+
+    local ret = modstorage_update:bind_values(new_userentry_id, old_userentry_id, modname)
+    if ret ~= sqlite.OK then error(ret) end
+
+    ret = modstorage_update:step()
+    if ret ~= sqlite.DONE then error(ret) end
+end
+
+local modstorage_delete_one
+local modstorage_delete_all
+dbmanager.delete_modstorage = function(userentry_id, modname, key)
+    if key then
+        if not modstorage_delete_one then
+            modstorage_delete_one = ipdb:prepare("DELETE FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ?")
+        else
+            modstorage_delete_one:reset()
+        end
+        local ret = modstorage_delete_one:bind_values(userentry_id, modname, key)
+        if ret ~= sqlite.OK then error(ret) end
+        ret = modstorage_delete_one:step()
+        if ret ~= sqlite.DONE then error(ret) end
+    else
+        if not modstorage_delete_all then
+            modstorage_delete_all = ipdb:prepare("DELETE FROM Modstorage WHERE userentry_id = ? AND modname = ?")
+        else
+            modstorage_delete_all:reset()
+        end
+        local ret = modstorage_delete_all:bind_values(userentry_id, modname)
+        if ret ~= sqlite.OK then error(ret) end
+        ret = modstorage_delete_all:step()
+        if ret ~= sqlite.DONE then error(ret) end
+    end
 end
 
 return dbmanager

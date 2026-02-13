@@ -10,6 +10,7 @@ local modpath = core.get_modpath(core.get_current_modname())
 local dbmanager = dofile(modpath .. "/dbmanager.lua")
 local db = dbmanager.init_ipdb(sqlite)
 local no_newentries
+local mergers = {}
 ipdb = {}
 if not db then
 	core.log("error", "[ipdb]: Database initialization failed, mod cannot function")
@@ -21,6 +22,26 @@ end
 
 local function log(err)
 	core.log("error", "[ipdb]: Database operation failed with code: "..tostring(err))
+end
+
+local function merge_modstorage(entrysrcid, entrydestid)
+	for modname, merger in pairs(mergers) do
+		local srctable = dbmanager.get_all_modstorage(entrysrcid, modname)
+		local desttable = dbmanager.get_all_modstorage(entrydestid, modname)
+		if next(srctable) == nil then return end -- Destination is already the exact thing we preserve
+		if next(desttable) == nil then
+			-- We need to reassociate srctable to destid userentry
+			dbmanager.update_modstorage(modname, entrysrcid, entrydestid)
+			return
+		end
+		-- We passed the simple situations, now we need to actually call the custom merger to decide what to do
+		-- First erase dest modstorage as we are about to replace it
+		dbmanager.delete_modstorage(entrydestid, modname)
+		local merged = merger(srctable, desttable)
+		for k, v in pairs(merger) do
+			dbmanager.insert_into_modstorage(entrydestid, modname, k, v)
+		end
+	end
 end
 
 local function register_new_ids(name, ip)
@@ -56,6 +77,7 @@ local function register_new_ids(name, ip)
 			if ipent.userentry_id ~= user.userentry_id then
 				-- This is where we need to merge
 				if not dbmanager.can_merge(ipent.userentry_id, user.userentry_id) then return end
+				merge_modstorage(ipent.userentry_id, user.userentry_id)
 				local ids = dbmanager.get_all_identifiers(ipent.userentry_id)
 				-- We removed the entry that came from the IP address, now we need to insert its ids into
 				-- the entry that came from the username
@@ -260,8 +282,6 @@ core.register_chatcommand("ipdb", {
 
 dofile(modpath .. "/migration.lua")
 
-local mergers = {}
-
 ipdb.register_merger = function(func)
 	if type(func) ~= "function" then
 		return "Argument must be a function(entry1, entry2)"
@@ -274,12 +294,17 @@ ipdb.register_merger = function(func)
 end
 
 local function modstorage_set_string(self, key, value)
-	if type(self) ~= "table" or type(key) ~= "string" or type(value) ~= "string" or
+	if type(self) ~= "table" or type(key) ~= "string" or (type(value) ~= "string" and type(value) ~= "nil") or
 	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
 	   self._userentry_id ~= math.floor(self._userentry_id) then
 		return "Invalid argument"
 	end
-	local ok, ret = pcall(dbmanager.insert_into_modstorage, self._userentry_id, self._modname, key, value)
+	local ok, ret
+	if value then
+		ok, ret = pcall(dbmanager.insert_into_modstorage, self._userentry_id, self._modname, key, value)
+	else
+		ok, ret = pcall(dbmanager.delete_modstorage, self._userentry_id, self._modname, key)
+	end
 	if not ok then
 		log(ret)
 		db:exec("ROLLBACK")

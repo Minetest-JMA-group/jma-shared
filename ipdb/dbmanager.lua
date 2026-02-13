@@ -391,7 +391,7 @@ dbmanager.get_all_modstorage = function(userentry_id, modname)
 end
 
 local modstorage_update
--- Reassociate modstorage to a new entry
+-- Reassociate modstorage to a new entry that must not have its own modstorage that could cause a conflict
 dbmanager.update_modstorage = function(modname, old_userentry_id, new_userentry_id)
     if not modstorage_update then
         modstorage_update = ipdb:prepare("UPDATE Modstorage SET userentry_id = ? WHERE userentry_id = ? AND modname = ?")

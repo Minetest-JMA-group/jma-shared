@@ -44,7 +44,7 @@ local function merge_modstorage(entrysrcid, entrydestid)
 	for modname, merger in pairs(mergers) do
 		local srctable = dbmanager.get_all_modstorage(entrysrcid, modname)
 		local desttable = dbmanager.get_all_modstorage(entrydestid, modname)
-		if next(srctable) == nil then return end -- Destination is already the exact thing we preserve
+		if next(srctable) == nil then goto continue end -- Destination is already the exact thing we preserve
 		if next(desttable) == nil then
 			-- We need to reassociate srctable to destid userentry
 			dbmanager.update_modstorage(modname, entrysrcid, entrydestid)
@@ -54,9 +54,10 @@ local function merge_modstorage(entrysrcid, entrydestid)
 		-- First erase dest modstorage as we are about to replace it
 		dbmanager.delete_modstorage(entrydestid, modname)
 		local merged = merger(srctable, desttable)
-		for k, v in pairs(merger) do
+		for k, v in pairs(merged) do
 			dbmanager.insert_into_modstorage(entrydestid, modname, k, v)
 		end
+		::continue::
 	end
 end
 
@@ -92,7 +93,11 @@ local function register_new_ids(name, ip)
 		if ipent and user then
 			if ipent.userentry_id ~= user.userentry_id then
 				-- This is where we need to merge
-				if not dbmanager.can_merge(ipent.userentry_id, user.userentry_id) then return end
+				if not dbmanager.can_merge(ipent.userentry_id, user.userentry_id) then
+					dbmanager.update_last_seen(user.userentry_id, user.id)
+					dbmanager.update_last_seen(ipent.userentry_id, nil, ipent.id)
+					return
+				end
 				merge_modstorage(ipent.userentry_id, user.userentry_id)
 				local ids = dbmanager.get_all_identifiers(ipent.userentry_id)
 				-- We removed the entry that came from the IP address, now we need to insert its ids into
@@ -119,7 +124,7 @@ local function register_new_ids(name, ip)
 		db:exec("ROLLBACK")
 	else
 		err = db:exec("COMMIT")
-		if err ~= sqlite.OK then log(err) end
+		if err ~= sqlite.OK then log(err); db:exec("ROLLBACK") end
 		if err_or_ret then return err_or_ret end
 	end
 end
@@ -216,7 +221,7 @@ core.register_chatcommand("ipdb", {
 				return false, "Internal error"
 			else
 				err = db:exec("COMMIT")
-				if err ~= sqlite.OK then log(err); return false, "Internal error" end
+				if err ~= sqlite.OK then log(err); db:exec("ROLLBACK"); return false, "Internal error" end
 				if res then return res end
 				return true, "Name removed"
 			end
@@ -240,7 +245,7 @@ core.register_chatcommand("ipdb", {
 				return false, "Internal error"
 			else
 				err = db:exec("COMMIT")
-				if err ~= sqlite.OK then log(err); return false, "Internal error" end
+				if err ~= sqlite.OK then log(err); db:exec("ROLLBACK"); return false, "Internal error" end
 				if res then return res end
 				return true, "IP removed"
 			end
@@ -289,7 +294,7 @@ core.register_chatcommand("ipdb", {
 				return false, "Internal error"
 			else
 				err = db:exec("COMMIT")
-				if err ~= sqlite.OK then log(err); return false, "Internal error" end
+				if err ~= sqlite.OK then log(err); db:exec("ROLLBACK"); return false, "Internal error" end
 				return true, "Isolated entry created"
 			end
 		end
@@ -309,10 +314,12 @@ ipdb.register_merger = function(func)
 	mergers[modname] = func
 end
 
+local is_in_transaction = false
+
 local function modstorage_set_string(self, key, value)
 	if type(self) ~= "table" or type(key) ~= "string" or (type(value) ~= "string" and type(value) ~= "nil") or
 	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
-	   self._userentry_id ~= math.floor(self._userentry_id) then
+	   self._userentry_id ~= math.floor(self._userentry_id) or not is_in_transaction then
 		return "Invalid argument"
 	end
 	local ok, ret
@@ -324,6 +331,7 @@ local function modstorage_set_string(self, key, value)
 	if not ok then
 		log(ret)
 		db:exec("ROLLBACK")
+		is_in_transaction = false
 		return "Internal error"
 	end
 end
@@ -331,23 +339,22 @@ end
 local function modstorage_get_string(self, key)
 	if type(self) ~= "table" or type(key) ~= "string" or
 	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
-	   self._userentry_id ~= math.floor(self._userentry_id) then
+	   self._userentry_id ~= math.floor(self._userentry_id) or not is_in_transaction then
 		return nil, "Invalid argument"
 	end
 	local ok, ret = pcall(dbmanager.get_from_modstorage, self._userentry_id, self._modname, key)
 	if not ok then
 		log(ret)
 		db:exec("ROLLBACK")
+		is_in_transaction = false
 		return "Internal error"
 	end
 end
 
-local is_in_transaction = false
-
 local function modstorage_finalize()
 	if not is_in_transaction then return end
 	local err = db:exec("COMMIT")
-	if err ~= sqlite.OK then log(err); return "Internal error" end
+	if err ~= sqlite.OK then log(err); db:exec("ROLLBACK"); return "Internal error" end
 	is_in_transaction = false
 end
 

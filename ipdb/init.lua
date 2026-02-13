@@ -99,13 +99,13 @@ local function register_new_ids(name, ip)
 				-- the entry that came from the username
 				dbmanager.delete_entry(ipent.userentry_id)
 				local newipent_id
-				for old_ip in ids.ips do
+				for _, old_ip in ipairs(ids.ips) do
 					local newid = dbmanager.add_ip(user.userentry_id, old_ip)
 					if old_ip == ip then
 						newipent_id = newid
 					end
 				end
-				for old_name in ids.names do
+				for _, old_name in ipairs(ids.names) do
 					dbmanager.add_name(user.userentry_id, old_name)
 				end
 				dbmanager.update_last_seen(user.userentry_id, user.id, newipent_id)

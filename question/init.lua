@@ -32,10 +32,6 @@ if not mod_storage then
 	return
 end
 
-local function is_ipv4(str)
-	return str:match("^%d+%.%d+%.%d+%.%d+$") ~= nil
-end
-
 local function get_user_votes(name)
 	local ctx = mod_storage:get_context_by_name(name)
 	if not ctx then

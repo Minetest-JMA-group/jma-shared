@@ -133,8 +133,7 @@ end
 core.register_on_authplayer(function(name, ip, is_success)
 	if is_success then
 		local ret = register_new_ids(name, ip)
-		print(ret)
-		return ret
+		if ret then core.disconnect_player(name, ret) end
 	end
 end)
 

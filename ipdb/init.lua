@@ -308,6 +308,7 @@ core.register_chatcommand("ipdb", {
 				return true, "Isolated entry created"
 			end
 		end
+		return false, "Usage: /ipdb <subcommand> args"
 	end
 })
 

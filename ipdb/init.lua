@@ -130,7 +130,13 @@ local function register_new_ids(name, ip)
 	end
 end
 
-core.register_on_prejoinplayer(register_new_ids)
+core.register_on_authplayer(function(name, ip, is_success)
+	if is_success then
+		local ret = register_new_ids(name, ip)
+		print(ret)
+		return ret
+	end
+end)
 
 ipdb.register_new_ids = function(name, ip)
 	-- We don't want to trigger enforcement here

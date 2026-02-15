@@ -2,7 +2,11 @@
 -- Copyright (c) 2024 Nanowolf4 (n4w@tutanota.com)
 
 server_restart = {}
-local ie = core.request_insecure_environment() or error("server_restart: Insecure environment required!")
+local ie = core.request_insecure_environment()
+if not ie then
+	core.log("action", "[server_restart]: Insecure environment is not available, server restart will not work.")
+	return
+end
 
 local shell_command = core.settings:get("restart_command")
 local disconnect_msg = "Server is restarting. Please reconnect in a couple seconds."
@@ -16,7 +20,6 @@ end
 
 
 if not shell_command then
-	core.log("warning", "server_restart: 'restart_command' parameter is not set in minetest.conf, using core.request_shutdown function")
 	do_restart = function()
 		core.request_shutdown(disconnect_msg, true)
 	end
@@ -29,7 +32,7 @@ local formspec = "formspec_version[7]"
 
 function server_restart.request_restart(playername, time, update)
     local requestedby_msg = "Restart requested by " .. playername
-    core.log("warning", "server_restart: " .. requestedby_msg)
+    core.log("action", "[server_restart]: " .. requestedby_msg)
 
 	if time == 0 then
 		do_restart()
@@ -76,7 +79,7 @@ if not core.global_exists("ctf_modebase") then
 			if not players then
 				return false, "Please provide a player count"
 			else
-				core.log("[server_restart] Restart queued by "..name.." when there are <="..players.." players online")
+				core.log("[server_restart]: Restart queued by "..name.." when there are <="..players.." players online")
 				return true, "Ok. The server will be restarted when there are <="..players.." players online."
 			end
 		end
@@ -88,7 +91,7 @@ if not core.global_exists("ctf_modebase") then
 		func = function(name)
 			if restart_max_players then
 				restart_max_players = nil
-				core.log("[server_restart] Restart cancelled by "..name)
+				core.log("[server_restart]: Restart cancelled by "..name)
 				return true, "Cancelled."
 			end
 			return false, "Nothing to cancel"
@@ -122,10 +125,10 @@ core.register_chatcommand("qrestart", {
 		end
 
 		if not players then
-			core.log("[server_restart] Restart queued by "..name.." after match end")
+			core.log("[server_restart]: Restart queued by "..name.." after match end")
 			return true, "Ok. The server will be restarted after the match."
 		else
-			core.log("[server_restart] Restart queued by "..name.." when there are <="..players.." players online")
+			core.log("[server_restart]: Restart queued by "..name.." when there are <="..players.." players online")
 			return true, "Ok. The server will be restarted when there are <="..players.." players online."
 		end
 	end
@@ -139,7 +142,7 @@ core.register_chatcommand("qcancel", {
 			requested_by = nil
 			ctf_modebase.restart_on_next_match = false
 			restart_max_players = nil
-			core.log("[server_restart] Restart cancelled by "..name)
+			core.log("[server_restart]: Restart cancelled by "..name)
 			return true, "Cancelled."
 		end
 		return false, "Nothing to cancel"
@@ -156,7 +159,7 @@ ctf_api.register_on_match_end(function()
 		if restart_max_players >= #players then
 			server_restart.request_restart(requested_by, 3)
 		else
-			core.log("[server_restart] Not restarting yet")
+			core.log("[server_restart]: Not restarting yet")
 		end
 	end
 end)

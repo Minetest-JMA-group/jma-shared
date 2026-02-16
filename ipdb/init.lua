@@ -17,6 +17,7 @@ local function register_dummmies()
 		core.log("error", msg)
 		return nil, msg
 	end
+	ipdb.disabled = true
 end
 local sqlite = algorithms.require("lsqlite3")
 if not sqlite then

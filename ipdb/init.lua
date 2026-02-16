@@ -34,6 +34,7 @@ if not db then
 	register_dummmies()
 	return
 end
+ipdb.dbmanager = dbmanager
 
 local function log(err)
 	core.log("error", "[ipdb]: Database operation failed with code: "..tostring(err))

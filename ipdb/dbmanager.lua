@@ -8,6 +8,10 @@ local ipdb
 local sqlite
 
 dbmanager.init_ipdb = function(sqlite_param)
+	if sqlite then
+		core.log("error", "[ipdb]: dbmanager.init_ipdb called more than once")
+		return nil
+	end
 	sqlite = sqlite_param
 	local db, errcode, errmsg = sqlite.open(dbpath)
 	if not db then

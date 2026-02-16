@@ -28,7 +28,6 @@ end
 local modpath = core.get_modpath(core.get_current_modname())
 local dbmanager = dofile(modpath .. "/dbmanager.lua")
 local db = dbmanager.init_ipdb(sqlite)
-local no_newentries
 local mergers = {}
 if not db then
 	core.log("error", "[ipdb]: Database initialization failed, mod cannot function")
@@ -61,23 +60,18 @@ local function merge_modstorage(entrysrcid, entrydestid)
 	end
 end
 
-local function register_new_ids(name, ip)
+ipdb.register_new_ids = function(name, ip)
 	local err = db:exec("BEGIN")
-	if err ~= sqlite.OK then log(err); return end
+	local err_msg = "The server has experienced an internal database error, please try again..."
+	if err ~= sqlite.OK then log(err); return err_msg end
 
 	-- Almost every statement needs error checking. Just use pcall to catch exceptions instead of bloating the code
-	local ok, err_or_ret = pcall(function()
-		if no_newentries == nil then
-			no_newentries = dbmanager.no_newentries()
-		end
+	local ok, err = pcall(function()
 		local user
 		local ipent
 		if name then user = dbmanager.user_exists(name) end
 		if ip then ipent = dbmanager.ip_exists(ip) end
 		if not user and not ipent then
-			if no_newentries then
-				return "[Access restriction]: New account from an unrecognized network detected. Please contact us on Discord: www.ctf.jma-sig.de or E-Mail loki@jma-sig.de to get whitelisted."
-			end
 			local entryid = dbmanager.new_entry()
 			if name then dbmanager.add_name(entryid, name) end
 			if ip then dbmanager.add_ip(entryid, ip) end
@@ -93,11 +87,6 @@ local function register_new_ids(name, ip)
 		if ipent and user then
 			if ipent.userentry_id ~= user.userentry_id then
 				-- This is where we need to merge
-				if not dbmanager.can_merge(ipent.userentry_id, user.userentry_id) then
-					dbmanager.update_last_seen(user.userentry_id, user.id)
-					dbmanager.update_last_seen(ipent.userentry_id, nil, ipent.id)
-					return
-				end
 				merge_modstorage(ipent.userentry_id, user.userentry_id)
 				local ids = dbmanager.get_all_identifiers(ipent.userentry_id)
 				-- We removed the entry that came from the IP address, now we need to insert its ids into
@@ -119,40 +108,15 @@ local function register_new_ids(name, ip)
 			end
 		end
 	end)
-	if not ok then
-		log(err_or_ret)
-		db:exec("ROLLBACK")
-		return "The server has experienced an internal database error, please try again..."
-	else
+	if ok then
 		err = db:exec("COMMIT")
-		if err ~= sqlite.OK then log(err); db:exec("ROLLBACK") end
-		if err_or_ret then return err_or_ret end
+		if err == sqlite.OK then return end
 	end
-end
 
-local to_disconnect = {}
-
-core.register_on_authplayer(function(name, ip, is_success)
-	if is_success then
-		local ret = register_new_ids(name, ip)
-		if ret then to_disconnect[name] = ret end
-	end
-end)
-
-core.register_on_joinplayer(function(player, last_seen)
-	local name = player:get_player_name()
-	if to_disconnect[name] then
-		core.disconnect_player(name, to_disconnect[name])
-		to_disconnect[name] = nil
-	end
-end)
-
-ipdb.register_new_ids = function(name, ip)
-	-- We don't want to trigger enforcement here
-	local old_no_newentries = no_newentries
-	no_newentries = false
-	register_new_ids(name, ip)
-	no_newentries = old_no_newentries
+	-- Reachable only in the case of error
+	log(err)
+	db:exec("ROLLBACK")
+	return err_msg
 end
 
 local function is_ipv4(str)
@@ -167,8 +131,6 @@ add_name <username>: Record the given username in the database
 add_ip <IP Address>: Record the given IP address in the database
 rm_name <username>: Remove the given username from the database
 rm_ip <IP Address>: Remove the given IP address from the database
-isolate name|ip <identifier>: Create an isolated entry (no_merging flag set) and move or add the specified name/IP to it
-newentries [yes|no]: If the argument is given, change whether new user entries are allowed or not. Otherwise print current value.
 ]]
 core.register_chatcommand("ipdb", {
 	description = "Interface to the IP-based player entry database",
@@ -197,29 +159,6 @@ core.register_chatcommand("ipdb", {
 			end
 			ipdb.register_new_ids(nil, newip)
 			return true, "IP recorded"
-		end
-
-		if cmd == "newentries" then
-			local arg = iter()
-			if arg then
-				if arg ~= "yes" and arg ~= "no" then
-					return false, "Usage: /ipdb newentries [yes|no]"
-				end
-				no_newentries = (arg == "no")
-				local ok, err = pcall(dbmanager.no_newentries, no_newentries)
-				if not ok then
-					log(err)
-					return false, "Internal error"
-				end
-				if no_newentries then
-					return true, "Auto-generation of new user entries is not allowed now."
-				else
-					return true, "Auto-generation of new user entries is allowed now."
-				end
-			else
-				local state = no_newentries and "not allowed" or "allowed"
-				return true, "Auto-generation of new user entries is currently " .. state .. "."
-			end
 		end
 
 		if cmd == "rm_name" then
@@ -270,53 +209,6 @@ core.register_chatcommand("ipdb", {
 			end
 		end
 
-		if cmd == "isolate" then
-			local subtype = iter()
-			local identifier = iter()
-			if not subtype or not identifier then
-				return false, "Usage: /ipdb isolate name|ip <identifier>"
-			end
-			if subtype ~= "name" and subtype ~= "ip" then
-				return false, "Type must be 'name' or 'ip'"
-			end
-			if subtype == "ip" and not is_ipv4(identifier) then
-				return false, "Invalid IP address format"
-			end
-
-			local err = db:exec("BEGIN")
-			if err ~= sqlite.OK then log(err); return false, "Internal error" end
-
-			local ok, res = pcall(function()
-				local entryid = dbmanager.new_entry()
-				dbmanager.set_merge_allowance(entryid, false)
-
-				if subtype == "name" then
-					local user = dbmanager.user_exists(identifier)
-					if user then
-						dbmanager.reassociate(entryid, user.id)
-					else
-						dbmanager.add_name(entryid, identifier)
-					end
-				else
-					local ipent = dbmanager.ip_exists(identifier)
-					if ipent then
-						dbmanager.reassociate(entryid, nil, ipent.id)
-					else
-						dbmanager.add_ip(entryid, identifier)
-					end
-				end
-			end)
-
-			if not ok then
-				log(res)
-				db:exec("ROLLBACK")
-				return false, "Internal error"
-			else
-				err = db:exec("COMMIT")
-				if err ~= sqlite.OK then log(err); db:exec("ROLLBACK"); return false, "Internal error" end
-				return true, "Isolated entry created"
-			end
-		end
 		return false, "Usage: /ipdb <subcommand> args"
 	end
 })

@@ -15,6 +15,11 @@ local MIN_BATCH_SIZE = tonumber(core.settings:get("ai_filter_watcher.min_batch_s
 local HISTORY_SIZE = tonumber(core.settings:get("ai_filter_watcher.history_size")) or 100
 local HISTORY_TRACKING_TIME = tonumber(core.settings:get("ai_filter_watcher.history_tracking_time")) or 86400 -- seconds (default: 1 day)
 
+-- Global AI parameters (nil = use API default)
+local TEMPERATURE = nil
+local FREQUENCY_PENALTY = nil
+local PRESENCE_PENALTY = nil
+
 -- State variables
 local PROMPT_READY = false
 local message_buffer = {}
@@ -291,16 +296,6 @@ local function process_batch()
 		return
 	end
 
-	-- Allow batch processing to happen when force-called on smaller number of messages
-	--[[if #message_buffer < MIN_BATCH_SIZE then
-		core.log("verbose", string.format(
-			"[ai_filter_watcher] Skipping scan: only %d messages in buffer (need %d)",
-			#message_buffer, MIN_BATCH_SIZE
-		))
-		is_processing = false
-		return
-	end]]
-
 	-- Set processing flag immediately
 	is_processing = true
 
@@ -338,6 +333,17 @@ local function process_batch()
 			process_batch()
 		end
 		return
+	end
+
+	-- Apply global AI parameters if set
+	if TEMPERATURE ~= nil then
+		context:set_temperature(TEMPERATURE)
+	end
+	if FREQUENCY_PENALTY ~= nil then
+		context:set_frequency_penalty(FREQUENCY_PENALTY)
+	end
+	if PRESENCE_PENALTY ~= nil then
+		context:set_presence_penalty(PRESENCE_PENALTY)
 	end
 
 	active_context = context
@@ -739,6 +745,10 @@ core.register_chatcommand("ai_watcher", {
 				end
 			end
 
+			local function val_or_default(v)
+				return v ~= nil and tostring(v) or "not set (using API default)"
+			end
+
 			local status_text = string.format([[
 AI Watcher Status:
 - Mode: %s
@@ -750,6 +760,10 @@ AI Watcher Status:
 - Pending scan: %s
 - Message buffer: %d messages
 - Moderation history: %d players, %d total entries
+- AI parameters:
+  • Temperature: %s
+  • Frequency penalty: %s
+  • Presence penalty: %s
 - Statistics:
   • Scans performed: %d
   • Messages processed: %d
@@ -768,6 +782,9 @@ AI Watcher Status:
 				#message_buffer,
 				unique_players,
 				total_entries,
+				val_or_default(TEMPERATURE),
+				val_or_default(FREQUENCY_PENALTY),
+				val_or_default(PRESENCE_PENALTY),
 				watcher_stats.scans_performed,
 				watcher_stats.messages_processed,
 				watcher_stats.actions_taken,
@@ -815,6 +832,42 @@ AI Watcher Status:
 
 			MIN_BATCH_SIZE = size
 			return true, string.format("Minimum batch size set to: %d messages", size)
+
+		elseif cmd == "temperature" then
+			local val = param:match("%s+(%S+)")
+			if not val then
+				return true, "Current temperature: " .. (TEMPERATURE ~= nil and tostring(TEMPERATURE) or "not set (using API default)")
+			end
+			local num = tonumber(val)
+			if not num or num < 0 or num > 2 then
+				return false, "Temperature must be a number between 0 and 2"
+			end
+			TEMPERATURE = num
+			return true, string.format("Temperature set to: %g", TEMPERATURE)
+
+		elseif cmd == "frequency_penalty" then
+			local val = param:match("%s+(%S+)")
+			if not val then
+				return true, "Current frequency_penalty: " .. (FREQUENCY_PENALTY ~= nil and tostring(FREQUENCY_PENALTY) or "not set (using API default)")
+			end
+			local num = tonumber(val)
+			if not num or num < -2 or num > 2 then
+				return false, "Frequency penalty must be a number between -2 and 2"
+			end
+			FREQUENCY_PENALTY = num
+			return true, string.format("Frequency penalty set to: %g", FREQUENCY_PENALTY)
+
+		elseif cmd == "presence_penalty" then
+			local val = param:match("%s+(%S+)")
+			if not val then
+				return true, "Current presence_penalty: " .. (PRESENCE_PENALTY ~= nil and tostring(PRESENCE_PENALTY) or "not set (using API default)")
+			end
+			local num = tonumber(val)
+			if not num or num < -2 or num > 2 then
+				return false, "Presence penalty must be a number between -2 and 2"
+			end
+			PRESENCE_PENALTY = num
+			return true, string.format("Presence penalty set to: %g", PRESENCE_PENALTY)
 
 		elseif cmd == "process" then
 			local force = param:match("%s+force")
@@ -931,6 +984,9 @@ AI Watcher Status:
   mode <mode>           - Set mode: enabled, permissive, disabled
   interval <seconds>    - Set scan interval (1-3600)
   batch <size>          - Set minimum batch size (1-100)
+  temperature [value]   - Get/set temperature (0-2, omit to show current)
+  frequency_penalty [value] - Get/set frequency penalty (-2 to 2)
+  presence_penalty [value]  - Get/set presence penalty (-2 to 2)
   process [force]       - Process current batch immediately
   dump                  - Show current messages waiting in buffer
   abort                 - Abort ongoing processing or cancel pending scan

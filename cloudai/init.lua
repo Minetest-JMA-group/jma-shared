@@ -150,11 +150,24 @@ cloudai.get_context = function()
 		_destroyed = false,	-- If set, this context is not usable anymore
 		_max_steps = nil,	-- How many tool calls may the AI make before giving a response
 		_max_steps_now = nil,	-- How many steps are left available for the current prompt
+		_temperature = nil,
+		_frequency_penalty = nil,
+		_presence_penalty = nil,
 		_make_request = function(self)	-- After everything was made ready, this is called to form and send the request
 			local payload = {
 				model = model,
 				messages = self._history
 			}
+			-- Add optional parameters if set
+			if self._temperature ~= nil then
+				payload.temperature = self._temperature
+			end
+			if self._frequency_penalty ~= nil then
+				payload.frequency_penalty = self._frequency_penalty
+			end
+			if self._presence_penalty ~= nil then
+				payload.presence_penalty = self._presence_penalty
+			end
 			if #self._formatted_tools > 0 then
 				payload.tools = self._formatted_tools
 			end
@@ -235,6 +248,33 @@ cloudai.get_context = function()
 				return false, "Max steps must be a number"
 			end
 			self._max_steps = new_max_steps
+			return true
+		end,
+		set_temperature = function(self, temp)
+			if temp ~= nil then
+				if type(temp) ~= "number" or temp < 0 or temp > 2 then
+					return false, "Temperature must be a number between 0 and 2"
+				end
+			end
+			self._temperature = temp
+			return true
+		end,
+		set_frequency_penalty = function(self, fp)
+			if fp ~= nil then
+				if type(fp) ~= "number" or fp < -2 or fp > 2 then
+					return false, "Frequency penalty must be a number between -2 and 2"
+				end
+			end
+			self._frequency_penalty = fp
+			return true
+		end,
+		set_presence_penalty = function(self, pp)
+			if pp ~= nil then
+				if type(pp) ~= "number" or pp < -2 or pp > 2 then
+					return false, "Presence penalty must be a number between -2 and 2"
+				end
+			end
+			self._presence_penalty = pp
 			return true
 		end,
 		destroy = function(self)

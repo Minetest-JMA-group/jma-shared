@@ -25,7 +25,6 @@ Important notes:
 - Messages are shown as [time] <username>: message
 - Use get_history tool ONLY if you cannot decide without additional context.
 - You can't take actions for messages in the output of get_history, as those have already been processed earlier, and can be requested only for context, if necessary.
-- The word "mf" means Motherfucker, punish users who write a message like "mf Player1", or only mf in a sigle message. The two letters itself in a normal converation should not be punished!
 - DO NOT punish or warn users for continuing to chat immediately after being muted.
 - DO NOT explain your decisions.
 - DO NOT engage in conversation.

@@ -17,6 +17,11 @@ local function register_dummmies()
 		core.log("error", msg)
 		return nil, msg
 	end
+	ipdb.register_on_login = function(func)
+		local msg = "[ipdb]: ipdb.register_on_login called while ipdb is disabled"
+		core.log("error", msg)
+		return msg
+	end
 	ipdb.disabled = true
 end
 local sqlite = algorithms.require("lsqlite3")
@@ -132,12 +137,25 @@ local function register_new_ids(name, ip)
 	end
 end
 
+local registered_callbacks = {}
+
 core.register_on_authplayer(function(name, ip, is_success)
 	if is_success then
 		local ret = register_new_ids(name, ip)
-		return ret
+		if ret then return ret end
+		for _, func in ipairs(registered_callbacks) do
+			ret = func(name, ip)
+			if ret and type(ret) == "string" then return ret end
+		end
 	end
 end)
+
+ipdb.register_on_login = function(func)
+	if type(func) ~= "function" then
+		return "Argument must be a function(name, ip)"
+	end
+	table.insert(registered_callbacks, func)
+end
 
 ipdb.register_new_ids = function(name, ip)
 	-- We don't want to trigger enforcement here

@@ -14,12 +14,12 @@ ipdb is a mod that maintains a persistent database of player names and IP addres
 
 ## Dependencies
 - `lsqlite3` – must be installed on the system and the mod must be added to `secure.trusted_mods` or `secure.c_mods`.
+- An engine patch giving on_authplayer callbacks ability to deny server access by returning a string.
 
 ## Installation
 1. Place the mod folder in your `mods/` directory.
 2. Ensure `lsqlite3` is available (e.g., `luarocks install lsqlite3`).
-3. Add `ipdb` to your `world.mt` or enable it in the Minetest launcher.
-4. If using a secure server, add `"ipdb"` to `secure.trusted_mods` in `minetest.conf`.
+3. Add `"ipdb"` to `secure.trusted_mods` in `minetest.conf`.
 
 ## Configuration
 The setting `no_newentries` (stored in the database) controls whether new user entries can be created:
@@ -76,6 +76,13 @@ The context object provides:
 ### Manual Entry Registration
 ```lua
 ipdb.register_new_ids(name, ip)   -- both can be nil; creates/updates links without enforcing no_newentries.
+```
+
+### Register callbacks
+Call func(name, ip) when a player successfully authenticates and is processed by ipdb, but before they join the game.
+Can return a string representing a reason for denying player's access to the server.
+```lua
+ipdb.register_on_login(func)
 ```
 
 ## Database Schema

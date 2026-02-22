@@ -132,20 +132,10 @@ local function register_new_ids(name, ip)
 	end
 end
 
-local to_disconnect = {}
-
 core.register_on_authplayer(function(name, ip, is_success)
 	if is_success then
 		local ret = register_new_ids(name, ip)
-		if ret then to_disconnect[name] = ret end
-	end
-end)
-
-core.register_on_joinplayer(function(player, last_seen)
-	local name = player:get_player_name()
-	if to_disconnect[name] then
-		core.disconnect_player(name, to_disconnect[name])
-		to_disconnect[name] = nil
+		if ret then core.after(0, core.disconnect_player, name, ret) end
 	end
 end)
 

@@ -100,9 +100,10 @@ end
 
 -- Initial connection and setup
 conn = connect()
-if not conn then
-	disable("Failed to connect to PostgreSQL")
-	return
+if conn:status() ~= pg.CONNECTION_OK then
+    local err = conn:errorMessage()
+    disable("Connection failed: " .. err)
+    return
 end
 
 local ok, err = init_database()

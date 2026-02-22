@@ -10,6 +10,7 @@ local dbname = core.settings:get("shareddb.database") or "shareddb"
 local conn
 local transaction_active = false
 local listeners = {}
+local listening = false
 shareddb = {}
 
 local dummy = function() return nil, "shareddb not available" end
@@ -33,8 +34,40 @@ local function connect()
 	return pg.connectdb(conn_str)
 end
 
--- Execute SQL with optional parameters
+local function ensure_connection()
+	if conn and conn:status() == pg.CONNECTION_OK then
+		return true
+	end
+
+	-- Connection is dead or nil: any active transaction is lost.
+	transaction_active = false
+	listening = false
+	if conn then
+		conn:finish()
+		conn = nil
+	end
+
+	-- Try to reconnect.
+	conn = connect()
+	if not conn then
+		return nil, "Failed to create connection object"
+	end
+	if conn:status() ~= pg.CONNECTION_OK then
+		local err = conn:errorMessage()
+		conn:finish()
+		conn = nil
+		return nil, "Reconnect failed: " .. err
+	end
+
+	core.log("action", "[shareddb] Reconnected to PostgreSQL")
+	return true
+end
+
+-- Execute SQL with optional parameters, first ensuring the connection is alive.
 local function exec_sql(sql, params)
+	local ok, err = ensure_connection()
+	if not ok then return nil, err end
+
 	local res
 	if params and #params > 0 then
 		res = conn:execParams(sql, unpack(params))
@@ -48,7 +81,19 @@ local function exec_sql(sql, params)
 	return res
 end
 
--- Initialize schema and NOTIFY trigger
+-- Ensure the current connection is listening on the notification channel.
+local function ensure_listening()
+	if listening then return true end
+	local res, err = exec_sql("LISTEN shareddb_changed")
+	if not res then
+		core.log("error", "[shareddb] Failed to LISTEN: " .. err)
+		return false
+	end
+	listening = true
+	return true
+end
+
+-- Initialize schema and NOTIFY trigger (unchanged)
 local function init_database()
 	local res, err = exec_sql([[
 		SELECT EXISTS (
@@ -112,11 +157,19 @@ if not ok then
 	return
 end
 
+-- Start listening for notifications
+if not ensure_listening() then
+	disable("Failed to LISTEN on startup")
+	return
+end
+
 core.log("action", "[shareddb] Connected to PostgreSQL and initialized")
 
--- Poll for notifications
+-- Poll for notifications (only if connection is alive and listening)
 local function poll_notifications()
-	if not conn then return end
+	if not ensure_connection() then return end
+	if not ensure_listening() then return end
+
 	while true do
 		local n = conn:notifies()
 		if not n then break end
@@ -137,6 +190,7 @@ end
 
 core.register_globalstep(poll_notifications)
 
+-- Transaction context methods (unchanged except they rely on exec_sql's error handling)
 local function modstorage_set_string(self, key, value)
 	if not self._active then return nil, "Transaction not active" end
 	if type(key) ~= "string" then return nil, "key must be string" end
@@ -157,7 +211,8 @@ local function modstorage_set_string(self, key, value)
 
 	local res, err = exec_sql(sql, params)
 	if not res then
-		conn:exec("ROLLBACK")
+		-- Connection failure already logged by exec_sql; clean up transaction state.
+		conn:exec("ROLLBACK")   -- may fail if connection dead, but we ignore
 		self._active = false
 		transaction_active = false
 		core.log("error", "[shareddb] set_string failed: " .. err)
@@ -197,8 +252,11 @@ local function modstorage_finalize(self)
 	return true
 end
 
--- Start a transaction and return context
+-- Start a transaction and return context (now checks connection first)
 local function get_modstorage_context(modname)
+	local ok, err = ensure_connection()
+	if not ok then return nil, err end
+
 	if transaction_active then
 		return nil, "Another transaction is already active"
 	end

@@ -20,7 +20,7 @@ local TEMPERATURE = nil
 local FREQUENCY_PENALTY = nil
 local PRESENCE_PENALTY = nil
 
--- NEW: Debug flag for cloudai conversation logging
+-- Debug flag for cloudai conversation logging
 local DEBUG_ENABLED = false
 
 -- State variables
@@ -136,7 +136,7 @@ local function cleanup_player_history()
 	end
 end
 
--- Add a moderation action to player history
+-- Add a moderation action to player history (only called in enabled mode)
 local function add_to_player_history(player_name, action_type, duration, reason)
 	if not player_history_loaded then
 		load_player_history()
@@ -338,7 +338,7 @@ local function process_batch()
 		return
 	end
 
-	-- NEW: Enable debug logging if flag is set
+	-- Enable debug logging if flag is set
 	if DEBUG_ENABLED and context.set_debug then
 		context:set_debug(true)
 	end
@@ -401,36 +401,6 @@ local function process_batch()
 	})
 
 	context:add_tool({
-		name = "get_player_history",
-		func = function(args)
-			if type(args) == "string" then
-				return { error = "Invalid JSON string" }
-			end
-
-			local player_name = args.name
-			if not player_name then
-				return {error = "Missing 'name' parameter"}
-			end
-
-			local history = get_player_moderation_history(player_name)
-			return {
-				success = true,
-				player = player_name,
-				history = format_player_history(history),
-				count = #history
-			}
-		end,
-		description = "Get recent moderation history (warns and mutes) for a player",
-		strict = false,
-		properties = {
-			name = {
-				type = "string",
-				description = "Player name to get history for"
-			}
-		}
-	})
-
-	context:add_tool({
 		name = "warn_player",
 		func = function(args)
 			if type(args) == "string" then
@@ -460,27 +430,23 @@ local function process_batch()
 					return {error = "Essentials mod not available"}
 				end
 			else
-				-- Permissive mode: just log
-				action_taken = false
+				-- Permissive mode: log only, do NOT record history, but pretend it happened
+				action_taken = true
 				result_message = string.format("[PERMISSIVE] Would have warned player '%s' for: %s", player_name, reason)
-				-- Still add to history for consistency
-				add_to_player_history(player_name, "warn", nil, reason)
+				-- No call to add_to_player_history
 			end
 
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
 
-			-- In enabled mode, essentials logs on its own
+			-- In permissive mode, log the intention
 			if WATCHER_MODE == ai_filter_watcher.MODES.PERMISSIVE then
 				core.log("action", "[ai_filter_watcher] " .. result_message)
 				relays.send_action_report("**AI Watcher**: %s", result_message)
 			end
 
 			return {
-				success = true,
-				action = action_taken and "warned" or "logged_warning",
-				reason = reason,
-				message = result_message
+				success = true
 			}
 		end,
 		description = "Warn player for rule violation",
@@ -538,29 +504,24 @@ local function process_batch()
 					return {error = "XBan mod not available"}
 				end
 			else
-				-- Permissive mode: just log
-				action_taken = false
+				-- Permissive mode: log only, do NOT record history, but pretend it happened
+				action_taken = true
 				result_message = string.format("[PERMISSIVE] Would have muted player '%s' for %d minutes: %s",
 					player_name, duration, reason)
-				-- Still add to history for consistency
-				add_to_player_history(player_name, "mute", duration, reason)
+				-- No call to add_to_player_history
 			end
 
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
 
-			-- In enabled mode, xban logs on its own
+			-- In permissive mode, log the intention
 			if WATCHER_MODE == ai_filter_watcher.MODES.PERMISSIVE then
 				core.log("action", "[ai_filter_watcher] " .. result_message)
 				relays.send_action_report("**AI Watcher**: %s", result_message)
 			end
 
 			return {
-				success = true,
-				action = action_taken and "muted" or "logged_mute",
-				duration = duration,
-				reason = reason,
-				message = result_message
+				success = true
 			}
 		end,
 		description = "Mute player for specified duration",
@@ -590,21 +551,22 @@ local function process_batch()
 		unique_players[msg.name] = true
 	end
 
-	-- Build player history section for the prompt (with caching)
+	-- Build player history section for the prompt (with caching) - SKIP in permissive mode
 	local player_history_section = ""
-	local history_cache = {}  -- Cache for this batch
+	if WATCHER_MODE ~= ai_filter_watcher.MODES.PERMISSIVE then
+		local history_cache = {}  -- Cache for this batch
+		for player_name in pairs(unique_players) do
+			-- Check cache first
+			if not history_cache[player_name] then
+				history_cache[player_name] = get_player_moderation_history(player_name)
+			end
 
-	for player_name in pairs(unique_players) do
-		-- Check cache first
-		if not history_cache[player_name] then
-			history_cache[player_name] = get_player_moderation_history(player_name)
-		end
-
-		local history = history_cache[player_name]
-		if #history > 0 then
-			player_history_section = player_history_section ..
-				string.format("\n--- Moderation history for player '%s' ---\n%s",
-					player_name, format_player_history(history))
+			local history = history_cache[player_name]
+			if #history > 0 then
+				player_history_section = player_history_section ..
+					string.format("\n--- Moderation history for player '%s' ---\n%s",
+						player_name, format_player_history(history))
+			end
 		end
 	end
 
@@ -764,6 +726,7 @@ AI Watcher Status:
 - Scan interval: %d seconds
 - Min batch size: %d messages
 - History size: %d messages (stored: %d)
+- History tracking time: %d seconds (%.1f hours)
 - Currently processing: %s
 - Pending scan: %s
 - Message buffer: %d messages
@@ -786,6 +749,7 @@ AI Watcher Status:
 				MIN_BATCH_SIZE,
 				HISTORY_SIZE,
 				history_count,
+				HISTORY_TRACKING_TIME, HISTORY_TRACKING_TIME/3600,
 				is_processing and "Yes (call_id: " .. active_call_id .. ")" or "No",
 				pending_scan and "Yes" or "No",
 				#message_buffer,
@@ -893,6 +857,31 @@ AI Watcher Status:
 			else
 				return false, "Usage: /ai_watcher debug [on|off]"
 			end
+
+		elseif cmd == "history_time" then
+			local val = param:match("%s+(%S+)")
+			if not val then
+				return true, string.format("Current history tracking time: %d seconds (%.1f hours)",
+					HISTORY_TRACKING_TIME, HISTORY_TRACKING_TIME / 3600)
+			end
+			local new_time
+			local num = tonumber(val)
+			if num then
+				new_time = num
+			else
+				-- Use algorithms.parse_time if available
+				new_time = algorithms.parse_time(val)
+			end
+			if not new_time or new_time < 60 or new_time > 2592000 then
+				return false, "Invalid time. Must be a number of seconds (>=60) or a time string like '10h', '2d' (max 30d)."
+			end
+			local old_time = HISTORY_TRACKING_TIME
+			HISTORY_TRACKING_TIME = new_time
+			if new_time < old_time then
+				cleanup_player_history()  -- immediately prune old entries
+			end
+			relays.send_action_report("**AI Watcher**: History tracking time changed to %d seconds by %s", new_time, name)
+			return true, string.format("History tracking time set to: %d seconds (%.1f hours)", new_time, new_time/3600)
 
 		elseif cmd == "process" then
 			local force = param:match("%s+force")
@@ -1013,6 +1002,7 @@ AI Watcher Status:
   frequency_penalty [value] - Get/set frequency penalty (-2 to 2)
   presence_penalty [value]  - Get/set presence penalty (-2 to 2)
   debug [on|off]        - Get/set debug logging for AI conversations
+  history_time [time]   - Get/set history retention (seconds or e.g. '10h', '2d')
   process [force]       - Process current batch immediately
   dump                  - Show current messages waiting in buffer
   abort                 - Abort ongoing processing or cancel pending scan

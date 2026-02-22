@@ -4,7 +4,8 @@ PRAGMA user_version = 1;
 CREATE TABLE UserEntry (
 	id INTEGER PRIMARY KEY,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	last_seen TEXT NOT NULL
+	last_seen TEXT NOT NULL,
+	no_merging INTEGER	-- 1 if set, NULL if not
 ) STRICT;
 
 CREATE TABLE Usernames (
@@ -38,6 +39,7 @@ CREATE TABLE Metadata (
 ) STRICT;
 
 INSERT INTO Metadata (key, value) VALUES ('db_creation', CURRENT_TIMESTAMP);
+INSERT INTO Metadata (key, value) VALUES ('no_new_entries', 'false');
 
 CREATE INDEX idx_usernames_userentry ON Usernames(userentry_id);
 CREATE INDEX idx_ips_userentry ON IPs(userentry_id);

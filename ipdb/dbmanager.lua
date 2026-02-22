@@ -215,6 +215,68 @@ dbmanager.delete_entry = function(entryid)
 	if ret ~= sqlite.DONE then error(ret) end
 end
 
+local set_no_newentries
+local get_no_newentries
+dbmanager.no_newentries = function(newval)
+	if newval ~= nil then
+		if not set_no_newentries then
+			set_no_newentries = ipdb:prepare("UPDATE Metadata SET value = ? WHERE key = 'no_new_entries'")
+		else
+			set_no_newentries:reset()
+		end
+		newval = newval and "true" or "false"
+		local ret = set_no_newentries:bind(1, newval)
+		if ret ~= sqlite.OK then error(ret) end
+		ret = set_no_newentries:step()
+		if ret ~= sqlite.DONE then error(ret) end
+	else
+		if not get_no_newentries then
+			get_no_newentries = ipdb:prepare("SELECT value FROM Metadata WHERE key = 'no_new_entries'")
+		else
+			get_no_newentries:reset()
+		end
+		local ret = get_no_newentries:step()
+		if ret ~= sqlite.ROW then error(ret) end
+		local no_newentries = get_no_newentries:get_value(0)
+		return no_newentries == "true"
+	end
+end
+
+local set_merge_perm
+-- Set no_merging flag in entry
+dbmanager.set_merge_allowance = function(entryid, allowed)
+	local no_merging = nil
+	if not allowed then no_merging = 1 end
+
+	if not set_merge_perm then
+		set_merge_perm = ipdb:prepare("UPDATE UserEntry SET no_merging = ? WHERE id = ?")
+	else
+		set_merge_perm:reset()
+	end
+	local ret = set_merge_perm:bind_values(no_merging, entryid)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = set_merge_perm:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+local check_merge_blocked
+dbmanager.can_merge = function(entryid1, entryid2)
+	if not check_merge_blocked then
+		check_merge_blocked = ipdb:prepare("SELECT COUNT(*) FROM UserEntry WHERE id IN (?, ?) AND no_merging = 1;")
+	else
+		check_merge_blocked:reset()
+	end
+
+	local ret = check_merge_blocked:bind_values(entryid1, entryid2)
+	if ret ~= sqlite.OK then error(ret) end
+
+	ret = check_merge_blocked:step()
+	if ret ~= sqlite.ROW then error(ret) end
+
+	local blocked_count = check_merge_blocked:get_value(0)
+	return blocked_count == 0
+end
+
 local remove_ip
 dbmanager.remove_ip = function(ipid)
 	if not remove_ip then

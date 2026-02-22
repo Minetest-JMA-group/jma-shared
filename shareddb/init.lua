@@ -9,7 +9,7 @@ local password = core.settings:get("shareddb.password") or ""
 local database = core.settings:get("shareddb.database") or "shareddb"
 
 local shareddb_enabled = true
-local pg = algorithms and algorithms.require("luapgsql")
+local pg = algorithms and algorithms.require("pgsql")
 if not pg then
 	core.log("error", "[shareddb] Failed to load luapgsql via algorithms.require")
 	shareddb_enabled = false

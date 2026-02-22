@@ -7,6 +7,8 @@ if not http_api then
 	core.log("cloudai mod requires http_api. Add to secure.http_mods")
 	working = false
 end
+
+local is_xmpp = core.global_exists("xmpp_relay")
 local url = core.settings:get("cloudai.url") or "https://api.deepseek.com/chat/completions"
 local model = core.settings:get("cloudai.model") or "deepseek-chat"
 local timeout = core.settings:get("cloudai.timeout") or 10
@@ -19,6 +21,20 @@ else
 	auth_header = "Authorization: Bearer "..api_key
 end
 cloudai = {}
+
+local function send_debug(context, label, data)
+	if not context._debug or not is_xmpp then return end
+	local id = context._current_debug_id
+	if not id then return end
+	local data_str
+	if type(data) == "table" then
+		data_str = dump(data)
+	else
+		data_str = tostring(data)
+	end
+	local msg = string.format("[%s] %s: %s", id, label, data_str)
+	xmpp_relay.send(msg, "debuglog@conference.jmaminetest.mooo.com")
+end
 
 -- Callback should add response to history, but we add tool calls
 local function handle_response(context, auto_call)
@@ -42,12 +58,14 @@ local function handle_response(context, auto_call)
 		end
 		context._callback(context._history, nil, err)
 		context._callback = nil
+		context._current_debug_id = nil
 		return true
 	end
 	if response.code ~= 200 then
 		if #response.data == 0 then
 			context._callback(context._history, nil, nil)
 			context._callback = nil
+			context._current_debug_id = nil
 			return true
 		end
 		-- Attempt to parse as JSON
@@ -60,12 +78,14 @@ local function handle_response(context, auto_call)
 		end
 		context._callback(context._history, nil, parsed)
 		context._callback = nil
+		context._current_debug_id = nil
 		return true
 	end
 	local parsed, err = core.parse_json(response.data, nil, true)
 	if not parsed then
 		context._callback(context._history, nil, err)
 		context._callback = nil
+		context._current_debug_id = nil
 		return true
 	end
 
@@ -79,16 +99,19 @@ local function handle_response(context, auto_call)
 	   or not parsed.choices[1].message.role then
 		context._callback(context._history, nil, "Malformed response")
 		context._callback = nil
+		context._current_debug_id = nil
 	else
 		if parsed.choices[1].finish_reason == "tool_calls" then
 			local msg = parsed.choices[1].message
 			table.insert(context._history, msg)
+			send_debug(context, "tool_call", msg)
 			for _, tool_call in ipairs(msg.tool_calls) do
 				if context._max_steps_now then
 					context._max_steps_now = context._max_steps_now - 1
 					if context._max_steps_now < 0 then
 						context._callback(context._history, nil, "Exceeded the maximum number of tool calls")
 						context._callback = nil
+						context._current_debug_id = nil
 						return true
 					end
 				end
@@ -101,6 +124,7 @@ local function handle_response(context, auto_call)
 					if context._tools[name].strict then
 						context._callback(context._history, nil, "Malformed arguments in tool call to "..name..": "..err)
 						context._callback = nil
+						context._current_debug_id = nil
 						return true
 					end
 				end
@@ -111,23 +135,28 @@ local function handle_response(context, auto_call)
 						context._callback(context._history, nil, "Malformed response from tool "..name..
 						": Returned table that couldn't be converted to JSON\n"..err)
 						context._callback = nil
+						context._current_debug_id = nil
 						return true
 					end
 				end
 				result = tostring(result)
 				table.insert(context._history, {role = "tool", content = result, tool_call_id = tool_call.id})
+				send_debug(context, "tool_response", {tool_call_id = tool_call.id, result = result})
 			end
 			local result, err = context:_make_request()
 			if not result then
 				context._callback(context._history, nil, "Failed to continue after tool call: "..err)
 				context._callback = nil
+				context._current_debug_id = nil
 				return true
 			end
 			return false, "You cannot send a new message to the same conversation before the old response completes"
 		else
 			parsed.choices[1].message.content = parsed.choices[1].message.content or ""
+			send_debug(context, "final_response", parsed.choices[1].message)
 			context._callback(context._history, parsed.choices[1].message)
 			context._callback = nil
+			context._current_debug_id = nil
 			return true
 		end
 	end
@@ -153,6 +182,8 @@ cloudai.get_context = function()
 		_temperature = nil,
 		_frequency_penalty = nil,
 		_presence_penalty = nil,
+		_debug = false,
+		_current_debug_id = nil,
 		_make_request = function(self)	-- After everything was made ready, this is called to form and send the request
 			local payload = {
 				model = model,
@@ -201,6 +232,12 @@ cloudai.get_context = function()
 				table.insert(self._history, {role = "system", content = self._system_prompt})
 			end
 			table.insert(self._history, {role = "user", content = message})
+
+			if self._debug then
+				self._current_debug_id = tostring(core.get_us_time())
+				send_debug(self, "initial_history", self._history)
+			end
+
 			self._callback = callback
 			self._max_steps_now = self._max_steps
 			return self:_make_request()
@@ -275,6 +312,10 @@ cloudai.get_context = function()
 				end
 			end
 			self._presence_penalty = pp
+			return true
+		end,
+		set_debug = function(self, enable)
+			self._debug = (enable == true)
 			return true
 		end,
 		destroy = function(self)

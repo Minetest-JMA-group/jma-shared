@@ -93,7 +93,6 @@ local function ensure_listening()
 	return true
 end
 
--- Initialize schema and NOTIFY trigger (unchanged)
 local function init_database()
 	local res, err = exec_sql([[
 		SELECT EXISTS (
@@ -104,42 +103,10 @@ local function init_database()
 	local exists = res:getvalue(1, 1) == "t"
 
 	if not exists then
-		local ok, err = exec_sql([[
-			CREATE TABLE Modstorage (
-				id SERIAL PRIMARY KEY,
-				modname TEXT NOT NULL,
-				key TEXT NOT NULL,
-				value TEXT NOT NULL,
-				UNIQUE(modname, key)
-			)
-		]])
-		if not ok then return nil, "Failed to create Modstorage table: " .. err end
-		core.log("action", "[shareddb] Created Modstorage table")
+		return nil, "Database schema not applied. Please apply schema manually."
 	end
 
-	local ok, err = exec_sql([[
-		CREATE OR REPLACE FUNCTION modstorage_notify_func()
-		RETURNS trigger AS $$
-		BEGIN
-			IF TG_OP = 'INSERT' OR TG_OP = 'UPDATE' THEN
-				PERFORM pg_notify('shareddb_changed', NEW.modname || E'\n' || NEW.key);
-			ELSIF TG_OP = 'DELETE' THEN
-				PERFORM pg_notify('shareddb_changed', OLD.modname || E'\n' || OLD.key);
-			END IF;
-			RETURN NEW;
-		END;
-		$$ LANGUAGE plpgsql;
-	]])
-	if not ok then return nil, "Failed to create trigger function: " .. err end
-
-	exec_sql("DROP TRIGGER IF EXISTS modstorage_notify_trigger ON Modstorage;")
-	local ok, err = exec_sql([[
-		CREATE TRIGGER modstorage_notify_trigger
-		AFTER INSERT OR UPDATE OR DELETE ON Modstorage
-		FOR EACH ROW EXECUTE FUNCTION modstorage_notify_func();
-	]])
-	if not ok then return nil, "Failed to create trigger: " .. err end
-
+	-- Table exists; assume full schema (including trigger) is already applied manually
 	return true
 end
 

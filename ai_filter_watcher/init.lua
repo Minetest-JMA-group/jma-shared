@@ -20,6 +20,9 @@ local TEMPERATURE = nil
 local FREQUENCY_PENALTY = nil
 local PRESENCE_PENALTY = nil
 
+-- NEW: Debug flag for cloudai conversation logging
+local DEBUG_ENABLED = false
+
 -- State variables
 local PROMPT_READY = false
 local message_buffer = {}
@@ -333,6 +336,11 @@ local function process_batch()
 			process_batch()
 		end
 		return
+	end
+
+	-- NEW: Enable debug logging if flag is set
+	if DEBUG_ENABLED and context.set_debug then
+		context:set_debug(true)
 	end
 
 	-- Apply global AI parameters if set
@@ -764,6 +772,7 @@ AI Watcher Status:
   • Temperature: %s
   • Frequency penalty: %s
   • Presence penalty: %s
+- Debug logging: %s
 - Statistics:
   • Scans performed: %d
   • Messages processed: %d
@@ -785,6 +794,7 @@ AI Watcher Status:
 				val_or_default(TEMPERATURE),
 				val_or_default(FREQUENCY_PENALTY),
 				val_or_default(PRESENCE_PENALTY),
+				DEBUG_ENABLED and "Enabled" or "Disabled",
 				watcher_stats.scans_performed,
 				watcher_stats.messages_processed,
 				watcher_stats.actions_taken,
@@ -868,6 +878,21 @@ AI Watcher Status:
 			end
 			PRESENCE_PENALTY = num
 			return true, string.format("Presence penalty set to: %g", PRESENCE_PENALTY)
+
+		elseif cmd == "debug" then
+			local val = param:match("%s+(%S+)")
+			if not val then
+				return true, "Debug logging is currently " .. (DEBUG_ENABLED and "enabled" or "disabled")
+			end
+			if val == "on" then
+				DEBUG_ENABLED = true
+				return true, "Debug logging enabled"
+			elseif val == "off" then
+				DEBUG_ENABLED = false
+				return true, "Debug logging disabled"
+			else
+				return false, "Usage: /ai_watcher debug [on|off]"
+			end
 
 		elseif cmd == "process" then
 			local force = param:match("%s+force")
@@ -987,6 +1012,7 @@ AI Watcher Status:
   temperature [value]   - Get/set temperature (0-2, omit to show current)
   frequency_penalty [value] - Get/set frequency penalty (-2 to 2)
   presence_penalty [value]  - Get/set presence penalty (-2 to 2)
+  debug [on|off]        - Get/set debug logging for AI conversations
   process [force]       - Process current batch immediately
   dump                  - Show current messages waiting in buffer
   abort                 - Abort ongoing processing or cancel pending scan
@@ -1015,13 +1041,15 @@ core.after(0, function()
 	cleanup_player_history()
 
 	core.log("action", string.format(
-		"[ai_filter_watcher] Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d)",
-		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE
+		"[ai_filter_watcher] Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s)",
+		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE,
+		DEBUG_ENABLED and "enabled" or "disabled"
 	))
 
 	-- Send initialization message to relays
-	relays.send_action_report("**AI Watcher**: Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d)",
-		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE)
+	relays.send_action_report("**AI Watcher**: Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s)",
+		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE,
+		DEBUG_ENABLED and "enabled" or "disabled")
 
 	core.log("info", string.format([[
 [ai_filter_watcher] Configuration (set in minetest.conf):

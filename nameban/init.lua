@@ -1,14 +1,8 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
-local storage = core.get_mod_storage()
-
--- Clean up old storage keys from previous version
-storage:set_string("database", "")
-storage:set_int("filter", 0)
-storage:set_int("LCSthreshold", 0)
-
-local mode = storage:contains("mode") and storage:get_int("mode") or 1
+local storage = shareddb.get_mod_storage()
+local mode = 1
 
 local function make_logger(level)
 	return function(text, ...)
@@ -50,6 +44,27 @@ if not whitelist then
 	WARNING("Failed to initialize whitelist regex context. Nameban mod will be disabled.")
 	return
 end
+
+local function load_data(key)
+	if key == "mode" or not key then
+		local ctx = storage:get_context()
+		if ctx then
+			local mode_str, err = ctx:get_string("mode")
+			ctx:finalize()
+			if err then return end
+			if mode_str == "0" then mode = 0 else mode = 1 end
+		end
+	end
+	if key == "blacklist" then
+		blacklist:load()
+	end
+	if key == "whitelist" then
+		whitelist:load()
+	end
+end
+
+load_data("mode")
+shareddb.register_listener(load_data)
 
 local function check_username(name)
 	if whitelist:match(name) then
@@ -153,7 +168,14 @@ Use /nameban blacklist help or /nameban whitelist help for more info.
 
 			if new_mode ~= mode then
 				mode = new_mode
-				storage:set_int("mode", mode)
+
+				local ctx, err = storage:get_context()
+				err = err or ctx:set_string("mode", tostring(mode))
+				err = err or ctx:finalize()
+				if err then
+					return false, "Failed to save mode: " .. tostring(err)
+				end
+
 				local mode_text = mode == 1 and "Enforcing" or "Permissive"
 				ACTION("%s set mode to %s", name, mode_text)
 				relays.send_action_report("nameban: %s set mode to %s", name, mode_text)

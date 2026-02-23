@@ -1,51 +1,44 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2023 Marko Petrović
 
-local storage = core.get_mod_storage()
 local get_player_by_name = core.get_player_by_name
 
 if not core.registered_privileges.filtering then
 	core.register_privilege("filtering", "Filter manager")
 end
 
-local function load_int(key, default)
-	if storage:contains(key) then
-		return storage:get_int(key)
+local caps_space = 2
+local caps_max = 2
+local whitelist = {}
+local shareddb_obj = shareddb.get_mod_storage()
+assert(shareddb_obj)
+local function load_settings(key)
+	local ctx = shareddb_obj:get_context()
+	if not ctx then
+		return
 	end
-	return default
+	if not key or key == "caps_space" then
+		local space_str = ctx:get_string("caps_space")
+		caps_space = space_str and tonumber(space_str) or 2
+	end
+
+	if not key or key == "caps_max" then
+		local max_str = ctx:get_string("caps_max")
+		caps_max = max_str and tonumber(max_str) or 2
+	end
+
+	if not key or key == "whitelist" then
+		local wl_str = ctx:get_string("whitelist")
+		whitelist = wl_str and core.deserialize(wl_str) or {}
+	end
+
+	ctx:finalize()
 end
-
-local caps_space = load_int("capsSpace", 2)
-local caps_max = load_int("capsMax", 2)
-
-local function load_whitelist()
-	if not storage:contains("whitelist") then
-		return {}
-	end
-	local raw = storage:get_string("whitelist")
-	if raw == "" then
-		return {}
-	end
-
-	return core.deserialize(raw) or {}
-end
-
-local whitelist = load_whitelist()
+load_settings()
+shareddb.register_listener(load_settings)
 
 local utf8_lower = utf8_simple.lower
 local utf8_chars = utf8_simple.chars
-
-local function save_caps_space()
-	storage:set_int("capsSpace", caps_space)
-end
-
-local function save_caps_max()
-	storage:set_int("capsMax", caps_max)
-end
-
-local function save_whitelist()
-	storage:set_string("whitelist", core.serialize(whitelist))
-end
 
 local function clamp_uppercase(word)
 	local uppercase_count = 0
@@ -70,16 +63,6 @@ local function clamp_uppercase(word)
 end
 
 filter_caps = {}
-
-local function parse_int(param)
-	if type(param) ~= "string" or param == "" then
-		return nil
-	end
-	if not param:match("^%-?%d+$") then
-		return nil
-	end
-	return tonumber(param)
-end
 
 function filter_caps.parse(name, message)
 	if type(message) ~= "string" or message == "" then
@@ -135,24 +118,44 @@ local usage_lines = table.concat({
 	"rm <word>: Remove word from the whitelist",
 }, "\n")
 
-local function set_caps_space(name, param)
-	local value = parse_int(param)
-	if not value then
-		return false, ("capsSpace is currently at value: %d\nYou have to enter a valid number to change it"):format(caps_space)
+local function save_value(key, value, oldctx)
+	local ctx = oldctx or shareddb_obj:get_context()
+	if not ctx then
+		return "shareddb is not available"
 	end
-	caps_space = value
-	save_caps_space()
-	return true, ("capsSpace set to: %d"):format(caps_space)
+
+	local ok, err = ctx:set_string(key, value)
+	if not ok then
+		return "Failed to save: " .. tostring(err)
+	end
+	ok, err = ctx:finalize()
+	if not ok then
+		return "Failed to save: " .. tostring(err)
+	end
 end
 
-local function set_caps_max(name, param)
+local function parse_int(param)
+	if type(param) ~= "string" or param == "" then
+		return nil
+	end
+	if not param:match("^%d+$") then
+		return nil
+	end
+	return param
+end
+
+local function set_setting(setting, param)
 	local value = parse_int(param)
 	if not value then
-		return false, ("capsMax is currently at value: %d\nYou have to enter a valid number to change it"):format(caps_max)
+		local cur
+		if setting == "capsMax" then cur = caps_max else cur = caps_space end
+		return false, (setting.." is currently at value: %d\nYou have to enter a valid number to change it"):format(cur)
 	end
-	caps_max = value
-	save_caps_max()
-	return true, ("capsMax set to: %d"):format(caps_max)
+	local err = save_value(setting, value)
+	if err then return false, err end
+	local numvalue = tonumber(value) or 2
+	if setting == "capsMax" then caps_max = numvalue else caps_space = numvalue end
+	return true, ("capsSpace set to: %s"):format(value)
 end
 
 local function add_to_whitelist(_, param)
@@ -160,8 +163,21 @@ local function add_to_whitelist(_, param)
 		return false, "You can't add empty word to the whitelist..."
 	end
 	param = utf8_lower(param)
-	whitelist[param] = true
-	save_whitelist()
+
+	local ctx = shareddb_obj:get_context()
+	if not ctx then
+		return false, "shareddb is not available"
+	end
+
+	-- Read current whitelist inside the transaction
+	local wl_str, err = ctx:get_string("whitelist")
+	if err then return false, err end
+	local wl = wl_str and core.deserialize(wl_str) or whitelist
+	wl[param] = true
+	err = save_value("whitelist", core.serialize(wl), ctx)
+	if err then return false, err end
+
+	whitelist[param] = true   -- update cache
 	return true, "Added to whitelist: " .. param
 end
 
@@ -170,11 +186,24 @@ local function remove_from_whitelist(_, param)
 		return false, "You have to enter a word to remove it from the whitelist"
 	end
 	param = utf8_lower(param)
-	if not whitelist[param] then
+
+	local ctx = shareddb_obj:get_context()
+	if not ctx then
+		return false, "shareddb is not available"
+	end
+
+	local wl_str, err = ctx:get_string("whitelist")
+	if err then return false, err end
+	local wl = wl_str and core.deserialize(wl_str) or whitelist
+	if not wl[param] then
+		ctx:finalize()
 		return false, ('Word "%s" hasn\'t existed in the whitelist'):format(param)
 	end
+	wl[param] = nil
+	err = save_value("whitelist", core.serialize(wl), ctx)
+	if err then return false, err end
+
 	whitelist[param] = nil
-	save_whitelist()
 	return true, ('Word "%s" removed from the whitelist'):format(param)
 end
 
@@ -206,10 +235,10 @@ local function filter_caps_console(name, param)
 		return dump_whitelist()
 	end
 	if command == "capsMax" then
-		return set_caps_max(name, arg)
+		return set_setting("capsMax", arg)
 	end
 	if command == "capsSpace" then
-		return set_caps_space(name, arg)
+		return set_setting("capsSpace", arg)
 	end
 	return false, usage_lines
 end

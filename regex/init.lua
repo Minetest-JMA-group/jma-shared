@@ -142,7 +142,7 @@ rm <regex>: Remove regex from $LIST]]
 			data = data .. "\n"
 		end
 
-		local ok = core.safe_file_write(self.save_path, data)
+		local ok = pcall(core.safe_file_write(self.save_path, data))
 		if not ok then
 			return false, "Failed to write to file"
 		end

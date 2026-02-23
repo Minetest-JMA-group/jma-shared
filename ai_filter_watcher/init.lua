@@ -777,9 +777,13 @@ AI Watcher Status:
 			return true, ("Moderation history for '%s' (last %d hours):\n%s"):format(p, math.floor(HISTORY_TRACKING_TIME/3600), format_player_history(h))
 
 		elseif cmd == "reload_prompt" then
+			local suffix = ", but couldn't update the git repository"
+			if core.global_exists("server_restart") and server_restart.update() then
+				suffix = " from an updated git repository"
+			end
 			if load_system_prompt() then
 				relays.send_action_report("**AI Watcher**: System prompt reloaded by %s", name)
-				return true, "System prompt reloaded successfully"
+				return true, "System prompt reloaded successfully"..suffix
 			else
 				return false, "Failed to reload system prompt"
 			end

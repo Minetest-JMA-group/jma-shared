@@ -82,6 +82,7 @@ rm <regex>: Remove regex from $LIST]]
 		else
 			storage = self.storage
 		end
+		if not storage then return self:load_file() end
 
 		local serialized = storage:get_string(self.storage_key)
 		if storage.finalize then storage:finalize() end
@@ -98,12 +99,13 @@ rm <regex>: Remove regex from $LIST]]
 	end
 
 	function context:save()
-		local storage
+		local storage, err
 		if self.storage.get_context then
-			storage = self.storage:get_context()
+			storage, err = self.storage:get_context()
 		else
 			storage = self.storage
 		end
+		if not storage then return false, err end
 		storage:set_string(self.storage_key, core.serialize(self.patterns))
 		if storage.finalize then storage:finalize() end
 		return true

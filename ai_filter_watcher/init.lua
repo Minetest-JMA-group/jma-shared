@@ -107,9 +107,7 @@ local function update_setting_from_db(key)
 	ctx:finalize()
 end
 
-shareddb.register_listener(function(key)
-	update_setting_from_db(key)
-end)
+shareddb.register_listener(update_setting_from_db)
 
 local function load_system_prompt()
 	local file = io.open(system_prompt_file, "r")

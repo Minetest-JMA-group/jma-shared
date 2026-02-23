@@ -8,13 +8,15 @@ local storage = core.get_mod_storage()
 local is_xban = core.global_exists("xban")
 local is_essentials = core.global_exists("essentials")
 
-local WATCHER_MODE = core.settings:get("ai_filter_watcher.mode") or "enabled"
-local SCAN_INTERVAL = tonumber(core.settings:get("ai_filter_watcher.scan_interval")) or 60
-local MIN_BATCH_SIZE = tonumber(core.settings:get("ai_filter_watcher.min_batch_size")) or 5
-local HISTORY_SIZE = tonumber(core.settings:get("ai_filter_watcher.history_size")) or 100
-local HISTORY_TRACKING_TIME = tonumber(core.settings:get("ai_filter_watcher.history_tracking_time")) or 86400
-
-local TEMPERATURE, FREQUENCY_PENALTY, PRESENCE_PENALTY
+-- These will be overridden from shareddb
+local WATCHER_MODE = "enabled"
+local SCAN_INTERVAL = 60
+local MIN_BATCH_SIZE = 5
+local HISTORY_SIZE = 100
+local HISTORY_TRACKING_TIME = 86400		-- 24 hours
+local TEMPERATURE = nil		-- use API default
+local FREQUENCY_PENALTY = nil
+local PRESENCE_PENALTY = nil
 local DEBUG_ENABLED = false
 
 local PROMPT_READY = false
@@ -34,6 +36,80 @@ local active_context = nil
 ai_filter_watcher = {
 	MODES = { ENABLED = "enabled", PERMISSIVE = "permissive", DISABLED = "disabled" }
 }
+
+local modstorage = shareddb.get_mod_storage()
+
+local function set_local_setting(key, value_str)
+	if key == "mode" then
+		if value_str == "enabled" or value_str == "permissive" or value_str == "disabled" then
+			WATCHER_MODE = value_str
+		end
+	elseif key == "scan_interval" then
+		local n = tonumber(value_str)
+		if n and n >= 1 and n <= 3600 then SCAN_INTERVAL = n end
+	elseif key == "min_batch_size" then
+		local n = tonumber(value_str)
+		if n and n >= 1 and n <= 100 then MIN_BATCH_SIZE = n end
+	elseif key == "history_size" then
+		local n = tonumber(value_str)
+		if n and n >= 10 and n <= 1000 then HISTORY_SIZE = n end
+	elseif key == "history_tracking_time" then
+		local n = tonumber(value_str)
+		if n and n >= 60 and n <= 2592000 then HISTORY_TRACKING_TIME = n end
+	elseif key == "temperature" then
+		local n = tonumber(value_str)
+		if not n or (n >= 0 and n <= 2) then TEMPERATURE = n end   -- allow nil
+	elseif key == "frequency_penalty" then
+		local n = tonumber(value_str)
+		if not n or (n >= -2 and n <= 2) then FREQUENCY_PENALTY = n end
+	elseif key == "presence_penalty" then
+		local n = tonumber(value_str)
+		if not n or (n >= -2 and n <= 2) then PRESENCE_PENALTY = n end
+	elseif key == "debug_enabled" then
+		DEBUG_ENABLED = (value_str == "true")
+	end
+end
+
+local function update_setting_from_db(key)
+	local errmsg = "[ai_filter_watcher] shareddb database error, cannot update settings"
+	local ctx = modstorage:get_context()
+	if not ctx then
+		core.log("error", errmsg)
+		return
+	end
+
+	if key then
+		local val, err = ctx:get_string(key)
+		if err then
+			ctx:finalize()
+			core.log("error", errmsg)
+			return
+		end
+		set_local_setting(key, val)
+	else
+		local keys = {
+			"mode", "scan_interval", "min_batch_size", "history_size",
+			"history_tracking_time", "temperature", "frequency_penalty",
+			"presence_penalty", "debug_enabled"
+		}
+		for _, k in ipairs(keys) do
+			local v, err = ctx:get_string(k)
+			if err then
+				ctx:finalize()
+				core.log("error", errmsg)
+				return
+			end
+			if v ~= nil then
+				set_local_setting(k, v)
+			end
+		end
+	end
+	ctx:finalize()
+end
+
+shareddb.register_listener(function(key)
+	update_setting_from_db(key)
+end)
 
 local function load_system_prompt()
 	local file = io.open(system_prompt_file, "r")
@@ -188,7 +264,6 @@ local function process_batch()
 		return
 	end
 
-	-- If already processing, abort the old batch (it took too long)
 	if is_processing then
 		abort_current_processing("New batch started, aborting old one")
 	end
@@ -259,7 +334,7 @@ local function process_batch()
 				type = "integer",
 				description = "Number of previous messages to retrieve",
 				minimum = 1,
-				maximum = 50   -- aligned with the function's check
+				maximum = 50
 			}
 		}
 	})
@@ -376,7 +451,7 @@ core.register_globalstep(function(dtime)
 	if time_acc >= SCAN_INTERVAL then
 		time_acc = 0
 		if #message_buffer >= MIN_BATCH_SIZE then
-			process_batch()   -- will abort old batch if needed
+			process_batch()
 		else
 			core.log("verbose", ("[ai_filter_watcher] Buffer too small (%d/%d), skipping scan"):format(#message_buffer, MIN_BATCH_SIZE))
 		end
@@ -466,6 +541,17 @@ AI Watcher Status:
 			if mode == "disabled" and WATCHER_MODE ~= "disabled" then
 				abort_current_processing()
 			end
+			-- Write to shareddb
+			local ctx = modstorage:get_context()
+			if ctx then
+				local success, err = ctx:set_string("mode", mode)
+				ctx:finalize()
+				if not success then
+					core.log("error", "[ai_filter_watcher] Failed to write mode to shareddb: " .. tostring(err))
+				end
+			else
+				core.log("warning", "[ai_filter_watcher] shareddb unavailable, mode change not persisted")
+			end
 			WATCHER_MODE = mode
 			relays.send_action_report("**AI Watcher**: Mode changed to %s by %s", mode, name)
 			return true, "Watcher mode set to: " .. mode
@@ -474,6 +560,16 @@ AI Watcher Status:
 			local i = tonumber(param:match("%s+(%S+)"))
 			if not i or i < 1 or i > 3600 then
 				return false, "Usage: /ai_watcher interval <seconds> (1-3600)"
+			end
+			local ctx = modstorage:get_context()
+			if ctx then
+				local success, err = ctx:set_string("scan_interval", tostring(i))
+				ctx:finalize()
+				if not success then
+					core.log("error", "[ai_filter_watcher] Failed to write interval to shareddb: " .. tostring(err))
+				end
+			else
+				core.log("warning", "[ai_filter_watcher] shareddb unavailable, interval change not persisted")
 			end
 			SCAN_INTERVAL = i
 			time_acc = 0
@@ -484,6 +580,16 @@ AI Watcher Status:
 			if not s or s < 1 or s > 100 then
 				return false, "Usage: /ai_watcher batch <size> (1-100)"
 			end
+			local ctx = modstorage:get_context()
+			if ctx then
+				local success, err = ctx:set_string("min_batch_size", tostring(s))
+				ctx:finalize()
+				if not success then
+					core.log("error", "[ai_filter_watcher] Failed to write batch size to shareddb: " .. tostring(err))
+				end
+			else
+				core.log("warning", "[ai_filter_watcher] shareddb unavailable, batch size change not persisted")
+			end
 			MIN_BATCH_SIZE = s
 			return true, ("Minimum batch size set to: %d messages"):format(s)
 
@@ -493,11 +599,21 @@ AI Watcher Status:
 				return true, "Current temperature: " .. (TEMPERATURE and tostring(TEMPERATURE) or "not set")
 			end
 			local n = tonumber(v)
-			if not n or n < 0 or n > 2 then
+			if n and (n < 0 or n > 2) then
 				return false, "Temperature must be 0-2"
 			end
+			local ctx = modstorage:get_context()
+			if ctx then
+				local success, err = ctx:set_string("temperature", v)
+				ctx:finalize()
+				if not success then
+					core.log("error", "[ai_filter_watcher] Failed to write temperature to shareddb: " .. tostring(err))
+				end
+			else
+				core.log("warning", "[ai_filter_watcher] shareddb unavailable, temperature change not persisted")
+			end
 			TEMPERATURE = n
-			return true, ("Temperature set to: %g"):format(TEMPERATURE)
+			return true, ("Temperature set to: %s"):format(v)
 
 		elseif cmd == "frequency_penalty" then
 			local v = param:match("%s+(%S+)")
@@ -505,11 +621,21 @@ AI Watcher Status:
 				return true, "Current frequency_penalty: " .. (FREQUENCY_PENALTY and tostring(FREQUENCY_PENALTY) or "not set")
 			end
 			local n = tonumber(v)
-			if not n or n < -2 or n > 2 then
+			if n and (n < -2 or n > 2) then
 				return false, "Frequency penalty must be -2..2"
 			end
+			local ctx = modstorage:get_context()
+			if ctx then
+				local success, err = ctx:set_string("frequency_penalty", v)
+				ctx:finalize()
+				if not success then
+					core.log("error", "[ai_filter_watcher] Failed to write frequency penalty to shareddb: " .. tostring(err))
+				end
+			else
+				core.log("warning", "[ai_filter_watcher] shareddb unavailable, frequency penalty change not persisted")
+			end
 			FREQUENCY_PENALTY = n
-			return true, ("Frequency penalty set to: %g"):format(FREQUENCY_PENALTY)
+			return true, ("Frequency penalty set to: %s"):format(v)
 
 		elseif cmd == "presence_penalty" then
 			local v = param:match("%s+(%S+)")
@@ -517,26 +643,47 @@ AI Watcher Status:
 				return true, "Current presence_penalty: " .. (PRESENCE_PENALTY and tostring(PRESENCE_PENALTY) or "not set")
 			end
 			local n = tonumber(v)
-			if not n or n < -2 or n > 2 then
+			if n and (n < -2 or n > 2) then
 				return false, "Presence penalty must be -2..2"
 			end
+			local ctx = modstorage:get_context()
+			if ctx then
+				local success, err = ctx:set_string("presence_penalty", v)
+				ctx:finalize()
+				if not success then
+					core.log("error", "[ai_filter_watcher] Failed to write presence penalty to shareddb: " .. tostring(err))
+				end
+			else
+				core.log("warning", "[ai_filter_watcher] shareddb unavailable, presence penalty change not persisted")
+			end
 			PRESENCE_PENALTY = n
-			return true, ("Presence penalty set to: %g"):format(PRESENCE_PENALTY)
+			return true, ("Presence penalty set to: %s"):format(v)
 
 		elseif cmd == "debug" then
 			local v = param:match("%s+(%S+)")
 			if not v then
 				return true, "Debug logging is " .. (DEBUG_ENABLED and "enabled" or "disabled")
 			end
+			local new_val
 			if v == "on" then
-				DEBUG_ENABLED = true
-				return true, "Debug enabled"
+				new_val = true
 			elseif v == "off" then
-				DEBUG_ENABLED = false
-				return true, "Debug disabled"
+				new_val = false
 			else
 				return false, "Usage: /ai_watcher debug [on|off]"
 			end
+			local ctx = modstorage:get_context()
+			if ctx then
+				local success, err = ctx:set_string("debug_enabled", tostring(new_val))
+				ctx:finalize()
+				if not success then
+					core.log("error", "[ai_filter_watcher] Failed to write debug setting to shareddb: " .. tostring(err))
+				end
+			else
+				core.log("warning", "[ai_filter_watcher] shareddb unavailable, debug change not persisted")
+			end
+			DEBUG_ENABLED = new_val
+			return true, "Debug " .. (new_val and "enabled" or "disabled")
 
 		elseif cmd == "history_time" then
 			local v = param:match("%s+(%S+)")
@@ -546,6 +693,16 @@ AI Watcher Status:
 			local new = tonumber(v) or (algorithms and algorithms.parse_time(v))
 			if not new or new < 60 or new > 2592000 then
 				return false, "Invalid time. Must be >=60 seconds or a time string like '10h', '2d' (max 30d)."
+			end
+			local ctx = modstorage:get_context()
+			if ctx then
+				local success, err = ctx:set_string("history_tracking_time", tostring(new))
+				ctx:finalize()
+				if not success then
+					core.log("error", "[ai_filter_watcher] Failed to write history time to shareddb: " .. tostring(err))
+				end
+			else
+				core.log("warning", "[ai_filter_watcher] shareddb unavailable, history time change not persisted")
 			end
 			local old = HISTORY_TRACKING_TIME
 			HISTORY_TRACKING_TIME = new
@@ -561,7 +718,7 @@ AI Watcher Status:
 				return false, ("Buffer has only %d messages (need %d). Use '/ai_watcher process force' to override."):format(#message_buffer, MIN_BATCH_SIZE)
 			end
 			local cnt = #message_buffer
-			process_batch()   -- will abort if busy
+			process_batch()
 			return true, ("Processing batch of %d messages"):format(cnt)
 
 		elseif cmd == "dump" then
@@ -654,6 +811,9 @@ AI Watcher Status:
 })
 
 core.after(0, function()
+	-- Load initial settings from shareddb (if available)
+	update_setting_from_db(nil)   -- read all keys
+
 	load_system_prompt()
 	load_player_history()
 	cleanup_player_history()

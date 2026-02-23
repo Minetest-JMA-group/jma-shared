@@ -21,7 +21,7 @@ local function sanitize_patterns(list)
 end
 
 -- Return a regex context or nil and error
--- options.storage: modstorage object for storing patterns
+-- options.storage: modstorage (local or shareddb) object for storing patterns
 -- options.path: string, full path to the regex list file
 -- options.storage_key: string, storage key name (default: options.list_name)
 -- options.list_name: string, name of the list (e.g., "blacklist", "whitelist", default "regex_list")
@@ -76,7 +76,15 @@ rm <regex>: Remove regex from $LIST]]
 	end
 
 	function context:load()
-		local serialized = self.storage:get_string(self.storage_key)
+		local storage
+		if self.storage.get_context then
+			storage = self.storage:get_context()
+		else
+			storage = self.storage
+		end
+
+		local serialized = storage:get_string(self.storage_key)
+		if storage.finalize then storage:finalize() end
 		if serialized ~= "" then
 			local decoded = core.deserialize(serialized)
 			if type(decoded) == "table" then
@@ -90,7 +98,14 @@ rm <regex>: Remove regex from $LIST]]
 	end
 
 	function context:save()
-		self.storage:set_string(self.storage_key, core.serialize(self.patterns))
+		local storage
+		if self.storage.get_context then
+			storage = self.storage:get_context()
+		else
+			storage = self.storage
+		end
+		storage:set_string(self.storage_key, core.serialize(self.patterns))
+		if storage.finalize then storage:finalize() end
 		return true
 	end
 

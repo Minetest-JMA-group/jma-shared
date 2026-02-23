@@ -542,9 +542,9 @@ AI Watcher Status:
 			-- Write to shareddb
 			local ctx = modstorage:get_context()
 			if ctx then
-				local success, err = ctx:set_string("mode", mode)
-				ctx:finalize()
-				if not success then
+				local err = ctx:set_string("mode", mode)
+				err = err or ctx:finalize()
+				if err then
 					core.log("error", "[ai_filter_watcher] Failed to write mode to shareddb: " .. tostring(err))
 				end
 			else
@@ -561,9 +561,9 @@ AI Watcher Status:
 			end
 			local ctx = modstorage:get_context()
 			if ctx then
-				local success, err = ctx:set_string("scan_interval", tostring(i))
-				ctx:finalize()
-				if not success then
+				local err = ctx:set_string("scan_interval", tostring(i))
+				err = err or ctx:finalize()
+				if err then
 					core.log("error", "[ai_filter_watcher] Failed to write interval to shareddb: " .. tostring(err))
 				end
 			else
@@ -580,9 +580,9 @@ AI Watcher Status:
 			end
 			local ctx = modstorage:get_context()
 			if ctx then
-				local success, err = ctx:set_string("min_batch_size", tostring(s))
-				ctx:finalize()
-				if not success then
+				local err = ctx:set_string("min_batch_size", tostring(s))
+				err = err or ctx:finalize()
+				if err then
 					core.log("error", "[ai_filter_watcher] Failed to write batch size to shareddb: " .. tostring(err))
 				end
 			else
@@ -602,9 +602,9 @@ AI Watcher Status:
 			end
 			local ctx = modstorage:get_context()
 			if ctx then
-				local success, err = ctx:set_string("temperature", v)
-				ctx:finalize()
-				if not success then
+				local err = ctx:set_string("temperature", v)
+				err = err or ctx:finalize()
+				if err then
 					core.log("error", "[ai_filter_watcher] Failed to write temperature to shareddb: " .. tostring(err))
 				end
 			else
@@ -624,9 +624,9 @@ AI Watcher Status:
 			end
 			local ctx = modstorage:get_context()
 			if ctx then
-				local success, err = ctx:set_string("frequency_penalty", v)
-				ctx:finalize()
-				if not success then
+				local err = ctx:set_string("frequency_penalty", v)
+				err = err or ctx:finalize()
+				if err then
 					core.log("error", "[ai_filter_watcher] Failed to write frequency penalty to shareddb: " .. tostring(err))
 				end
 			else
@@ -646,9 +646,9 @@ AI Watcher Status:
 			end
 			local ctx = modstorage:get_context()
 			if ctx then
-				local success, err = ctx:set_string("presence_penalty", v)
-				ctx:finalize()
-				if not success then
+				local err = ctx:set_string("presence_penalty", v)
+				err = err or ctx:finalize()
+				if err then
 					core.log("error", "[ai_filter_watcher] Failed to write presence penalty to shareddb: " .. tostring(err))
 				end
 			else
@@ -672,9 +672,9 @@ AI Watcher Status:
 			end
 			local ctx = modstorage:get_context()
 			if ctx then
-				local success, err = ctx:set_string("debug_enabled", tostring(new_val))
-				ctx:finalize()
-				if not success then
+				local err = ctx:set_string("debug_enabled", tostring(new_val))
+				err = err or ctx:finalize()
+				if err then
 					core.log("error", "[ai_filter_watcher] Failed to write debug setting to shareddb: " .. tostring(err))
 				end
 			else
@@ -694,9 +694,9 @@ AI Watcher Status:
 			end
 			local ctx = modstorage:get_context()
 			if ctx then
-				local success, err = ctx:set_string("history_tracking_time", tostring(new))
-				ctx:finalize()
-				if not success then
+				local err = ctx:set_string("history_tracking_time", tostring(new))
+				err = err or ctx:finalize()
+				if err then
 					core.log("error", "[ai_filter_watcher] Failed to write history time to shareddb: " .. tostring(err))
 				end
 			else

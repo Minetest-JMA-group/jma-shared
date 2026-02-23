@@ -1,7 +1,6 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
--- Settings
 local host = core.settings:get("shareddb.host") or "localhost"
 local port = tonumber(core.settings:get("shareddb.port") or "5432")
 local user = core.settings:get("shareddb.user") or "postgres"
@@ -14,7 +13,8 @@ local listening = false
 shareddb = {}
 
 local dummy = function() return nil, "shareddb not available" end
-shareddb.get_mod_storage = dummy
+local dummy_obj = { get_context = dummy }
+shareddb.get_mod_storage = function() return dummy_obj end
 shareddb.register_listener = dummy
 
 local pg = algorithms.require("pgsql")
@@ -39,7 +39,6 @@ local function ensure_connection()
 		return true
 	end
 
-	-- Connection is dead or nil: any active transaction is lost.
 	transaction_active = false
 	listening = false
 	if conn then
@@ -47,7 +46,6 @@ local function ensure_connection()
 		conn = nil
 	end
 
-	-- Try to reconnect.
 	conn = connect()
 	if not conn then
 		return nil, "Failed to create connection object"
@@ -63,7 +61,6 @@ local function ensure_connection()
 	return true
 end
 
--- Execute SQL with optional parameters, first ensuring the connection is alive.
 local function exec_sql(sql, params)
 	local ok, err = ensure_connection()
 	if not ok then return nil, err end
@@ -81,7 +78,6 @@ local function exec_sql(sql, params)
 	return res
 end
 
--- Ensure the current connection is listening on the notification channel.
 local function ensure_listening()
 	if listening then return true end
 	local res, err = exec_sql("LISTEN shareddb_changed")
@@ -106,11 +102,9 @@ local function init_database()
 		return nil, "Database schema not applied. Please apply schema manually."
 	end
 
-	-- Table exists; assume full schema (including trigger) is already applied manually
 	return true
 end
 
--- Initial connection and setup
 conn = connect()
 if conn:status() ~= pg.CONNECTION_OK then
     local err = conn:errorMessage()
@@ -124,7 +118,6 @@ if not ok then
 	return
 end
 
--- Start listening for notifications
 if not ensure_listening() then
 	disable("Failed to LISTEN on startup")
 	return
@@ -132,7 +125,6 @@ end
 
 core.log("action", "[shareddb] Connected to PostgreSQL and initialized")
 
--- Poll for notifications (only if connection is alive and listening)
 local function poll_notifications()
 	if not ensure_connection() then return end
 	if not ensure_listening() then return end
@@ -157,7 +149,6 @@ end
 
 core.register_globalstep(poll_notifications)
 
--- Transaction context methods (unchanged except they rely on exec_sql's error handling)
 local function modstorage_set_string(self, key, value)
 	if not self._active then return nil, "Transaction not active" end
 	if type(key) ~= "string" then return nil, "key must be string" end
@@ -178,8 +169,7 @@ local function modstorage_set_string(self, key, value)
 
 	local res, err = exec_sql(sql, params)
 	if not res then
-		-- Connection failure already logged by exec_sql; clean up transaction state.
-		conn:exec("ROLLBACK")   -- may fail if connection dead, but we ignore
+		conn:exec("ROLLBACK")
 		self._active = false
 		transaction_active = false
 		core.log("error", "[shareddb] set_string failed: " .. err)
@@ -219,8 +209,7 @@ local function modstorage_finalize(self)
 	return true
 end
 
--- Start a transaction and return context (now checks connection first)
-local function get_modstorage_context(modname)
+local function start_transaction(self)
 	local ok, err = ensure_connection()
 	if not ok then return nil, err end
 
@@ -236,7 +225,7 @@ local function get_modstorage_context(modname)
 	transaction_active = true
 
 	local ctx = {
-		_modname = modname,
+		_modname = self._modname,
 		_active = true,
 		set_string = modstorage_set_string,
 		get_string = modstorage_get_string,
@@ -246,14 +235,18 @@ local function get_modstorage_context(modname)
 	return ctx
 end
 
--- Overwrite public API with real implementations
 shareddb.get_mod_storage = function()
 	local modname = core.get_current_modname()
 	if not modname then
 		core.log("error", "[shareddb] get_mod_storage called outside of load time")
 		return nil, "Must be called at load time"
 	end
-	return get_modstorage_context(modname)
+
+	local modstorage_obj = {
+		_modname = modname,
+		get_context = start_transaction
+	}
+	return modstorage_obj
 end
 
 shareddb.register_listener = function(listener)

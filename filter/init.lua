@@ -3,27 +3,21 @@
 
 local modname = core.get_current_modname()
 local modpath = core.get_modpath(modname)
-local storage = core.get_mod_storage()
-
-local VERSION_KEY = "version"
-local VERSION = 2
+local worldpath = core.get_worldpath()
+local storage = shareddb.get_mod_storage()
 
 local relayCooldown = 0
 local violations = {}
 local last_kicked_time = os.time()
+local mode = 1
 
-local mode = storage:contains("mode") and storage:get_int("mode") or 1
 filter = { registered_on_violations = {}, phrase = "Filter mod has detected the player writing a bad message: " }
-
--- Store version if not present (fresh install)
-if not storage:contains(VERSION_KEY) then
-	storage:set_int(VERSION_KEY, VERSION)
-end
 
 -- Create regex context for blacklist management
 local blacklist_ctx = regex.create({
 	storage = storage,
 	path = modpath .. "/blacklist",
+	save_path = worldpath .. "/filter_blacklist",
 	list_name = "blacklist",
 	storage_key = "blacklist",
 	help_prefix = "The filter works by matching regex patterns from a blacklist with each message.\nIf a match is found, the message is blocked.\n\nList of possible commands:\ngetenforce: Get the current filter mode\nsetenforce <mode>: Set new filter mode\n",
@@ -42,6 +36,22 @@ if not blacklist_ctx then
 
 	return
 end
+
+local function load_data(key)
+	if key == "mode" then
+		local ctx, err = storage:get_context()
+		local newmode
+		if ctx then newmode, err = ctx:get_string("mode") end
+		err = err or ctx:finalize()
+		if err then return end
+		mode = newmode == "0" and 0 or 1
+	end
+	if key == "blacklist" then
+		blacklist_ctx:load()
+	end
+end
+shareddb.register_listener(load_data)
+load_data("mode")
 
 -- Define violation types and their messages
 local violation_types = {
@@ -251,8 +261,10 @@ local function set_mode(new_mode)
 		return false, "Filter mode already set to " .. (mode == 1 and "Enforcing" or "Permissive")
 	end
 	mode = new_mode
-	storage:set_int("mode", mode)
-	return true
+	local ctx, err = storage:get_context()
+	err = err or ctx:set_string("mode", tostring(mode))
+	err = err or ctx:finalize()
+	if err then return false, err else return true end
 end
 
 local function filter_console(name, param)

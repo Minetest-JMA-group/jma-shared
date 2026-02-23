@@ -129,6 +129,13 @@ local function poll_notifications()
 	if not ensure_connection() then return end
 	if not ensure_listening() then return end
 
+	-- Read any incoming data from PostgreSQL
+    local ok = conn:consumeInput()
+    if not ok then
+        core.log("error", "[shareddb] consumeInput failed: " .. conn:errorMessage())
+        return
+    end
+
 	while true do
 		local n = conn:notifies()
 		if not n then break end

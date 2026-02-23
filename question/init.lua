@@ -120,9 +120,9 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			set_user_votes(name, votes)
 		end
 
-		local new_votes = get_user_votes(name)
+		-- Find next unanswered question using the updated votes table
 		for i, _ in pairs(textTable) do
-			if not pollEnded[i] and new_votes[i] == nil and not (canceled[name] and canceled[name][i]) then
+			if not pollEnded[i] and votes[i] == nil and not (canceled[name] and canceled[name][i]) then
 				show_formspec(name, i)
 				return true
 			end

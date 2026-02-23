@@ -33,7 +33,7 @@ local formspec = "formspec_version[7]"
 	.. "no_prepend[]"
 	.. "hypertext[0,0;12,3;hypertext;<global valign=middle><center><b>%s</b>\n%s</center>]"
 
-function server_restart.request_restart(playername, time, update)
+function server_restart.request_restart(playername, time)
     local requestedby_msg = "Restart requested by " .. playername
     core.log("action", "[server_restart]: " .. requestedby_msg)
 
@@ -62,6 +62,12 @@ core.register_chatcommand("restart", {
 		return true, "Ok"
 	end
 })
+
+function server_restart.update()
+	if not update_command then return false end
+	local ret = ie.os.execute(update_command)
+	return ret
+end
 
 core.register_chatcommand("update", {
 	description = "Run the server update service without restarting",

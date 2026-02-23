@@ -1,14 +1,25 @@
 -- * Copyright (c) 2024 Nanowolf4  (E-Mail: n4w@tutanota.com, XMPP/Jabber: n4w@nixnet.serivces)
 -- * SPDX-License-Identifier: GPL-3.0-or-later
 
-local storage = core.get_mod_storage()
+local shareddb_obj = shareddb.get_mod_storage()
 
-chat_lib.relay_allowed_chat_commands = {}
-if storage:contains("whitelist") then
-	chat_lib.relay_allowed_chat_commands = core.deserialize(storage:get_string("whitelist"))
-else
-	chat_lib.relay_allowed_chat_commands = dofile(core.get_modpath("chat_lib") .. "/relay_chat_commands.lua")
+local function load_whitelist()
+	local ctx = shareddb_obj:get_context()
+	if not ctx then
+		chat_lib.relay_allowed_chat_commands = dofile(core.get_modpath("chat_lib") .. "/relay_chat_commands.lua")
+		return
+	end
+	local wl_str = ctx:get_string("whitelist")
+	ctx:finalize()
+	if wl_str and wl_str ~= "" then
+		chat_lib.relay_allowed_chat_commands = core.deserialize(wl_str) or {}
+	else
+		chat_lib.relay_allowed_chat_commands = dofile(core.get_modpath("chat_lib") .. "/relay_chat_commands.lua")
+	end
 end
+
+load_whitelist()
+shareddb.register_listener(load_whitelist)
 
 function chat_lib.chatcommand_check_privs(name, command)
 	local def = core.registered_chatcommands[command]
@@ -53,7 +64,6 @@ core.register_chatcommand("relay_commands", {
 	func = function(name, param)
 		local iter = param:gmatch("%S+")
 		local command = iter()
-		local allowed_commands = chat_lib.relay_allowed_chat_commands
 
 		if command == "help" then
 			local help = "List of possible commands:\n" ..
@@ -68,11 +78,17 @@ core.register_chatcommand("relay_commands", {
 			if not cmdname or cmdname == "" then
 				return false, "You have to enter valid command name to "..command
 			end
-			if allowed_commands[cmdname] then
+			if chat_lib.relay_allowed_chat_commands[cmdname] then
 				return false, "Command "..cmdname.." is already in the whitelist"
 			end
-			allowed_commands[cmdname] = true
-			storage:set_string("whitelist", core.serialize(allowed_commands))
+			chat_lib.relay_allowed_chat_commands[cmdname] = true
+
+			local ctx, err = shareddb_obj:get_context()
+			err = err or ctx:set_string("whitelist", core.serialize(chat_lib.relay_allowed_chat_commands))
+			err = err or ctx:finalize()
+			if err then
+				return false, "Failed to save: " .. tostring(err)
+			end
 			return true, "Added "..cmdname.." to the whitelist"
 
 		elseif command == "rm" then
@@ -80,20 +96,32 @@ core.register_chatcommand("relay_commands", {
 			if not cmdname or cmdname == "" then
 				return false, "You have to enter valid command name to "..command
 			end
-			if not allowed_commands[cmdname] then
+			if not chat_lib.relay_allowed_chat_commands[cmdname] then
 				return false, "Command "..cmdname.." hasn't existed in the whitelist"
 			end
-			allowed_commands[cmdname] = nil
-			storage:set_string("whitelist", core.serialize(allowed_commands))
+			chat_lib.relay_allowed_chat_commands[cmdname] = nil
+
+			local ctx, err = shareddb_obj:get_context()
+			err = err or ctx:set_string("whitelist", core.serialize(chat_lib.relay_allowed_chat_commands))
+			err = err or ctx:finalize()
+			if err then
+				return false, "Failed to save: " .. tostring(err)
+			end
 			return true, "Removed "..cmdname.." from the whitelist"
 
 		elseif command == "reload" then
-			allowed_commands = dofile(core.get_modpath("chat_lib") .. "/relay_chat_commands.lua")
-			storage:set_string("whitelist", core.serialize(allowed_commands))
+			chat_lib.relay_allowed_chat_commands = dofile(core.get_modpath("chat_lib") .. "/relay_chat_commands.lua")
+
+			local ctx, err = shareddb_obj:get_context()
+			err = err or ctx:set_string("whitelist", core.serialize(chat_lib.relay_allowed_chat_commands))
+			err = err or ctx:finalize()
+			if err then
+				return false, "Failed to save: " .. tostring(err)
+			end
 			return true, "Whitelist reloaded"
 
 		elseif command == "dump" then
-			core.chat_send_player(name, dump(allowed_commands))
+			core.chat_send_player(name, dump(chat_lib.relay_allowed_chat_commands))
 			return true
 		end
 

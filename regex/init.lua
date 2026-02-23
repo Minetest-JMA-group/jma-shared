@@ -22,7 +22,8 @@ end
 
 -- Return a regex context or nil and error
 -- options.storage: modstorage (local or shareddb) object for storing patterns
--- options.path: string, full path to the regex list file
+-- options.path: string, full main path to the regex list file
+-- options.save_path: string, full path to where the regex list file will be saved, and reloaded from if it exists there
 -- options.storage_key: string, storage key name (default: options.list_name)
 -- options.list_name: string, name of the list (e.g., "blacklist", "whitelist", default "regex_list")
 -- options.help_prefix: string, prefix to show before help text
@@ -45,7 +46,8 @@ function regex.create(options)
 			core.log(level, "[regex] " .. message)
 		end,
 		storage = options.storage,
-		path = options.path
+		path = options.path,
+		save_path = options.save_path or options.path
 	}
 
 	local template = [[
@@ -112,9 +114,12 @@ rm <regex>: Remove regex from $LIST]]
 	end
 
 	function context:load_file()
-		local file = io.open(self.path, "r")
+		local file = io.open(self.save_path, "r")
 		if not file then
-			return false, "Could not open file: " .. self.path
+			file = io.open(self.path, "r")
+			if not file then
+				return false, "Could not open file: " .. self.path
+			end
 		end
 
 		local lines = {}
@@ -137,7 +142,7 @@ rm <regex>: Remove regex from $LIST]]
 			data = data .. "\n"
 		end
 
-		local ok = core.safe_file_write(self.path, data)
+		local ok = core.safe_file_write(self.save_path, data)
 		if not ok then
 			return false, "Failed to write to file"
 		end

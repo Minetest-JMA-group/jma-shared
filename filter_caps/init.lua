@@ -11,7 +11,6 @@ local caps_space = 2
 local caps_max = 2
 local whitelist = {}
 local shareddb_obj = shareddb.get_mod_storage()
-assert(shareddb_obj)
 local function load_settings(key)
 	local ctx = shareddb_obj:get_context()
 	if not ctx then

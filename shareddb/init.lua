@@ -157,9 +157,9 @@ end
 core.register_globalstep(poll_notifications)
 
 local function modstorage_set_string(self, key, value)
-	if not self._active then return nil, "Transaction not active" end
-	if type(key) ~= "string" then return nil, "key must be string" end
-	if value ~= nil and type(value) ~= "string" then return nil, "value must be string or nil" end
+	if not self._active then return "Transaction not active" end
+	if type(key) ~= "string" then return "key must be string" end
+	if value ~= nil and type(value) ~= "string" then return "value must be string or nil" end
 
 	local sql, params
 	if value == nil then
@@ -180,9 +180,8 @@ local function modstorage_set_string(self, key, value)
 		self._active = false
 		transaction_active = false
 		core.log("error", "[shareddb] set_string failed: " .. err)
-		return nil, "Database error"
+		return "Database error"
 	end
-	return true
 end
 
 local function modstorage_get_string(self, key)
@@ -204,16 +203,15 @@ local function modstorage_get_string(self, key)
 end
 
 local function modstorage_finalize(self)
-	if not self._active then return true end
+	if not self._active then return "Context inactive" end
 	local ok, err = exec_sql("COMMIT")
 	self._active = false
 	transaction_active = false
 	if not ok then
 		core.log("error", "[shareddb] COMMIT failed: " .. err)
 		conn:exec("ROLLBACK")
-		return nil, "Commit failed"
+		return "Commit failed"
 	end
-	return true
 end
 
 local function start_transaction(self)

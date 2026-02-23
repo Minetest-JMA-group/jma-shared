@@ -9,6 +9,7 @@ if not ie then
 end
 
 local shell_command = core.settings:get("restart_command")
+local update_command = core.settings:get("update_command")
 local disconnect_msg = "Server is restarting. Please reconnect in a couple seconds."
 
 local do_restart = function()
@@ -57,6 +58,17 @@ core.register_chatcommand("restart", {
 		local time = tonumber(param) or 0
 		server_restart.request_restart(name, time)
 		return true, "Ok"
+	end
+})
+
+core.register_chatcommand("update", {
+	description = "Run the server update service without restarting",
+	privs = { dev = true },
+	func = function(name, param)
+		if not update_command then
+			return false, "Update command is not set. Not doing anything."
+		end
+		ie.os.execute(update_command)
 	end
 })
 

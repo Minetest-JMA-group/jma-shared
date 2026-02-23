@@ -124,12 +124,9 @@ local function save_value(key, value, oldctx)
 		return "shareddb is not available"
 	end
 
-	local ok, err = ctx:set_string(key, value)
-	if not ok then
-		return "Failed to save: " .. tostring(err)
-	end
-	ok, err = ctx:finalize()
-	if not ok then
+	local err = ctx:set_string(key, value)
+	err = err or ctx:finalize()
+	if err then
 		return "Failed to save: " .. tostring(err)
 	end
 end

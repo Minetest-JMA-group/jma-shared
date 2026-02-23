@@ -379,7 +379,7 @@ local function modstorage_get_string(self, key)
 		is_in_transaction = false
 		return "Internal error"
 	end
-	return ok
+	return ret
 end
 
 local function modstorage_finalize()

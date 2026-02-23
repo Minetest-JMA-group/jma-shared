@@ -39,12 +39,18 @@ local function get_user_votes(name)
 	end
 	local votes_str = ctx:get_string("votes")
 	ctx:finalize()
+	if votes_str == nil then
+		return {}
+	end
 	return core.deserialize(votes_str) or {}
 end
 
 local function set_user_votes(name, votes)
 	local ctx = mod_storage:get_context_by_name(name)
-	if not ctx then return end
+	if not ctx then
+		core.log("error", "[question] Failed to get context for player " .. name .. " when saving votes")
+		return
+	end
 	ctx:set_string("votes", core.serialize(votes))
 	ctx:finalize()
 end

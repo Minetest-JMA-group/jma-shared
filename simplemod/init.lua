@@ -872,10 +872,13 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 			"button[7.5,9.0;2.9,1;quick_to_actions;Open In Actions]"..
 			"tooltip[quick_to_actions;Open selected entry in Actions tab with fields prefilled.]"
 	elseif tab == "3" then
+		local online_names, online_selected = online_player_dropdown(filter_player)
 		formspec = formspec ..
 			"label[0.3,1.0;Player name]"..
-			"field[0.3,1.6;8.2,1;player_filter;;"..core.formspec_escape(filter_player).."]"..
-			"button[8.8,1.6;2.2,1;view_log;View Log]"..
+			"field[0.3,1.6;6.5,1;player_filter;;"..core.formspec_escape(filter_player).."]"..
+			"dropdown[7.0,1.6;2.6,1;player_filter_pick;"..online_names..";"..online_selected.."]"..
+			"field_close_on_enter[player_filter;false]"..
+			"button[9.9,1.6;2.8,1;view_log;View Log]"..
 			"table[0.3,2.8;12.4,6.2;main_table;"..make_table_data(rows)..";"..tostring(state.selected_row or 1).."]"
 	elseif tab == "4" then
 		local online_names, online_selected = online_player_dropdown(action_player)
@@ -948,6 +951,24 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 				end
 			end
 		end
+	end
+
+	if fields.key_enter_field == "player_filter" then
+		fields.view_log = true
+	end
+
+	if fields.player_filter_pick and fields.player_filter_pick ~= "(select online)" then
+		show_gui(
+			name,
+			"3",
+			fields.player_filter_pick,
+			fields.action_player or state.action_player,
+			fields.action_scope or state.action_scope,
+			fields.action_template or state.action_template,
+			fields.action_duration or state.action_duration,
+			fields.action_custom_reason or state.action_custom_reason
+		)
+		return
 	end
 
 	if fields.view_log then

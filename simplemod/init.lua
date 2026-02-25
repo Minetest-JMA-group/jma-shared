@@ -33,6 +33,13 @@ local reason_templates = {
 	other = "", -- placeholder for custom reason
 }
 local reason_template_by_text = {}
+local reason_template_index = {
+	spam = 1,
+	grief = 2,
+	hack = 3,
+	language = 4,
+	other = 5,
+}
 for key, value in pairs(reason_templates) do
 	if key ~= "other" and value ~= "" then
 		reason_template_by_text[value] = key
@@ -900,8 +907,8 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 			"dropdown[9.5,2.3;1.6,1;action_scope;name,ip;"..(action_scope == "ip" and "2" or "1").."]"..
 			"label[11.3,1.8;Reason]"..
 			"dropdown[11.3,2.3;1.5,1;action_template;spam,grief,hack,language,other;"..
-				(({spam=1,grief=2,hack=3,language=4,other=5})[action_template] or "1").."]"..
-				"label[0.5,3.9;Duration (e.g. 1h, 2d, empty = permanent)]"..
+			(reason_template_index[action_template] or 1).."]"..
+			"label[0.5,3.9;Duration (e.g. 1h, 2d, empty = permanent)]"..
 			"field[0.5,4.4;4.0,1;action_duration;;"..core.formspec_escape(action_duration).."]"
 		if is_other_reason then
 			formspec = formspec ..

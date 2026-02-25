@@ -851,7 +851,8 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 		formspec = formspec ..
 			"label[0.3,1.0;"..(tab == "1" and "Active bans (red)" or "Active mutes (yellow)").."]"..
 			"table[0.3,1.4;12.4,7.4;main_table;"..make_table_data(rows)..";"..tostring(state.selected_row or 1).."]"..
-			"button[6.1,8.75;4.2,1;quick_to_actions;Use Selected]"
+			"button[7.5,9.0;2.9,1;quick_to_actions;Open In Actions]"..
+			"tooltip[quick_to_actions;Open selected entry in Actions tab with fields prefilled.]"
 	elseif tab == "3" then
 		formspec = formspec ..
 			"label[0.3,1.0;Player name]"..

@@ -611,6 +611,10 @@ local function get_ui_state(name)
 	return state
 end
 
+core.register_on_leaveplayer(function(player)
+	ui_state[player:get_player_name()] = nil
+end)
+
 local function severity_color(action_type)
 	if action_type == "ban" then
 		return "#cc4444"
@@ -1074,8 +1078,11 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	end
 
 	if fields.player_filter_pick and fields.player_filter_pick ~= "(select online)" then
-		fields.player_filter = fields.player_filter_pick
-		if not fields.view_log and not fields.tabs and not fields.refresh then
+		local dropdown_only = not fields.view_log and not fields.tabs and not fields.refresh and not fields.key_enter_field
+		if dropdown_only or not fields.player_filter or fields.player_filter == "" then
+			fields.player_filter = fields.player_filter_pick
+		end
+		if dropdown_only then
 			fields.view_log = true
 		end
 	end
@@ -1091,13 +1098,17 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	end
 
 	if fields.action_player_pick and fields.action_player_pick ~= "(select online)" then
-		fields.action_player = fields.action_player_pick
-		if not fields.action_ban
+		local dropdown_only = not fields.action_ban
 			and not fields.action_mute
 			and not fields.action_unban
 			and not fields.action_unmute
 			and not fields.refresh
-			and not fields.tabs then
+			and not fields.tabs
+			and not fields.key_enter_field
+		if dropdown_only or not fields.action_player or fields.action_player == "" then
+			fields.action_player = fields.action_player_pick
+		end
+		if dropdown_only then
 			show_gui(
 				name,
 				"4",

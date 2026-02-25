@@ -678,9 +678,15 @@ local function has_active_punishment(scope, target, kind)
 		return false
 	end
 	if scope == "ip" then
-		return kind == "mute" and simplemod.is_muted_ip(target) or simplemod.is_banned_ip(target)
+		if kind == "mute" then
+			return simplemod.is_muted_ip(target)
+		end
+		return simplemod.is_banned_ip(target)
 	end
-	return kind == "mute" and simplemod.is_muted_name(target) or simplemod.is_banned_name(target)
+	if kind == "mute" then
+		return simplemod.is_muted_name(target)
+	end
+	return simplemod.is_banned_name(target)
 end
 
 -- --------------------------------------------------------------------------

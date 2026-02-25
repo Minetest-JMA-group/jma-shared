@@ -3,13 +3,14 @@
 -- Copyright (c) 2026 Marko Petrović
 
 local modname = "simplemod"
-local modpath = core.get_modpath(modname)
 
 -- Dependencies (assumed present)
 local algorithms = algorithms
 local ipdb = ipdb
 local chat_lib = chat_lib
 local relays_available = core.global_exists("relays")
+local discordmt_available = core.global_exists("discord")
+local discord_mute_log_channel = "1210689151993774180"
 
 -- Core mod storage
 local storage = core.get_mod_storage()
@@ -19,7 +20,13 @@ local storage = core.get_mod_storage()
 -- --------------------------------------------------------------------------
 local parse_time = algorithms.parse_time
 local time_to_string = algorithms.time_to_string
-local table_contains = algorithms.table_contains
+
+local function log_message_to_discord(message, ...)
+	if not discordmt_available or not discord.enabled then
+		return
+	end
+	discord.send(string.format(message, ...), discord_mute_log_channel)
+end
 
 -- --------------------------------------------------------------------------
 -- Reason templates
@@ -243,6 +250,7 @@ end
 -- Public API
 -- --------------------------------------------------------------------------
 simplemod = {}
+simplemod.log_message_to_discord = log_message_to_discord
 
 -- Name ban
 function simplemod.ban_name(target, source, reason, duration_sec)
@@ -447,32 +455,68 @@ ipdb.register_on_login(function(name, ip)
 	end
 end)
 
+local function get_active_mute(name)
+	if simplemod.is_muted_name(name) then
+		return "name", get_name_mutes()[name]
+	end
+	if simplemod.is_muted_ip(name) then
+		local mute = get_ip_mute(name)
+		if mute then
+			return "ip", mute
+		end
+	end
+end
+
+core.register_chatcommand("smca", {
+	params = "<player_name> <on|off>",
+	description = "Enable or disable a muted player's access to mute-chat log visible to moderators.",
+	privs = {pmute=true},
+	func = function(player_name, param)
+		local muted_player_name, state = param:match("(%S+)%s+(%S+)")
+		if not muted_player_name or not state then
+			return false, "Enter a valid player name and on|off."
+		end
+
+		local muted_player = core.get_player_by_name(muted_player_name)
+		if not muted_player then
+			if core.player_exists(muted_player_name) ~= true then
+				return false, "The player \"" .. muted_player_name .. "\" doesn't exist."
+			end
+			return false, "The player \"" .. muted_player_name .. "\" exists but is not online."
+		end
+
+		local is_on = state == "on"
+		muted_player:get_meta():set_string("mute_chat_access", tostring(is_on))
+		if is_on then
+			return true, "Mute-chat access is now enabled for \"" .. muted_player_name .. "\"."
+		end
+		return true, "Mute-chat access is now disabled for \"" .. muted_player_name .. "\"."
+	end
+})
+
 core.register_on_chat_message(function(name, message)
 	if message:sub(1,1) == "/" then return end
-	local muted = false
-	local mute_data = nil
-	local scope = nil
-	if simplemod.is_muted_name(name) then
-		muted = true
-		mute_data = get_name_mutes()[name]
-		scope = "name"
-	elseif simplemod.is_muted_ip(name) then
-		muted = true
-		mute_data = get_ip_mute(name)
-		scope = "ip"
+	local scope, mute_data = get_active_mute(name)
+	if not scope then
+		return
 	end
-	if muted then
-		local expiry = mute_data.expiry and " until "..os.date("%Y-%m-%d %H:%M", mute_data.expiry) or " permanently"
-		core.chat_send_player(name, "You are muted ("..scope..")"..expiry..". Reason: "..(mute_data.reason or "none"))
-		if chat_lib then
-			local msg = string.format("[MUTED:%s] <%s>: %s", scope, name, message)
-			chat_lib.send_message_to_privileged(msg, {ban=true, pmute=true}, name)
-		end
-		if relays_available then
-			relays.send_action_report("[MUTED:%s] %s: %s", scope, name, message)
-		end
+
+	local player = core.get_player_by_name(name)
+	if player and player:get_meta():get_string("mute_chat_access") == "false" then
+		core.chat_send_player(name, "You're muted. No one can read your messages.")
 		return true
 	end
+
+	local expiry = mute_data.expiry and " until "..os.date("%Y-%m-%d %H:%M", mute_data.expiry) or " permanently"
+	core.chat_send_player(name, "You are muted ("..scope..")"..expiry..". Reason: "..(mute_data.reason or "none"))
+
+	local muted_message = string.format("[MUTED:%s] <%s>: %s", scope, name, message)
+	chat_lib.send_message_to_privileged(muted_message, {ban=true, pmute=true}, name)
+	if relays_available then
+		relays.send_action_report("[MUTED:%s] %s: %s", scope, name, message)
+	end
+	log_message_to_discord("**%s**: %s", name, message)
+	return true
 end)
 
 -- --------------------------------------------------------------------------
@@ -655,7 +699,7 @@ core.register_chatcommand("sblog", {
 })
 
 -- GUI (extended with Actions tab)
-function show_gui(name, tab, filter_player, action_player, action_scope, action_template, action_duration)
+local function show_gui(name, tab, filter_player, action_player, action_scope, action_template, action_duration)
 	tab = tab or "1"
 	filter_player = filter_player or ""
 	action_player = action_player or ""

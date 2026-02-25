@@ -19,6 +19,7 @@ simplemod provides name‑based and IP‑based bans and mutes for Minetest, leve
 - `ipdb` – for IP‑based storage and entry merging.
 - `chat_lib` – for sending muted messages to privileged players.
 - `relays` (optional) – for external notifications.
+- `discordmt` (optional) – for forwarding muted chat to a Discord mute-log channel.
 
 All dependencies are part of the same modpack and must be enabled.
 
@@ -28,17 +29,14 @@ All commands require `ban` privilege (for bans) or `pmute` privilege (for mutes)
 
 | Command | Description |
 |--------|-------------|
-| `/sbban <player> [time] <reason>` | Ban by name |
-| `/sbunban <player> [reason]` | Unban by name |
-| `/sbmute <player> [time] <reason>` | Mute by name |
-| `/sbunmute <player> [reason]` | Unmute by name |
-| `/sbipban <player> [time] <reason>` | Ban by IP (affects all accounts on that IP) |
-| `/sbipunban <player> [reason]` | Unban by IP |
-| `/sbipmute <player> [time] <reason>` | Mute by IP |
-| `/sbipunmute <player> [reason]` | Unmute by IP |
+| `/sbban <player> <name\|ip> [time] <reason>` | Ban by name or IP |
+| `/sbunban <player> <name\|ip> [reason]` | Unban by name or IP |
+| `/sbmute <player> <name\|ip> [time] <reason>` | Mute by name or IP |
+| `/sbunmute <player> <name\|ip> [reason]` | Unmute by name or IP |
 | `/sbbanlist` | List all active bans (name + IP) |
 | `/sbmutelist` | List all active mutes (name + IP) |
 | `/sblog <player>` | Show combined log for a player |
+| `/smca <player> <on\|off>` | Allow or block muted player's access to moderator mute-log chat |
 | `/sb` | Open the GUI |
 
 Time format examples: `30m`, `2h`, `1d`, `2w`, `3M` (month = 30 days). If omitted, the punishment is permanent.

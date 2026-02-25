@@ -1,7 +1,6 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
-local relays_available = core.global_exists("relays")
 local discordmt_available = core.global_exists("discord") and discord.enabled
 local discord_mute_log_channel = "1210689151993774180"
 
@@ -284,6 +283,34 @@ local function add_action_log(scope, action_type, target, source, reason, durati
 	end
 end
 
+local function report_action(scope_text, action_type, target, source, reason, duration_sec)
+	local has_reason = reason and reason ~= ""
+	if action_type == "ban" or action_type == "mute" then
+		if not has_reason then
+			reason = "none"
+		end
+		local duration_text = (duration_sec and duration_sec > 0) and algorithms.time_to_string(duration_sec) or "permanent"
+		relays.send_action_report(
+			"simplemod %s (%s): **%s** -> **%s** for `%s` reason: `%s`",
+			action_type, scope_text, source, target, duration_text, reason
+		)
+		return
+	end
+
+	if has_reason then
+		relays.send_action_report(
+			"simplemod %s (%s): **%s** -> **%s** reason: `%s`",
+			action_type, scope_text, source, target, reason
+		)
+		return
+	end
+
+	relays.send_action_report(
+		"simplemod %s (%s): **%s** -> **%s**",
+		action_type, scope_text, source, target
+	)
+end
+
 -- Name ban
 function simplemod.ban_name(target, source, reason, duration_sec)
 	local bans = get_storage_table(NAME_BANS_KEY)
@@ -291,6 +318,7 @@ function simplemod.ban_name(target, source, reason, duration_sec)
 	bans[target] = ban
 	save_storage_table(NAME_BANS_KEY, bans)
 	add_action_log("name", "ban", target, source, reason, duration_sec)
+	report_action("name", "ban", target, source, reason, duration_sec)
 	local player = core.get_player_by_name(target)
 	if player then
 		local msg = format_ban_message("You have been banned", ban.reason)
@@ -304,6 +332,7 @@ function simplemod.unban_name(target, source, reason)
 	bans[target] = nil
 	save_storage_table(NAME_BANS_KEY, bans)
 	add_action_log("name", "unban", target, source, reason)
+	report_action("name", "unban", target, source, reason)
 	return true
 end
 function simplemod.is_banned_name(target)
@@ -325,6 +354,7 @@ function simplemod.mute_name(target, source, reason, duration_sec)
 	mutes[target] = mute
 	save_storage_table(NAME_MUTES_KEY, mutes)
 	add_action_log("name", "mute", target, source, reason, duration_sec)
+	report_action("name", "mute", target, source, reason, duration_sec)
 	return true
 end
 function simplemod.unmute_name(target, source, reason)
@@ -333,6 +363,7 @@ function simplemod.unmute_name(target, source, reason)
 	mutes[target] = nil
 	save_storage_table(NAME_MUTES_KEY, mutes)
 	add_action_log("name", "unmute", target, source, reason)
+	report_action("name", "unmute", target, source, reason)
 	return true
 end
 function simplemod.is_muted_name(target)
@@ -356,6 +387,7 @@ function simplemod.ban_ip(target, source, reason, duration_sec)
 	list[target] = ban
 	save_storage_table(IP_BAN_LIST_KEY, list)
 	add_action_log("ip", "ban", target, source, reason, duration_sec)
+	report_action("IP", "ban", target, source, reason, duration_sec)
 	local msg = format_ban_message("Your IP has been banned", ban.reason)
 	local names, names_err = get_ip_linked_names(target)
 	if names_err then
@@ -389,6 +421,7 @@ function simplemod.unban_ip(target, source, reason)
 	list[target] = nil
 	save_storage_table(IP_BAN_LIST_KEY, list)
 	add_action_log("ip", "unban", target, source, reason)
+	report_action("IP", "unban", target, source, reason)
 	return true
 end
 function simplemod.is_banned_ip(target)
@@ -405,6 +438,7 @@ function simplemod.mute_ip(target, source, reason, duration_sec)
 	list[target] = mute
 	save_storage_table(IP_MUTE_LIST_KEY, list)
 	add_action_log("ip", "mute", target, source, reason, duration_sec)
+	report_action("IP", "mute", target, source, reason, duration_sec)
 	return true
 end
 function simplemod.unmute_ip(target, source, reason)
@@ -417,6 +451,7 @@ function simplemod.unmute_ip(target, source, reason)
 	list[target] = nil
 	save_storage_table(IP_MUTE_LIST_KEY, list)
 	add_action_log("ip", "unmute", target, source, reason)
+	report_action("IP", "unmute", target, source, reason)
 	return true
 end
 function simplemod.is_muted_ip(target)
@@ -513,9 +548,6 @@ core.register_on_chat_message(function(name, message)
 
 	local muted_message = string.format("[MUTED:%s] <%s>: %s", scope, name, message)
 	chat_lib.send_message_to_privileged(muted_message, {ban=true, pmute=true}, name)
-	if relays_available then
-		relays.send_action_report("[MUTED:%s] %s: %s", scope, name, message)
-	end
 	log_message_to_discord("**%s**: %s", name, message)
 	return true
 end)
@@ -961,7 +993,7 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	end
 
 	formspec = formspec ..
-		"button[0.3,9.0;2.0,1;close;Close]"..
+		"button_exit[0.3,9.0;2.0,1;close;Close]"..
 		"button[10.5,9.0;2.2,1;refresh;Refresh]"
 
 	core.show_formspec(name, "simplemod:main", formspec)
@@ -973,7 +1005,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	if not core.check_player_privs(name, {moderator=true}) then return end
 	local state = get_ui_state(name)
 
-	if fields.close then
+	if fields.close or fields.quit then
 		ui_state[name] = nil
 		return
 	end

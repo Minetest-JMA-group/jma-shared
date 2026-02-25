@@ -289,7 +289,7 @@ local function report_action(scope_text, action_type, target, source, reason, du
 		if not has_reason then
 			reason = "none"
 		end
-		local duration_text = (duration_sec and duration_sec > 0) and algorithms.time_to_string(duration_sec) or "permanent"
+		local duration_text = (duration_sec and duration_sec > 0) and algorithms.time_to_string(duration_sec) or "permanent duration"
 		relays.send_action_report(
 			"simplemod %s (%s): **%s** -> **%s** for `%s` reason: `%s`",
 			action_type, scope_text, source, target, duration_text, reason

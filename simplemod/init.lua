@@ -9,6 +9,7 @@ local discord_mute_log_channel = "1210689151993774180"
 local storage = core.get_mod_storage()
 local LOG_LIMIT = 100
 local BAN_APPEAL_SUFFIX = [[
+
 If you think that you got banned by mistake, please contact us on Discord: ctf.jma-sig.de or write an email to loki@jma-sig.de.
 (de) Wenn Sie denken, dass es sich um ein Missverständnis handelt, dann schreiben Sie bitte eine E-Mail an loki@jma-sig.de oder kontaktieren Sie uns auf Discord über die Website ctf.jma-sig.de.]]
 

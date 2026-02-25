@@ -766,7 +766,7 @@ local function handle_ban(name, params, is_mute)
 	local target = args[1]
 	local scope = args[2]
 	if scope ~= "name" and scope ~= "ip" then
-		return false, "Scope must be 'name' or 'ip'"
+		return false, ("Scope must be 'name' or 'ip' (got: %q)"):format(args[2] or "")
 	end
 	local time_str, reason
 	if args[3]:match("^%d") then
@@ -797,7 +797,7 @@ local function handle_unban(name, params, is_mute)
 	local target = args[1]
 	local scope = args[2]
 	if scope ~= "name" and scope ~= "ip" then
-		return false, "Scope must be 'name' or 'ip'"
+		return false, ("Scope must be 'name' or 'ip' (got: %q)"):format(args[2] or "")
 	end
 	local reason = table.concat(args, " ", 3)
 	local expanded_reason = expand_reason(reason)

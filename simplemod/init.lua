@@ -918,7 +918,7 @@ end
 core.register_on_player_receive_fields(function(player, formname, fields)
 	if formname ~= "simplemod:main" then return end
 	local name = player:get_player_name()
-	if not core.check_player_privs(name, {ban=true}) then return end
+	if not core.check_player_privs(name, {moderator=true}) then return end
 	local state = get_ui_state(name)
 
 	if fields.close then
@@ -1100,7 +1100,7 @@ end)
 
 core.register_chatcommand("sb", {
 	description = "Open simplemod GUI",
-	privs = {ban=true},
+	privs = {moderator=true},
 	func = function(name)
 		show_gui(name)
 	end,

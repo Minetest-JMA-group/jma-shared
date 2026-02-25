@@ -784,7 +784,16 @@ local function handle_ban(name, params, is_mute)
 		return false, "Insufficient privileges"
 	end
 
-	return run_action(is_mute and "mute" or "ban", scope, target, name, expanded_reason, duration)
+	local ok, err = run_action(is_mute and "mute" or "ban", scope, target, name, expanded_reason, duration)
+	if not ok then
+		local action = is_mute and "Mute" or "Ban"
+		return false, ("%s failed for %s (%s): %s"):format(action, target, scope, err or "unknown")
+	end
+
+	local action = is_mute and "Muted" or "Banned"
+	local duration_text = duration > 0 and (" for "..algorithms.time_to_string(duration)) or " permanently"
+	local reason_text = expanded_reason ~= "" and expanded_reason or "none"
+	return true, ("%s %s (%s)%s. Reason: %s."):format(action, target, scope, duration_text, reason_text)
 end
 
 local function handle_unban(name, params, is_mute)
@@ -807,7 +816,17 @@ local function handle_unban(name, params, is_mute)
 		return false, "Insufficient privileges"
 	end
 
-	return run_action(is_mute and "unmute" or "unban", scope, target, name, expanded_reason)
+	local ok, err = run_action(is_mute and "unmute" or "unban", scope, target, name, expanded_reason)
+	if not ok then
+		local action = is_mute and "Unmute" or "Unban"
+		return false, ("%s failed for %s (%s): %s"):format(action, target, scope, err or "unknown")
+	end
+
+	local action = is_mute and "Unmuted" or "Unbanned"
+	if expanded_reason ~= "" then
+		return true, ("%s %s (%s). Reason: %s."):format(action, target, scope, expanded_reason)
+	end
+	return true, ("%s %s (%s)."):format(action, target, scope)
 end
 
 core.register_chatcommand("sbban", {
@@ -1224,6 +1243,7 @@ core.register_chatcommand("sb", {
 	privs = {moderator=true},
 	func = function(name)
 		show_gui(name)
+		return true, "Opened simplemod GUI."
 	end,
 })
 

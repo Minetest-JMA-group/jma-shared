@@ -32,6 +32,12 @@ local reason_templates = {
 	language = "Offensive language",
 	other = "", -- placeholder for custom reason
 }
+local reason_template_by_text = {}
+for key, value in pairs(reason_templates) do
+	if key ~= "other" and value ~= "" then
+		reason_template_by_text[value] = key
+	end
+end
 
 local function expand_reason(arg)
 	if not arg or arg == "" then return "" end
@@ -39,6 +45,10 @@ local function expand_reason(arg)
 		return reason_templates[arg]
 	end
 	return arg
+end
+
+local function infer_reason_template(reason)
+	return reason_template_by_text[reason or ""] or "other"
 end
 
 local function trim_log(log)
@@ -521,29 +531,84 @@ local function format_active_entry(player, data)
 	return string.format("%s: %s (by %s)%s", player, data.reason, data.source, expiry)
 end
 
-local function make_textlist(items)
-	local escaped = {}
-	for i = 1, #items do
-		escaped[i] = core.formspec_escape(items[i])
+local ui_state = {}
+
+local function get_ui_state(name)
+	local state = ui_state[name]
+	if state then
+		return state
 	end
-	return table.concat(escaped, ",")
+	state = {
+		tab = "1",
+		filter = "",
+		action_player = "",
+		action_scope = "name",
+		action_template = "spam",
+		action_duration = "",
+		action_custom_reason = "",
+		selected_row = 1,
+		compact = false,
+	}
+	ui_state[name] = state
+	return state
 end
 
-local function get_tab_items(tab, filter)
-	local items = {}
+local function severity_color(action_type)
+	if action_type == "ban" then
+		return "#cc4444"
+	end
+	if action_type == "mute" then
+		return "#b3872b"
+	end
+	if action_type == "unban" or action_type == "unmute" then
+		return "#3f8f5b"
+	end
+	return "#d9d9d9"
+end
+
+local function make_table_rows(tab, filter)
+	local rows = {}
 	if tab == "1" then
 		for p,d in pairs(get_name_bans()) do
-			table.insert(items, "[Name] "..format_active_entry(p, d))
+			table.insert(rows, {
+				color = severity_color("ban"),
+				text = "[BAN][Name] "..format_active_entry(p, d),
+				target = p,
+				scope = "name",
+				kind = "ban",
+				reason = d.reason or "",
+			})
 		end
 		for p,d in pairs(get_storage_table("ip_ban_list")) do
-			table.insert(items, "[IP]   "..format_active_entry(p, d))
+			table.insert(rows, {
+				color = severity_color("ban"),
+				text = "[BAN][IP] "..format_active_entry(p, d),
+				target = p,
+				scope = "ip",
+				kind = "ban",
+				reason = d.reason or "",
+			})
 		end
 	elseif tab == "2" then
 		for p,d in pairs(get_name_mutes()) do
-			table.insert(items, "[Name] "..format_active_entry(p, d))
+			table.insert(rows, {
+				color = severity_color("mute"),
+				text = "[MUTE][Name] "..format_active_entry(p, d),
+				target = p,
+				scope = "name",
+				kind = "mute",
+				reason = d.reason or "",
+			})
 		end
 		for p,d in pairs(get_storage_table("ip_mute_list")) do
-			table.insert(items, "[IP]   "..format_active_entry(p, d))
+			table.insert(rows, {
+				color = severity_color("mute"),
+				text = "[MUTE][IP] "..format_active_entry(p, d),
+				target = p,
+				scope = "ip",
+				kind = "mute",
+				reason = d.reason or "",
+			})
 		end
 	elseif tab == "3" then
 		if filter and filter ~= "" then
@@ -558,17 +623,42 @@ local function get_tab_items(tab, filter)
 				if e.duration and e.duration > 0 then
 					line = line .. " for " .. algorithms.time_to_string(e.duration)
 				end
-				table.insert(items, line)
+				table.insert(rows, {
+					color = severity_color(e.type),
+					text = line,
+					target = e.target,
+					scope = e.scope,
+					kind = e.type,
+					reason = e.reason or "",
+				})
 			end
 		else
-			table.insert(items, "Enter a player name above and press View Log.")
+			table.insert(rows, {
+				color = "#d9d9d9",
+				text = "Enter a player name above and press View Log.",
+			})
 		end
 	end
 
-	if #items == 0 then
-		table.insert(items, "(none)")
+	if tab == "1" or tab == "2" then
+		table.sort(rows, function(a, b)
+			return a.text < b.text
+		end)
 	end
-	return items
+
+	if #rows == 0 then
+		table.insert(rows, {color = "#d9d9d9", text = "(none)"})
+	end
+	return rows
+end
+
+local function make_table_data(rows)
+	local data = {}
+	for _, row in ipairs(rows) do
+		table.insert(data, row.color)
+		table.insert(data, core.formspec_escape(row.text))
+	end
+	return table.concat(data, ",")
 end
 
 -- --------------------------------------------------------------------------
@@ -732,33 +822,51 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	action_duration = action_duration or ""
 	action_custom_reason = action_custom_reason or ""
 
+	local state = get_ui_state(name)
+	state.tab = tab
+	state.filter = filter_player
+	state.action_player = action_player
+	state.action_scope = action_scope
+	state.action_template = action_template
+	state.action_duration = action_duration
+	state.action_custom_reason = action_custom_reason
+
+	local compact = state.compact
 	local is_other_reason = action_template == "other"
-	local formspec = "formspec_version[6]size[13,10]"..
+	local rows = make_table_rows(tab, filter_player)
+	local row_h = compact and "7.0" or "7.4"
+	local fs_h = compact and "9.2" or "10"
+	local footer_y = compact and "8.25" or "9.0"
+	local compact_y = compact and "8.55" or "9.3"
+	local formspec = "formspec_version[6]size[13,"..fs_h.."]"..
 		"bgcolor[#1a1a1acc;true]"..
 		"style_type[label;font_size=18]"..
 		"style[close;bgcolor=#3a3a3a;bgcolor_hovered=#4a4a4a]"..
 		"style[refresh;bgcolor=#355070;bgcolor_hovered=#42678f]"..
+		"style[quick_to_actions;bgcolor=#425e7a;bgcolor_hovered=#527494]"..
 		"style[action_ban;bgcolor=#8f2626;bgcolor_hovered=#aa2f2f]"..
 		"style[action_mute;bgcolor=#6e5a2f;bgcolor_hovered=#85703a]"..
 		"style[action_unban;bgcolor=#305f3e;bgcolor_hovered=#3a774c]"..
 		"style[action_unmute;bgcolor=#305f3e;bgcolor_hovered=#3a774c]"..
+		"style_type[table;background=#151515;border=true]"..
+		"tablecolumns[color;text]"..
+		"tableoptions[highlight=#355070;border=false]"..
 		"tabheader[0.2,0.2;tabs;Active Bans,Active Mutes,Player Log,Actions;"..tab..";false;false]"
 
 	if tab == "1" or tab == "2" then
-		local items = get_tab_items(tab, "")
 		formspec = formspec ..
-			"label[0.3,1.0;"..(tab == "1" and "Active bans" or "Active mutes").."]"..
-			"textlist[0.3,1.4;12.4,7.6;main_list;"..make_textlist(items)..";0]"
+			"label[0.3,1.0;"..(tab == "1" and "Active bans (red)" or "Active mutes (yellow)").."]"..
+			"table[0.3,1.4;12.4,"..row_h..";main_table;"..make_table_data(rows)..";"..tostring(state.selected_row or 1).."]"..
+			"button[8.6,"..(compact and "8.55" or "8.75")..";4.1,1;quick_to_actions;Open Selected In Actions]"
 	elseif tab == "3" then
-		local items = get_tab_items(tab, filter_player)
 		formspec = formspec ..
 			"label[0.3,1.0;Player name]"..
 			"field[0.3,2.0;8.2,1;player_filter;;"..core.formspec_escape(filter_player).."]"..
 			"button[8.8,1.6;2.2,1;view_log;View Log]"..
-			"textlist[0.3,2.8;12.4,6.2;main_list;"..make_textlist(items)..";0]"
+			"table[0.3,2.8;12.4,6.2;main_table;"..make_table_data(rows)..";"..tostring(state.selected_row or 1).."]"
 	elseif tab == "4" then
-			formspec = formspec ..
-				"box[0.2,0.9;12.6,7.8;#1f1f1fa8]"..
+		formspec = formspec ..
+			"box[0.2,0.9;12.6,7.8;#1f1f1fa8]"..
 				"label[0.5,1.2;Apply moderation action]"..
 				"label[0.5,1.8;Player name]"..
 				"field[0.5,2.8;6.2,1;action_player;;"..core.formspec_escape(action_player).."]"..
@@ -782,8 +890,9 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	end
 
 	formspec = formspec ..
-		"button[0.3,9.0;2.0,1;close;Close]"..
-		"button[10.5,9.0;2.2,1;refresh;Refresh]"
+		"checkbox[2.6,"..compact_y..";compact_mode;Compact mode;"..(compact and "true" or "false").."]"..
+		"button[0.3,"..footer_y..";2.0,1;close;Close]"..
+		"button[10.5,"..footer_y..";2.2,1;refresh;Refresh]"
 
 	core.show_formspec(name, "simplemod:main", formspec)
 end
@@ -792,8 +901,43 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	if formname ~= "simplemod:main" then return end
 	local name = player:get_player_name()
 	if not core.check_player_privs(name, {ban=true}) then return end
+	local state = get_ui_state(name)
 
-	if fields.close then return end
+	if fields.compact_mode then
+		state.compact = fields.compact_mode == "true"
+	end
+
+	if fields.close then
+		ui_state[name] = nil
+		return
+	end
+
+	if fields.main_table then
+		local event = core.explode_table_event(fields.main_table)
+		if event.type == "CHG" then
+			state.selected_row = event.row
+		elseif event.type == "DCL" then
+			state.selected_row = event.row
+			if state.tab == "1" or state.tab == "2" then
+				local rows = make_table_rows(state.tab, state.filter)
+				local selected = rows[state.selected_row]
+				if selected and selected.target then
+					local template = infer_reason_template(selected.reason)
+					show_gui(
+						name,
+						"4",
+						state.filter,
+						selected.target,
+						selected.scope,
+						template,
+						state.action_duration,
+						template == "other" and selected.reason or ""
+					)
+					return
+				end
+			end
+		end
+	end
 
 	if fields.view_log then
 		local target = fields.player_filter
@@ -853,11 +997,38 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		return
 	end
 
-	if fields.action_template then
+	if fields.quick_to_actions then
+		local tab = fields.tabs or state.tab
+		if tab ~= "1" and tab ~= "2" then
+			show_gui(name, tab, fields.player_filter or state.filter, fields.action_player or "", fields.action_scope or "name", fields.action_template or "spam", fields.action_duration or "", fields.action_custom_reason or "")
+			return
+		end
+		local rows = make_table_rows(tab, fields.player_filter or state.filter)
+		local selected = rows[state.selected_row or 1]
+		if not selected or not selected.target then
+			core.chat_send_player(name, "Select an entry first.")
+			show_gui(name, tab, fields.player_filter or state.filter, fields.action_player or "", fields.action_scope or "name", fields.action_template or "spam", fields.action_duration or "", fields.action_custom_reason or "")
+			return
+		end
+		local template = infer_reason_template(selected.reason)
 		show_gui(
 			name,
 			"4",
-			fields.player_filter or "",
+			fields.player_filter or state.filter,
+			selected.target,
+			selected.scope,
+			template,
+			fields.action_duration or "",
+			template == "other" and selected.reason or ""
+		)
+		return
+	end
+
+	if fields.action_template then
+		show_gui(
+			name,
+			fields.tabs or "4",
+			fields.player_filter or state.filter,
 			fields.action_player or "",
 			fields.action_scope or "name",
 			fields.action_template,

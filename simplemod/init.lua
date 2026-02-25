@@ -874,7 +874,7 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	elseif tab == "3" then
 		formspec = formspec ..
 			"label[0.3,1.0;Player name]"..
-			"field[0.3,2.0;8.2,1;player_filter;;"..core.formspec_escape(filter_player).."]"..
+			"field[0.3,1.6;8.2,1;player_filter;;"..core.formspec_escape(filter_player).."]"..
 			"button[8.8,1.6;2.2,1;view_log;View Log]"..
 			"table[0.3,2.8;12.4,6.2;main_table;"..make_table_data(rows)..";"..tostring(state.selected_row or 1).."]"
 	elseif tab == "4" then

@@ -660,6 +660,24 @@ local function make_table_data(rows)
 	return table.concat(data, ",")
 end
 
+local function online_player_dropdown(current_name)
+	local names = {}
+	for _, player in ipairs(core.get_connected_players()) do
+		table.insert(names, player:get_player_name())
+	end
+	table.sort(names)
+	table.insert(names, 1, "(select online)")
+
+	local selected = 1
+	for i = 2, #names do
+		if names[i] == current_name then
+			selected = i
+			break
+		end
+	end
+	return table.concat(names, ","), selected
+end
+
 -- --------------------------------------------------------------------------
 -- Chat commands (unified with type argument)
 -- --------------------------------------------------------------------------
@@ -860,28 +878,31 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 			"button[8.8,1.6;2.2,1;view_log;View Log]"..
 			"table[0.3,2.8;12.4,6.2;main_table;"..make_table_data(rows)..";"..tostring(state.selected_row or 1).."]"
 	elseif tab == "4" then
+		local online_names, online_selected = online_player_dropdown(action_player)
 		formspec = formspec ..
-			"box[0.2,0.9;12.6,7.8;#1f1f1fa8]"..
-				"label[0.5,1.2;Apply moderation action]"..
-				"label[0.5,1.8;Player name]"..
-				"field[0.5,2.8;6.2,1;action_player;;"..core.formspec_escape(action_player).."]"..
-			"label[6.9,1.8;Scope]"..
-			"dropdown[6.9,2.3;2.0,1;action_scope;name,ip;"..(action_scope == "ip" and "2" or "1").."]"..
-			"label[9.1,1.8;Reason]"..
-				"dropdown[9.1,2.3;3.4,1;action_template;spam,grief,hack,language,other;"..
-					(({spam=1,grief=2,hack=3,language=4,other=5})[action_template] or "1").."]"..
-				"label[0.5,3.6;Duration (e.g. 1h, 2d)]"..
-				"field[0.5,4.6;4.0,1;action_duration;;"..core.formspec_escape(action_duration).."]"..
-				"button[0.5,7.0;2.8,1;action_ban;Ban]"..
-				"button[3.5,7.0;2.8,1;action_mute;Mute]"..
-				"button[6.5,7.0;2.8,1;action_unban;Unban]"..
-				"button[9.5,7.0;2.8,1;action_unmute;Unmute]"..
-				"tooltip[action_ban;Ban and disconnect immediately.]"
+			"box[0.2,0.9;12.6,8.0;#1f1f1fa8]"..
+			"label[0.5,1.2;Apply moderation action]"..
+			"label[0.5,1.8;Player name]"..
+			"field[0.5,2.8;6.0,1;action_player;;"..core.formspec_escape(action_player).."]"..
+			"dropdown[6.7,2.3;2.6,1;action_player_pick;"..online_names..";"..online_selected.."]"..
+			"label[9.5,1.8;Scope]"..
+			"dropdown[9.5,2.3;1.6,1;action_scope;name,ip;"..(action_scope == "ip" and "2" or "1").."]"..
+			"label[11.3,1.8;Reason]"..
+			"dropdown[11.3,2.3;1.5,1;action_template;spam,grief,hack,language,other;"..
+				(({spam=1,grief=2,hack=3,language=4,other=5})[action_template] or "1").."]"..
+			"label[0.5,3.6;Duration (e.g. 1h, 2d)]"..
+			"field[0.5,4.6;4.0,1;action_duration;;"..core.formspec_escape(action_duration).."]"
 		if is_other_reason then
 			formspec = formspec ..
-				"label[0.5,4.8;Custom reason]"..
-				"field[0.5,5.8;12.0,1;action_custom_reason;;"..core.formspec_escape(action_custom_reason).."]"
+				"label[0.5,5.4;Custom reason]"..
+				"field[0.5,6.4;12.0,1;action_custom_reason;;"..core.formspec_escape(action_custom_reason).."]"
 		end
+		formspec = formspec ..
+			"button[0.5,7.8;2.8,1;action_ban;Ban]"..
+			"button[3.5,7.8;2.8,1;action_mute;Mute]"..
+			"button[6.5,7.8;2.8,1;action_unban;Unban]"..
+			"button[9.5,7.8;2.8,1;action_unmute;Unmute]"..
+			"tooltip[action_ban;Ban and disconnect immediately.]"
 	end
 
 	formspec = formspec ..
@@ -936,6 +957,20 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		else
 			core.chat_send_player(name, "Please enter a player name")
 		end
+		return
+	end
+
+	if fields.action_player_pick and fields.action_player_pick ~= "(select online)" then
+		show_gui(
+			name,
+			"4",
+			fields.player_filter or state.filter,
+			fields.action_player_pick,
+			fields.action_scope or state.action_scope,
+			fields.action_template or state.action_template,
+			fields.action_duration or state.action_duration,
+			fields.action_custom_reason or state.action_custom_reason
+		)
 		return
 	end
 

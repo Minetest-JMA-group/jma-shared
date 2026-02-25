@@ -202,6 +202,22 @@ local function clear_ip_list_entry(list_key, name)
 	save_storage_table(list_key, list)
 end
 
+local function get_ip_linked_names(name)
+	local ctx, err = ipdb_ctx(name)
+	if not ctx then
+		return nil, err
+	end
+	local ok, identifiers_or_err = pcall(ipdb.dbmanager.get_all_identifiers, ctx._userentry_id)
+	err = err or ctx:finalize()
+	if not ok then
+		return nil, identifiers_or_err
+	end
+	if err then
+		return nil, err
+	end
+	return identifiers_or_err and identifiers_or_err.names or {}
+end
+
 local function get_ip_ban(name)
 	local data, err = get_ip_data(name, "ban")
 	if err then return nil, err end
@@ -340,10 +356,26 @@ function simplemod.ban_ip(target, source, reason, duration_sec)
 	list[target] = ban
 	save_storage_table(IP_BAN_LIST_KEY, list)
 	add_action_log("ip", "ban", target, source, reason, duration_sec)
-	local player = core.get_player_by_name(target)
-	if player then
-		local msg = format_ban_message("Your IP has been banned", ban.reason)
+	local msg = format_ban_message("Your IP has been banned", ban.reason)
+	local names, names_err = get_ip_linked_names(target)
+	if names_err then
+		core.log("warning", "[simplemod] failed to get linked names for IP ban target "..target..": "..tostring(names_err))
+		if core.get_player_by_name(target) then
+			core.kick_player(target, msg)
+		end
+		return true
+	end
+	local seen = {[target] = true}
+	if core.get_player_by_name(target) then
 		core.kick_player(target, msg)
+	end
+	for _, linked_name in ipairs(names) do
+		if not seen[linked_name] then
+			seen[linked_name] = true
+			if core.get_player_by_name(linked_name) then
+				core.kick_player(linked_name, msg)
+			end
+		end
 	end
 	return true
 end

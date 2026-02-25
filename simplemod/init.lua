@@ -513,6 +513,56 @@ local function format_active_entry(player, data)
 	return string.format("%s: %s (by %s)%s", player, data.reason, data.source, expiry)
 end
 
+local function make_textlist(items)
+	local escaped = {}
+	for i = 1, #items do
+		escaped[i] = core.formspec_escape(items[i])
+	end
+	return table.concat(escaped, ",")
+end
+
+local function get_tab_items(tab, filter)
+	local items = {}
+	if tab == "1" then
+		for p,d in pairs(get_name_bans()) do
+			table.insert(items, "[Name] "..format_active_entry(p, d))
+		end
+		for p,d in pairs(get_storage_table("ip_ban_list")) do
+			table.insert(items, "[IP]   "..format_active_entry(p, d))
+		end
+	elseif tab == "2" then
+		for p,d in pairs(get_name_mutes()) do
+			table.insert(items, "[Name] "..format_active_entry(p, d))
+		end
+		for p,d in pairs(get_storage_table("ip_mute_list")) do
+			table.insert(items, "[IP]   "..format_active_entry(p, d))
+		end
+	elseif tab == "3" then
+		if filter and filter ~= "" then
+			local log = simplemod.get_player_log(filter)
+			for i = 1, math.min(50, #log) do
+				local e = log[i]
+				local line = ("[%s] %s (%s): %s by %s"):format(
+					os.date("%Y-%m-%d %H:%M", e.time), e.type, e.scope, e.target, e.source)
+				if e.reason and e.reason ~= "" then
+					line = line .. " ("..e.reason..")"
+				end
+				if e.duration and e.duration > 0 then
+					line = line .. " for " .. algorithms.time_to_string(e.duration)
+				end
+				table.insert(items, line)
+			end
+		else
+			table.insert(items, "Enter a player name above and press View Log.")
+		end
+	end
+
+	if #items == 0 then
+		table.insert(items, "(none)")
+	end
+	return items
+end
+
 -- --------------------------------------------------------------------------
 -- Chat commands (unified with type argument)
 -- --------------------------------------------------------------------------
@@ -665,39 +715,48 @@ core.register_chatcommand("sblog", {
 })
 
 -- GUI (extended with Actions tab)
-local function show_gui(name, tab, filter_player, action_player, action_scope, action_template, action_duration)
+local function show_gui(name, tab, filter_player, action_player, action_scope, action_template, action_duration, action_custom_reason)
 	tab = tab or "1"
 	filter_player = filter_player or ""
 	action_player = action_player or ""
 	action_scope = action_scope or "name"
 	action_template = action_template or "spam"
 	action_duration = action_duration or ""
+	action_custom_reason = action_custom_reason or ""
 
-	local formspec = "size[12,10]"..
-		"tabheader[0,0;tabs;Active Bans,Active Mutes,Player Log,Actions;"..tab..";false;false]"..
-		"field[0,1;6,1;player_filter;Player name (for log tab);"..core.formspec_escape(filter_player).."]"..
-		"button[6,0.9;2,1;view_log;View Log]"
+	local formspec = "formspec_version[4]size[13,10]"..
+		"tabheader[0.2,0.2;tabs;Active Bans,Active Mutes,Player Log,Actions;"..tab..";false;false]"
 
-	if tab == "1" or tab == "2" or tab == "3" then
-		formspec = formspec .. "textlist[0,2;12,6;main_list;;0]"
-	elseif tab == "4" then
-		-- Actions tab
+	if tab == "1" or tab == "2" then
+		local items = get_tab_items(tab, "")
 		formspec = formspec ..
-			"field[0,2;6,1;action_player;Player name;"..core.formspec_escape(action_player).."]"..
-			"dropdown[0,3;3,1;action_scope;name,ip;"..(action_scope == "ip" and "2" or "1").."]"..
-			"dropdown[3,3;3,1;action_template;spam,grief,hack,language,other;"..
+			"label[0.3,1.0;"..(tab == "1" and "Active bans" or "Active mutes").."]"..
+			"textlist[0.3,1.4;12.4,7.6;main_list;"..make_textlist(items)..";0]"
+	elseif tab == "3" then
+		local items = get_tab_items(tab, filter_player)
+		formspec = formspec ..
+			"field[0.3,1.6;8.2,1;player_filter;Player name;"..core.formspec_escape(filter_player).."]"..
+			"button[8.8,1.2;2.2,1;view_log;View Log]"..
+			"textlist[0.3,2.1;12.4,6.9;main_list;"..make_textlist(items)..";0]"
+	elseif tab == "4" then
+		formspec = formspec ..
+			"label[0.3,1.0;Apply moderation action]"..
+			"field[0.3,2.0;6.2,1;action_player;Player name;"..core.formspec_escape(action_player).."]"..
+			"dropdown[6.8,1.6;2.0,1;action_scope;name,ip;"..(action_scope == "ip" and "2" or "1").."]"..
+			"dropdown[9.0,1.6;3.7,1;action_template;spam,grief,hack,language,other;"..
 				(({spam=1,grief=2,hack=3,language=4,other=5})[action_template] or "1").."]"..
-			"field[6,2;6,1;action_custom_reason;Custom reason (if 'other');]"..
-			"field[0,4;4,1;action_duration;Duration (e.g. 1h, 2d);"..core.formspec_escape(action_duration).."]"..
-			"button[0,5;3,1;action_ban;Ban]"..
-			"button[3,5;3,1;action_mute;Mute]"..
-			"button[6,5;3,1;action_unban;Unban]"..
-			"button[9,5;3,1;action_unmute;Unmute]"
+			"field[0.3,3.4;12.4,1;action_custom_reason;Custom reason (used for 'other');"..
+				core.formspec_escape(action_custom_reason).."]"..
+			"field[0.3,4.8;4.2,1;action_duration;Duration (e.g. 1h, 2d);"..core.formspec_escape(action_duration).."]"..
+			"button[0.3,6.1;3.0,1;action_ban;Ban]"..
+			"button[3.5,6.1;3.0,1;action_mute;Mute]"..
+			"button[6.7,6.1;3.0,1;action_unban;Unban]"..
+			"button[9.9,6.1;2.8,1;action_unmute;Unmute]"
 	end
 
 	formspec = formspec ..
-		"button[10,9;2,1;refresh;Refresh]"..
-		"button[0,9;2,1;close;Close]"
+		"button[0.3,9.0;2.0,1;close;Close]"..
+		"button[10.5,9.0;2.2,1;refresh;Refresh]"
 
 	core.show_formspec(name, "simplemod:main", formspec)
 end
@@ -712,7 +771,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	if fields.view_log then
 		local target = fields.player_filter
 		if target and target ~= "" then
-			show_gui(name, "3", target)
+			show_gui(name, "3", target, fields.action_player, fields.action_scope, fields.action_template, fields.action_duration, fields.action_custom_reason)
 		else
 			core.chat_send_player(name, "Please enter a player name")
 		end
@@ -723,7 +782,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		local target = fields.action_player
 		if not target or target == "" then
 			core.chat_send_player(name, "Player name required")
-			show_gui(name, "4", "", target, fields.action_scope, fields.action_template, fields.action_duration)
+			show_gui(name, "4", "", target, fields.action_scope, fields.action_template, fields.action_duration, fields.action_custom_reason)
 			return
 		end
 		local scope = fields.action_scope or "name"
@@ -741,7 +800,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		local priv = (fields.action_mute or fields.action_unmute) and "pmute" or "ban"
 		if not core.check_player_privs(name, {[priv]=true}) then
 			core.chat_send_player(name, "Insufficient privileges")
-			show_gui(name, "4", "", target, scope, template_key, duration_str)
+			show_gui(name, "4", "", target, scope, template_key, duration_str, custom)
 			return
 		end
 
@@ -763,60 +822,21 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		else
 			core.chat_send_player(name, "Error: " .. (msg or "unknown"))
 		end
-		show_gui(name, "4", "", "", "name", "spam", "")
+		show_gui(name, "4", "", target, scope, template_key, duration_str, custom)
 		return
 	end
 
 	if fields.refresh or fields.tabs then
-		local tab = fields.tabs or "1"
-		local filter = fields.player_filter or ""
-		local items = {}
-
-		if tab == "1" then  -- Active Bans
-			for p,d in pairs(get_name_bans()) do
-				table.insert(items, "[Name] "..format_active_entry(p, d))
-			end
-			for p,d in pairs(get_storage_table("ip_ban_list")) do
-				table.insert(items, "[IP]   "..format_active_entry(p, d))
-			end
-		elseif tab == "2" then  -- Active Mutes
-			for p,d in pairs(get_name_mutes()) do
-				table.insert(items, "[Name] "..format_active_entry(p, d))
-			end
-			for p,d in pairs(get_storage_table("ip_mute_list")) do
-				table.insert(items, "[IP]   "..format_active_entry(p, d))
-			end
-		elseif tab == "3" then  -- Player Log
-			if filter and filter ~= "" then
-				local log = simplemod.get_player_log(filter)
-				for i=1, math.min(50, #log) do
-					local e = log[i]
-					local line = ("[%s] %s (%s): %s by %s"):format(
-						os.date("%H:%M", e.time), e.type, e.scope, e.target, e.source)
-					if e.reason and e.reason ~= "" then line = line .. " ("..e.reason..")" end
-					if e.duration and e.duration > 0 then
-						line = line .. " for " .. algorithms.time_to_string(e.duration)
-					end
-					table.insert(items, line)
-				end
-			else
-				table.insert(items, "Enter a player name and click View Log")
-			end
-		elseif tab == "4" then
-			show_gui(name, tab, filter, fields.action_player, fields.action_scope, fields.action_template, fields.action_duration)
-			return
-		end
-
-		if #items == 0 then table.insert(items, "(none)") end
-
-		local new_fs = "size[12,10]"..
-			"tabheader[0,0;tabs;Active Bans,Active Mutes,Player Log,Actions;"..tab..";false;false]"..
-			"field[0,1;6,1;player_filter;Player name (for log tab);"..core.formspec_escape(filter).."]"..
-			"button[6,0.9;2,1;view_log;View Log]"..
-			"textlist[0,2;12,6;main_list;"..table.concat(items, ",")..";0]"..
-			"button[10,9;2,1;refresh;Refresh]"..
-			"button[0,9;2,1;close;Close]"
-		core.show_formspec(name, "simplemod:main", new_fs)
+		show_gui(
+			name,
+			fields.tabs or "1",
+			fields.player_filter or "",
+			fields.action_player or "",
+			fields.action_scope or "name",
+			fields.action_template or "spam",
+			fields.action_duration or "",
+			fields.action_custom_reason or ""
+		)
 	end
 end)
 

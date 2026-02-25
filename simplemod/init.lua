@@ -602,7 +602,7 @@ local function get_ui_state(name)
 		filter = "",
 		action_player = "",
 		action_scope = "name",
-		action_template = "spam",
+		action_template = "other",
 		action_duration = "",
 		action_custom_reason = "",
 		selected_row = 1,
@@ -933,7 +933,7 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	filter_player = filter_player or ""
 	action_player = action_player or ""
 	action_scope = action_scope or "name"
-	action_template = action_template or "spam"
+	action_template = action_template or "other"
 	action_duration = action_duration or ""
 	action_custom_reason = action_custom_reason or ""
 
@@ -1145,7 +1145,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			return
 		end
 		local scope = fields.action_scope or "name"
-		local template_key = fields.action_template or "spam"
+		local template_key = fields.action_template or "other"
 		local custom = fields.action_custom_reason or ""
 		local reason
 		if template_key == "other" then
@@ -1197,14 +1197,14 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	if fields.quick_to_actions then
 		local tab = fields.tabs or state.tab
 		if tab ~= "1" and tab ~= "2" then
-			show_gui(name, tab, fields.player_filter or state.filter, fields.action_player or "", fields.action_scope or "name", fields.action_template or "spam", fields.action_duration or "", fields.action_custom_reason or "")
+			show_gui(name, tab, fields.player_filter or state.filter, fields.action_player or "", fields.action_scope or "name", fields.action_template or "other", fields.action_duration or "", fields.action_custom_reason or "")
 			return
 		end
 		local rows = make_table_rows(tab, fields.player_filter or state.filter)
 		local selected = rows[state.selected_row or 1]
 		if not selected or not selected.target then
 			core.chat_send_player(name, "Select an entry first.")
-			show_gui(name, tab, fields.player_filter or state.filter, fields.action_player or "", fields.action_scope or "name", fields.action_template or "spam", fields.action_duration or "", fields.action_custom_reason or "")
+				show_gui(name, tab, fields.player_filter or state.filter, fields.action_player or "", fields.action_scope or "name", fields.action_template or "other", fields.action_duration or "", fields.action_custom_reason or "")
 			return
 		end
 		local template = infer_reason_template(selected.reason)
@@ -1242,7 +1242,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			fields.player_filter or "",
 			fields.action_player or "",
 			fields.action_scope or "name",
-			fields.action_template or "spam",
+			fields.action_template or "other",
 			fields.action_duration or "",
 			fields.action_custom_reason or ""
 		)

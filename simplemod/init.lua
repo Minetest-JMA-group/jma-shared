@@ -294,7 +294,7 @@ function simplemod.ban_name(target, source, reason, duration_sec)
 	local player = core.get_player_by_name(target)
 	if player then
 		local msg = format_ban_message("You have been banned", ban.reason)
-		core.kick_player(target, msg)
+		core.disconnect_player(target, msg)
 	end
 	return true
 end
@@ -361,19 +361,19 @@ function simplemod.ban_ip(target, source, reason, duration_sec)
 	if names_err then
 		core.log("warning", "[simplemod] failed to get linked names for IP ban target "..target..": "..tostring(names_err))
 		if core.get_player_by_name(target) then
-			core.kick_player(target, msg)
+			core.disconnect_player(target, msg)
 		end
 		return true
 	end
 	local seen = {[target] = true}
 	if core.get_player_by_name(target) then
-		core.kick_player(target, msg)
+		core.disconnect_player(target, msg)
 	end
 	for _, linked_name in ipairs(names) do
 		if not seen[linked_name] then
 			seen[linked_name] = true
 			if core.get_player_by_name(linked_name) then
-				core.kick_player(linked_name, msg)
+				core.disconnect_player(linked_name, msg)
 			end
 		end
 	end

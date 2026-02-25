@@ -894,7 +894,7 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 			"field[0.5,4.4;4.0,1;action_duration;;"..core.formspec_escape(action_duration).."]"
 		if is_other_reason then
 			formspec = formspec ..
-				"label[0.5,5.6;Custom reason]"..
+				"label[0.5,5.7;Custom reason]"..
 				"field[0.5,6.1;12.0,1;action_custom_reason;;"..core.formspec_escape(action_custom_reason).."]"
 		end
 		formspec = formspec ..

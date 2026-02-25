@@ -5,7 +5,6 @@
 local modname = core.get_current_modname()
 local modpath = core.get_modpath(modname)
 local storage = core.get_mod_storage()
-local is_xban = core.global_exists("xban")
 local is_essentials = core.global_exists("essentials")
 
 -- These will be overridden from shareddb
@@ -376,9 +375,7 @@ local function process_batch()
 			local duration = math.min(math.max(tonumber(args.duration) or 10, 1), 1440)
 			local reason = args.reason
 			if WATCHER_MODE == ai_filter_watcher.MODES.ENABLED then
-				if not is_xban then return {error = "XBan mod not available"} end
-				local expires = os.time() + duration * 60
-				local success, err = xban.mute_player(player_name, "AI Watcher", expires, reason)
+				local success, err = simplemod.mute_name(player_name, "AI Watcher", reason, duration * 60)
 				if not success then return {error = err} end
 				add_to_player_history(player_name, "mute", duration, reason)
 			else

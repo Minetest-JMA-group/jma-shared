@@ -112,11 +112,9 @@ function filter.mute(name, duration, violation_type, message)
 	core.chat_send_player(name, v_type.chat_msg)
 
 	local reason = string.format('%s"%s" using blacklist regex: "%s"', filter.phrase, message, filter.get_lastreg())
-
-	if xban == nil then
-		log("warning", "xban not available so not muting the player")
-	else
-		xban.mute_player(name, "filter", os.time() + (duration * 60), reason)
+	local ok, err = simplemod.mute_name(name, "filter", reason, duration * 60)
+	if not ok then
+		log("warning", "Failed to mute player "..name..": "..tostring(err))
 	end
 end
 
@@ -230,14 +228,14 @@ local function make_checker(old_func)
 end
 
 for name, def in pairs(core.registered_chatcommands) do
-	if (def.privs and def.privs.shout) or (xban and xban.cmd_list and xban.cmd_list[name]) then
+	if def.privs and def.privs.shout then
 		def.func = make_checker(def.func)
 	end
 end
 
 local old_register_chatcommand = core.register_chatcommand
 function core.register_chatcommand(name, def)
-	if (def.privs and def.privs.shout) or (xban and xban.cmd_list and xban.cmd_list[name]) then
+	if def.privs and def.privs.shout then
 		def.func = make_checker(def.func)
 	end
 	return old_register_chatcommand(name, def)
@@ -245,7 +243,7 @@ end
 
 local old_override_chatcommand = core.override_chatcommand
 function core.override_chatcommand(name, def)
-	if (def.privs and def.privs.shout) or (xban and xban.cmd_list and xban.cmd_list[name]) then
+	if def.privs and def.privs.shout then
 		def.func = make_checker(def.func)
 	end
 	return old_override_chatcommand(name, def)

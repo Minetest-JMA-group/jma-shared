@@ -8,10 +8,6 @@
 -- Initialize the antispam.players table as a global
 antispam = { players = {} }
 
-if xban == nil then
-	core.log("warning", "[antispam] xban is not available so won't be able to mute players")
-end
-
 -- Default settings
 local MIN_TIME_BETWEEN_MESSAGES = 6 -- Minimum seconds between messages
 local MIN_TIME_BETWEEN_MESSAGES_USEC = MIN_TIME_BETWEEN_MESSAGES * 1e6
@@ -36,21 +32,16 @@ core.register_on_leaveplayer(function(player)
 end)
 
 local function mute_player(name)
-	if xban == nil then
-		core.log("warning", "[antispam] xban is not available. Can't mute player")
+	local ok = simplemod.mute_name(
+		name,
+		"Antispam",
+		"Automatically muted by system, reason: Spamming. Please notify the server staff if you have been falsely muted.",
+		MUTE_DURATION
+	)
+	if ok then
+		core.log("action", string.format("[Antispam] Player %s muted for %d minutes.", name, MUTE_DURATION / 60))
 	else
-		local expires = os.time() + MUTE_DURATION
-		local ok = xban.mute_player(
-			name,
-			"Antispam",
-			expires,
-			"Automatically muted by system, reason: Spamming. Please notify the server staff if you have been falsely muted."
-		)
-		if ok then
-			core.log("action", string.format("[Antispam] Player %s muted for %d minutes.", name, MUTE_DURATION / 60))
-		else
-			core.log("action", string.format("[Antispam] Failed to mute player %s", name))
-		end
+		core.log("action", string.format("[Antispam] Failed to mute player %s", name))
 	end
 
 	antispam.players[name] = nil

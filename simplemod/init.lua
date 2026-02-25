@@ -547,7 +547,6 @@ local function get_ui_state(name)
 		action_duration = "",
 		action_custom_reason = "",
 		selected_row = 1,
-		compact = false,
 	}
 	ui_state[name] = state
 	return state
@@ -831,14 +830,9 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	state.action_duration = action_duration
 	state.action_custom_reason = action_custom_reason
 
-	local compact = state.compact
 	local is_other_reason = action_template == "other"
 	local rows = make_table_rows(tab, filter_player)
-	local row_h = compact and "7.0" or "7.4"
-	local fs_h = compact and "9.2" or "10"
-	local footer_y = compact and "8.25" or "9.0"
-	local compact_y = compact and "8.55" or "9.3"
-	local formspec = "formspec_version[6]size[13,"..fs_h.."]"..
+	local formspec = "formspec_version[6]size[13,10]"..
 		"bgcolor[#1a1a1acc;true]"..
 		"style_type[label;font_size=18]"..
 		"style[close;bgcolor=#3a3a3a;bgcolor_hovered=#4a4a4a]"..
@@ -856,8 +850,8 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	if tab == "1" or tab == "2" then
 		formspec = formspec ..
 			"label[0.3,1.0;"..(tab == "1" and "Active bans (red)" or "Active mutes (yellow)").."]"..
-			"table[0.3,1.4;12.4,"..row_h..";main_table;"..make_table_data(rows)..";"..tostring(state.selected_row or 1).."]"..
-			"button[8.6,"..(compact and "8.55" or "8.75")..";4.1,1;quick_to_actions;Open Selected In Actions]"
+			"table[0.3,1.4;12.4,7.4;main_table;"..make_table_data(rows)..";"..tostring(state.selected_row or 1).."]"..
+			"button[6.1,8.75;4.2,1;quick_to_actions;Use Selected]"
 	elseif tab == "3" then
 		formspec = formspec ..
 			"label[0.3,1.0;Player name]"..
@@ -890,9 +884,8 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	end
 
 	formspec = formspec ..
-		"checkbox[2.6,"..compact_y..";compact_mode;Compact mode;"..(compact and "true" or "false").."]"..
-		"button[0.3,"..footer_y..";2.0,1;close;Close]"..
-		"button[10.5,"..footer_y..";2.2,1;refresh;Refresh]"
+		"button[0.3,9.0;2.0,1;close;Close]"..
+		"button[10.5,9.0;2.2,1;refresh;Refresh]"
 
 	core.show_formspec(name, "simplemod:main", formspec)
 end
@@ -902,10 +895,6 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	local name = player:get_player_name()
 	if not core.check_player_privs(name, {ban=true}) then return end
 	local state = get_ui_state(name)
-
-	if fields.compact_mode then
-		state.compact = fields.compact_mode == "true"
-	end
 
 	if fields.close then
 		ui_state[name] = nil

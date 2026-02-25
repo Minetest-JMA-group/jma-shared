@@ -8,6 +8,9 @@ local discord_mute_log_channel = "1210689151993774180"
 -- Core mod storage
 local storage = core.get_mod_storage()
 local LOG_LIMIT = 100
+local BAN_APPEAL_SUFFIX = [[
+If you think that you got banned by mistake, please contact us on Discord: ctf.jma-sig.de or write an email to loki@jma-sig.de.
+(de) Wenn Sie denken, dass es sich um ein Missverständnis handelt, dann schreiben Sie bitte eine E-Mail an loki@jma-sig.de oder kontaktieren Sie uns auf Discord über die Website ctf.jma-sig.de.]]
 
 -- --------------------------------------------------------------------------
 -- Helper functions
@@ -69,6 +72,11 @@ local function make_log_entry(action_type, scope, target, source, reason, durati
 		duration = duration_sec,
 		time = os.time(),
 	}
+end
+
+local function format_ban_message(prefix, reason)
+	local msg = prefix .. (reason ~= "" and ": "..reason or "")
+	return msg .. BAN_APPEAL_SUFFIX
 end
 
 -- --------------------------------------------------------------------------
@@ -257,7 +265,7 @@ function simplemod.ban_name(target, source, reason, duration_sec)
 	add_action_log("name", "ban", target, source, reason, duration_sec)
 	local player = core.get_player_by_name(target)
 	if player then
-		local msg = "You have been banned" .. (ban.reason ~= "" and ": "..ban.reason or "")
+		local msg = format_ban_message("You have been banned", ban.reason)
 		core.kick_player(target, msg)
 	end
 	return true
@@ -327,7 +335,7 @@ function simplemod.ban_ip(target, source, reason, duration_sec)
 	add_action_log("ip", "ban", target, source, reason, duration_sec)
 	local player = core.get_player_by_name(target)
 	if player then
-		local msg = "Your IP has been banned" .. (ban.reason ~= "" and ": "..ban.reason or "")
+		local msg = format_ban_message("Your IP has been banned", ban.reason)
 		core.kick_player(target, msg)
 	end
 	return true
@@ -397,11 +405,11 @@ end
 ipdb.register_on_login(function(name, _)
 	if simplemod.is_banned_name(name) then
 		local ban = get_name_bans()[name]
-		return "You are banned" .. (ban.reason ~= "" and ": "..ban.reason or "")
+		return format_ban_message("You are banned", ban.reason)
 	end
 	local ban = get_ip_ban(name)
 	if ban then
-		return "Your IP is banned" .. (ban.reason ~= "" and ": "..ban.reason or "")
+		return format_ban_message("Your IP is banned", ban.reason)
 	end
 end)
 
@@ -724,7 +732,16 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	action_duration = action_duration or ""
 	action_custom_reason = action_custom_reason or ""
 
-	local formspec = "formspec_version[4]size[13,10]"..
+	local is_other_reason = action_template == "other"
+	local formspec = "formspec_version[6]size[13,10]"..
+		"bgcolor[#1a1a1acc;true]"..
+		"style_type[label;font_size=18]"..
+		"style[close;bgcolor=#3a3a3a;bgcolor_hovered=#4a4a4a]"..
+		"style[refresh;bgcolor=#355070;bgcolor_hovered=#42678f]"..
+		"style[action_ban;bgcolor=#8f2626;bgcolor_hovered=#aa2f2f]"..
+		"style[action_mute;bgcolor=#6e5a2f;bgcolor_hovered=#85703a]"..
+		"style[action_unban;bgcolor=#305f3e;bgcolor_hovered=#3a774c]"..
+		"style[action_unmute;bgcolor=#305f3e;bgcolor_hovered=#3a774c]"..
 		"tabheader[0.2,0.2;tabs;Active Bans,Active Mutes,Player Log,Actions;"..tab..";false;false]"
 
 	if tab == "1" or tab == "2" then
@@ -735,23 +752,33 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	elseif tab == "3" then
 		local items = get_tab_items(tab, filter_player)
 		formspec = formspec ..
-			"field[0.3,1.6;8.2,1;player_filter;Player name;"..core.formspec_escape(filter_player).."]"..
-			"button[8.8,1.2;2.2,1;view_log;View Log]"..
-			"textlist[0.3,2.1;12.4,6.9;main_list;"..make_textlist(items)..";0]"
+			"label[0.3,1.0;Player name]"..
+			"field[0.3,2.0;8.2,1;player_filter;;"..core.formspec_escape(filter_player).."]"..
+			"button[8.8,1.6;2.2,1;view_log;View Log]"..
+			"textlist[0.3,2.8;12.4,6.2;main_list;"..make_textlist(items)..";0]"
 	elseif tab == "4" then
-		formspec = formspec ..
-			"label[0.3,1.0;Apply moderation action]"..
-			"field[0.3,2.0;6.2,1;action_player;Player name;"..core.formspec_escape(action_player).."]"..
-			"dropdown[6.8,1.6;2.0,1;action_scope;name,ip;"..(action_scope == "ip" and "2" or "1").."]"..
-			"dropdown[9.0,1.6;3.7,1;action_template;spam,grief,hack,language,other;"..
-				(({spam=1,grief=2,hack=3,language=4,other=5})[action_template] or "1").."]"..
-			"field[0.3,3.4;12.4,1;action_custom_reason;Custom reason (used for 'other');"..
-				core.formspec_escape(action_custom_reason).."]"..
-			"field[0.3,4.8;4.2,1;action_duration;Duration (e.g. 1h, 2d);"..core.formspec_escape(action_duration).."]"..
-			"button[0.3,6.1;3.0,1;action_ban;Ban]"..
-			"button[3.5,6.1;3.0,1;action_mute;Mute]"..
-			"button[6.7,6.1;3.0,1;action_unban;Unban]"..
-			"button[9.9,6.1;2.8,1;action_unmute;Unmute]"
+			formspec = formspec ..
+				"box[0.2,0.9;12.6,7.8;#1f1f1fa8]"..
+				"label[0.5,1.2;Apply moderation action]"..
+				"label[0.5,1.8;Player name]"..
+				"field[0.5,2.8;6.2,1;action_player;;"..core.formspec_escape(action_player).."]"..
+			"label[6.9,1.8;Scope]"..
+			"dropdown[6.9,2.3;2.0,1;action_scope;name,ip;"..(action_scope == "ip" and "2" or "1").."]"..
+			"label[9.1,1.8;Reason]"..
+				"dropdown[9.1,2.3;3.4,1;action_template;spam,grief,hack,language,other;"..
+					(({spam=1,grief=2,hack=3,language=4,other=5})[action_template] or "1").."]"..
+				"label[0.5,3.6;Duration (e.g. 1h, 2d)]"..
+				"field[0.5,4.6;4.0,1;action_duration;;"..core.formspec_escape(action_duration).."]"..
+				"button[0.5,7.0;2.8,1;action_ban;Ban]"..
+				"button[3.5,7.0;2.8,1;action_mute;Mute]"..
+				"button[6.5,7.0;2.8,1;action_unban;Unban]"..
+				"button[9.5,7.0;2.8,1;action_unmute;Unmute]"..
+				"tooltip[action_ban;Ban and disconnect immediately.]"
+		if is_other_reason then
+			formspec = formspec ..
+				"label[0.5,4.8;Custom reason]"..
+				"field[0.5,5.8;12.0,1;action_custom_reason;;"..core.formspec_escape(action_custom_reason).."]"
+		end
 	end
 
 	formspec = formspec ..
@@ -823,6 +850,20 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			core.chat_send_player(name, "Error: " .. (msg or "unknown"))
 		end
 		show_gui(name, "4", "", target, scope, template_key, duration_str, custom)
+		return
+	end
+
+	if fields.action_template then
+		show_gui(
+			name,
+			"4",
+			fields.player_filter or "",
+			fields.action_player or "",
+			fields.action_scope or "name",
+			fields.action_template,
+			fields.action_duration or "",
+			fields.action_custom_reason or ""
+		)
 		return
 	end
 

@@ -1221,16 +1221,16 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		return
 	end
 
-	if fields.action_template then
+	if fields.action_template or fields.action_scope then
 		show_gui(
 			name,
 			fields.tabs or "4",
 			fields.player_filter or state.filter,
-			fields.action_player or "",
-			fields.action_scope or "name",
-			fields.action_template,
-			fields.action_duration or "",
-			fields.action_custom_reason or ""
+			fields.action_player or state.action_player,
+			fields.action_scope or state.action_scope,
+			fields.action_template or state.action_template,
+			fields.action_duration or state.action_duration,
+			fields.action_custom_reason or state.action_custom_reason
 		)
 		return
 	end

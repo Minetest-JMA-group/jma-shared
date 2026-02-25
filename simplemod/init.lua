@@ -883,25 +883,25 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 			"box[0.2,0.9;12.6,8.0;#1f1f1fa8]"..
 			"label[0.5,1.2;Apply moderation action]"..
 			"label[0.5,1.8;Player name]"..
-			"field[0.5,2.8;6.0,1;action_player;;"..core.formspec_escape(action_player).."]"..
+			"field[0.5,2.3;6.0,1;action_player;;"..core.formspec_escape(action_player).."]"..
 			"dropdown[6.7,2.3;2.6,1;action_player_pick;"..online_names..";"..online_selected.."]"..
 			"label[9.5,1.8;Scope]"..
 			"dropdown[9.5,2.3;1.6,1;action_scope;name,ip;"..(action_scope == "ip" and "2" or "1").."]"..
 			"label[11.3,1.8;Reason]"..
 			"dropdown[11.3,2.3;1.5,1;action_template;spam,grief,hack,language,other;"..
 				(({spam=1,grief=2,hack=3,language=4,other=5})[action_template] or "1").."]"..
-			"label[0.5,4.2;Duration (e.g. 1h, 2d)]"..
-			"field[0.5,5.2;4.0,1;action_duration;;"..core.formspec_escape(action_duration).."]"
+			"label[0.5,3.9;Duration (e.g. 1h, 2d)]"..
+			"field[0.5,4.4;4.0,1;action_duration;;"..core.formspec_escape(action_duration).."]"
 		if is_other_reason then
 			formspec = formspec ..
-				"label[0.5,6.0;Custom reason]"..
-				"field[0.5,7.0;12.0,1;action_custom_reason;;"..core.formspec_escape(action_custom_reason).."]"
+				"label[0.5,5.6;Custom reason]"..
+				"field[0.5,6.1;12.0,1;action_custom_reason;;"..core.formspec_escape(action_custom_reason).."]"
 		end
 		formspec = formspec ..
-			"button[0.5,7.8;2.8,1;action_ban;Ban]"..
-			"button[3.5,7.8;2.8,1;action_mute;Mute]"..
-			"button[6.5,7.8;2.8,1;action_unban;Unban]"..
-			"button[9.5,7.8;2.8,1;action_unmute;Unmute]"..
+			"button[0.5,7.4;2.8,1;action_ban;Ban]"..
+			"button[3.5,7.4;2.8,1;action_mute;Mute]"..
+			"button[6.5,7.4;2.8,1;action_unban;Unban]"..
+			"button[9.5,7.4;2.8,1;action_unmute;Unmute]"..
 			"tooltip[action_ban;Ban and disconnect immediately.]"
 	end
 

@@ -268,7 +268,6 @@ end
 -- Name ban
 function simplemod.ban_name(target, source, reason, duration_sec)
 	local bans = get_name_bans()
-	if bans[target] then return false, "Already name‑banned" end
 	local ban = make_punishment_entry(source, reason, duration_sec)
 	bans[target] = ban
 	save_name_bans(bans)
@@ -303,7 +302,6 @@ end
 -- Name mute
 function simplemod.mute_name(target, source, reason, duration_sec)
 	local mutes = get_name_mutes()
-	if mutes[target] then return false, "Already name‑muted" end
 	local mute = make_punishment_entry(source, reason, duration_sec)
 	mutes[target] = mute
 	save_name_mutes(mutes)
@@ -332,9 +330,7 @@ end
 
 -- IP ban
 function simplemod.ban_ip(target, source, reason, duration_sec)
-	local existing, err = get_ip_ban(target)
-	if err then return false, err end
-	if existing then return false, "Already IP‑banned" end
+	local err
 	local ban = make_punishment_entry(source, reason, duration_sec)
 	local ok
 	ok, err = set_ip_data(target, "ban", core.serialize(ban))
@@ -368,9 +364,7 @@ end
 
 -- IP mute
 function simplemod.mute_ip(target, source, reason, duration_sec)
-	local existing, err = get_ip_mute(target)
-	if err then return false, err end
-	if existing then return false, "Already IP‑muted" end
+	local err
 	local mute = make_punishment_entry(source, reason, duration_sec)
 	local ok
 	ok, err = set_ip_data(target, "mute", core.serialize(mute))
@@ -678,6 +672,16 @@ local function online_player_dropdown(current_name)
 	return table.concat(names, ","), selected
 end
 
+local function has_active_punishment(scope, target, kind)
+	if not target or target == "" then
+		return false
+	end
+	if scope == "ip" then
+		return kind == "mute" and simplemod.is_muted_ip(target) or simplemod.is_banned_ip(target)
+	end
+	return kind == "mute" and simplemod.is_muted_name(target) or simplemod.is_banned_name(target)
+end
+
 -- --------------------------------------------------------------------------
 -- Chat commands (unified with type argument)
 -- --------------------------------------------------------------------------
@@ -849,6 +853,8 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	state.action_custom_reason = action_custom_reason
 
 	local is_other_reason = action_template == "other"
+	local can_unban = has_active_punishment(action_scope, action_player, "ban")
+	local can_unmute = has_active_punishment(action_scope, action_player, "mute")
 	local rows = make_table_rows(tab, filter_player)
 	local formspec = "formspec_version[6]size[13,10]"..
 		"bgcolor[#1a1a1acc;true]"..
@@ -860,6 +866,8 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 		"style[action_mute;bgcolor=#6e5a2f;bgcolor_hovered=#85703a]"..
 		"style[action_unban;bgcolor=#305f3e;bgcolor_hovered=#3a774c]"..
 		"style[action_unmute;bgcolor=#305f3e;bgcolor_hovered=#3a774c]"..
+		"style[action_unban_disabled;bgcolor=#474747;bgcolor_hovered=#474747;font_color=#9a9a9a]"..
+		"style[action_unmute_disabled;bgcolor=#474747;bgcolor_hovered=#474747;font_color=#9a9a9a]"..
 		"style_type[table;background=#151515;border=true]"..
 		"tablecolumns[color;text]"..
 		"tableoptions[highlight=#355070;border=false]"..
@@ -903,8 +911,12 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 		formspec = formspec ..
 			"button[0.5,7.4;2.8,1;action_ban;Ban]"..
 			"button[3.5,7.4;2.8,1;action_mute;Mute]"..
-			"button[6.5,7.4;2.8,1;action_unban;Unban]"..
-			"button[9.5,7.4;2.8,1;action_unmute;Unmute]"..
+			(can_unban
+				and "button[6.5,7.4;2.8,1;action_unban;Unban]"
+				or "button[6.5,7.4;2.8,1;action_unban_disabled;Unban]")..
+			(can_unmute
+				and "button[9.5,7.4;2.8,1;action_unmute;Unmute]"
+				or "button[9.5,7.4;2.8,1;action_unmute_disabled;Unmute]")..
 			"tooltip[action_ban;Ban and disconnect immediately.]"
 	end
 
@@ -958,17 +970,10 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	end
 
 	if fields.player_filter_pick and fields.player_filter_pick ~= "(select online)" then
-		show_gui(
-			name,
-			"3",
-			fields.player_filter_pick,
-			fields.action_player or state.action_player,
-			fields.action_scope or state.action_scope,
-			fields.action_template or state.action_template,
-			fields.action_duration or state.action_duration,
-			fields.action_custom_reason or state.action_custom_reason
-		)
-		return
+		fields.player_filter = fields.player_filter_pick
+		if not fields.view_log and not fields.tabs and not fields.refresh then
+			fields.view_log = true
+		end
 	end
 
 	if fields.view_log then
@@ -982,11 +987,34 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	end
 
 	if fields.action_player_pick and fields.action_player_pick ~= "(select online)" then
+		fields.action_player = fields.action_player_pick
+		if not fields.action_ban
+			and not fields.action_mute
+			and not fields.action_unban
+			and not fields.action_unmute
+			and not fields.refresh
+			and not fields.tabs
+			and not fields.action_template then
+			show_gui(
+				name,
+				"4",
+				fields.player_filter or state.filter,
+				fields.action_player,
+				fields.action_scope or state.action_scope,
+				fields.action_template or state.action_template,
+				fields.action_duration or state.action_duration,
+				fields.action_custom_reason or state.action_custom_reason
+			)
+			return
+		end
+	end
+
+	if fields.action_unban_disabled or fields.action_unmute_disabled then
 		show_gui(
 			name,
 			"4",
 			fields.player_filter or state.filter,
-			fields.action_player_pick,
+			fields.action_player or state.action_player,
 			fields.action_scope or state.action_scope,
 			fields.action_template or state.action_template,
 			fields.action_duration or state.action_duration,
@@ -1013,6 +1041,15 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		end
 		local duration_str = fields.action_duration or ""
 		local duration = duration_str ~= "" and algorithms.parse_time(duration_str) or 0
+
+		if fields.action_unban and not has_active_punishment(scope, target, "ban") then
+			show_gui(name, "4", "", target, scope, template_key, duration_str, custom)
+			return
+		end
+		if fields.action_unmute and not has_active_punishment(scope, target, "mute") then
+			show_gui(name, "4", "", target, scope, template_key, duration_str, custom)
+			return
+		end
 
 		local priv = (fields.action_mute or fields.action_unmute) and "pmute" or "ban"
 		if not core.check_player_privs(name, {[priv]=true}) then

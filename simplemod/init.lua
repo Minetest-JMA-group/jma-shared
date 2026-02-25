@@ -1,15 +1,8 @@
--- simplemod/init.lua
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
-local modname = "simplemod"
-
--- Dependencies (assumed present)
-local algorithms = algorithms
-local ipdb = ipdb
-local chat_lib = chat_lib
 local relays_available = core.global_exists("relays")
-local discordmt_available = core.global_exists("discord")
+local discordmt_available = core.global_exists("discord") and discord.enabled
 local discord_mute_log_channel = "1210689151993774180"
 
 -- Core mod storage
@@ -17,13 +10,10 @@ local storage = core.get_mod_storage()
 local LOG_LIMIT = 100
 
 -- --------------------------------------------------------------------------
--- Helper functions from algorithms
+-- Helper functions
 -- --------------------------------------------------------------------------
-local parse_time = algorithms.parse_time
-local time_to_string = algorithms.time_to_string
-
 local function log_message_to_discord(message, ...)
-	if not discordmt_available or not discord.enabled then
+	if not discordmt_available then
 		return
 	end
 	discord.send(string.format(message, ...), discord_mute_log_channel)
@@ -42,11 +32,9 @@ local reason_templates = {
 
 local function expand_reason(arg)
 	if not arg or arg == "" then return "" end
-	-- if arg is exactly a template key, use that template
 	if reason_templates[arg] then
 		return reason_templates[arg]
 	end
-	-- otherwise treat as custom reason
 	return arg
 end
 
@@ -163,6 +151,7 @@ end)
 
 -- Helper: get ipdb context for a player name
 local function ipdb_ctx(name)
+	---@diagnostic disable-next-line: need-check-nil
 	return ipdb_storage:get_context_by_name(name)
 end
 
@@ -202,7 +191,6 @@ local function clear_ip_data(name, key)
 	return err
 end
 
--- IP ban: source of truth is ipdb
 local function get_ip_ban(name)
 	local data, err = get_ip_data(name, "ban")
 	if err then return nil, err end
@@ -214,14 +202,7 @@ local function get_ip_ban(name)
 	end
 	return ban
 end
-local function set_ip_ban(name, ban)
-	return set_ip_data(name, "ban", core.serialize(ban))
-end
-local function clear_ip_ban(name)
-	clear_ip_data(name, "ban")
-end
 
--- IP mute
 local function get_ip_mute(name)
 	local data, err = get_ip_data(name, "mute")
 	if err then return nil, err end
@@ -233,14 +214,7 @@ local function get_ip_mute(name)
 	end
 	return mute
 end
-local function set_ip_mute(name, mute)
-	return set_ip_data(name, "mute", core.serialize(mute))
-end
-local function clear_ip_mute(name)
-	clear_ip_data(name, "mute")
-end
 
--- IP log
 local function get_ip_log(name)
 	local data, err = get_ip_data(name, "log")
 	if err then
@@ -256,20 +230,6 @@ local function add_ip_log(name, entry)
 	local log = data and core.deserialize(data) or {}
 	table.insert(log, 1, entry)
 	set_ip_data(name, "log", core.serialize(trim_log(log)))
-end
-
--- Lightweight lists of active IP bans/mutes for listing (stored in core storage)
-local function get_ip_ban_list()
-	return get_storage_table("ip_ban_list")
-end
-local function save_ip_ban_list(list)
-	save_storage_table("ip_ban_list", list)
-end
-local function get_ip_mute_list()
-	return get_storage_table("ip_mute_list")
-end
-local function save_ip_mute_list(list)
-	save_storage_table("ip_mute_list", list)
 end
 
 -- --------------------------------------------------------------------------
@@ -295,7 +255,6 @@ function simplemod.ban_name(target, source, reason, duration_sec)
 	bans[target] = ban
 	save_name_bans(bans)
 	add_action_log("name", "ban", target, source, reason, duration_sec)
-	-- Kick if online
 	local player = core.get_player_by_name(target)
 	if player then
 		local msg = "You have been banned" .. (ban.reason ~= "" and ": "..ban.reason or "")
@@ -359,14 +318,13 @@ function simplemod.ban_ip(target, source, reason, duration_sec)
 	if err then return false, err end
 	if existing then return false, "Already IP‑banned" end
 	local ban = make_punishment_entry(source, reason, duration_sec)
-	local ok, err = set_ip_ban(target, ban)
+	local ok
+	ok, err = set_ip_data(target, "ban", core.serialize(ban))
 	if not ok then return false, err end
-	-- Update list
-	local list = get_ip_ban_list()
+	local list = get_storage_table("ip_ban_list")
 	list[target] = ban
-	save_ip_ban_list(list)
+	save_storage_table("ip_ban_list", list)
 	add_action_log("ip", "ban", target, source, reason, duration_sec)
-	-- Kick player if online
 	local player = core.get_player_by_name(target)
 	if player then
 		local msg = "Your IP has been banned" .. (ban.reason ~= "" and ": "..ban.reason or "")
@@ -378,15 +336,15 @@ function simplemod.unban_ip(target, source, reason)
 	local existing, err = get_ip_ban(target)
 	if err then return false, err end
 	if not existing then return false, "Not IP‑banned" end
-	clear_ip_ban(target)
-	local list = get_ip_ban_list()
+	clear_ip_data(target, "ban")
+	local list = get_storage_table("ip_ban_list")
 	list[target] = nil
-	save_ip_ban_list(list)
+	save_storage_table("ip_ban_list", list)
 	add_action_log("ip", "unban", target, source, reason)
 	return true
 end
 function simplemod.is_banned_ip(target)
-	local ban, err = get_ip_ban(target)
+	local ban = get_ip_ban(target)
 	return ban ~= nil
 end
 
@@ -396,11 +354,12 @@ function simplemod.mute_ip(target, source, reason, duration_sec)
 	if err then return false, err end
 	if existing then return false, "Already IP‑muted" end
 	local mute = make_punishment_entry(source, reason, duration_sec)
-	local ok, err = set_ip_mute(target, mute)
+	local ok
+	ok, err = set_ip_data(target, "mute", core.serialize(mute))
 	if not ok then return false, err end
-	local list = get_ip_mute_list()
+	local list = get_storage_table("ip_mute_list")
 	list[target] = mute
-	save_ip_mute_list(list)
+	save_storage_table("ip_mute_list", list)
 	add_action_log("ip", "mute", target, source, reason, duration_sec)
 	return true
 end
@@ -408,15 +367,15 @@ function simplemod.unmute_ip(target, source, reason)
 	local existing, err = get_ip_mute(target)
 	if err then return false, err end
 	if not existing then return false, "Not IP‑muted" end
-	clear_ip_mute(target)
-	local list = get_ip_mute_list()
+	clear_ip_data(target, "mute")
+	local list = get_storage_table("ip_mute_list")
 	list[target] = nil
-	save_ip_mute_list(list)
+	save_storage_table("ip_mute_list", list)
 	add_action_log("ip", "unmute", target, source, reason)
 	return true
 end
 function simplemod.is_muted_ip(target)
-	local mute, err = get_ip_mute(target)
+	local mute = get_ip_mute(target)
 	return mute ~= nil
 end
 
@@ -435,26 +394,32 @@ end
 -- Callbacks
 -- --------------------------------------------------------------------------
 -- Check bans on successful login (after ipdb processing)
-ipdb.register_on_login(function(name, ip)
+ipdb.register_on_login(function(name, _)
 	if simplemod.is_banned_name(name) then
 		local ban = get_name_bans()[name]
 		return "You are banned" .. (ban.reason ~= "" and ": "..ban.reason or "")
 	end
-	if simplemod.is_banned_ip(name) then
-		local ban = get_ip_ban(name)
+	local ban = get_ip_ban(name)
+	if ban then
 		return "Your IP is banned" .. (ban.reason ~= "" and ": "..ban.reason or "")
 	end
 end)
 
 local function get_active_mute(name)
-	if simplemod.is_muted_name(name) then
-		return "name", get_name_mutes()[name]
-	end
-	if simplemod.is_muted_ip(name) then
-		local mute = get_ip_mute(name)
-		if mute then
-			return "ip", mute
+	local mutes = get_name_mutes()
+	local name_mute = mutes[name]
+	if name_mute then
+		if name_mute.expiry and name_mute.expiry <= os.time() then
+			mutes[name] = nil
+			save_name_mutes(mutes)
+		else
+			return "name", name_mute
 		end
+	end
+
+	local ip_mute = get_ip_mute(name)
+	if ip_mute then
+		return "ip", ip_mute
 	end
 end
 
@@ -462,7 +427,7 @@ core.register_chatcommand("smca", {
 	params = "<player_name> <on|off>",
 	description = "Enable or disable a muted player's access to mute-chat log visible to moderators.",
 	privs = {pmute=true},
-	func = function(player_name, param)
+	func = function(_, param)
 		local muted_player_name, state = param:match("(%S+)%s+(%S+)")
 		if not muted_player_name or not state then
 			return false, "Enter a valid player name and on|off."
@@ -571,7 +536,7 @@ local function handle_ban(name, params, is_mute)
 		time_str = nil
 		reason = table.concat(args, " ", 3)
 	end
-	local duration = time_str and parse_time(time_str) or 0
+	local duration = time_str and algorithms.parse_time(time_str) or 0
 	local expanded_reason = expand_reason(reason)
 
 	local priv = is_mute and "pmute" or "ban"
@@ -634,9 +599,9 @@ core.register_chatcommand("sbunmute", {
 core.register_chatcommand("sbbanlist", {
 	description = "List all active bans (name and IP)",
 	privs = {ban=true},
-	func = function(name)
+	func = function(_)
 		local name_bans = get_name_bans()
-		local ip_bans = get_ip_ban_list()
+		local ip_bans = get_storage_table("ip_ban_list")
 		local lines = {"Name bans:"}
 		for p,d in pairs(name_bans) do
 			table.insert(lines, "  "..format_active_entry(p, d))
@@ -654,9 +619,9 @@ core.register_chatcommand("sbbanlist", {
 core.register_chatcommand("sbmutelist", {
 	description = "List all active mutes (name and IP)",
 	privs = {pmute=true},
-	func = function(name)
+	func = function(_)
 		local name_mutes = get_name_mutes()
-		local ip_mutes = get_ip_mute_list()
+		local ip_mutes = get_storage_table("ip_mute_list")
 		local lines = {"Name mutes:"}
 		for p,d in pairs(name_mutes) do
 			table.insert(lines, "  "..format_active_entry(p, d))
@@ -691,7 +656,7 @@ core.register_chatcommand("sblog", {
 				line = line .. " (" .. e.reason .. ")"
 			end
 			if e.duration and e.duration > 0 then
-				line = line .. " for " .. time_to_string(e.duration)
+				line = line .. " for " .. algorithms.time_to_string(e.duration)
 			end
 			table.insert(lines, line)
 		end
@@ -754,7 +719,6 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		return
 	end
 
-	-- Handle action buttons
 	if fields.action_ban or fields.action_mute or fields.action_unban or fields.action_unmute then
 		local target = fields.action_player
 		if not target or target == "" then
@@ -772,7 +736,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			reason = reason_templates[template_key] or template_key
 		end
 		local duration_str = fields.action_duration or ""
-		local duration = duration_str ~= "" and parse_time(duration_str) or 0
+		local duration = duration_str ~= "" and algorithms.parse_time(duration_str) or 0
 
 		local priv = (fields.action_mute or fields.action_unmute) and "pmute" or "ban"
 		if not core.check_player_privs(name, {[priv]=true}) then
@@ -812,14 +776,14 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			for p,d in pairs(get_name_bans()) do
 				table.insert(items, "[Name] "..format_active_entry(p, d))
 			end
-			for p,d in pairs(get_ip_ban_list()) do
+			for p,d in pairs(get_storage_table("ip_ban_list")) do
 				table.insert(items, "[IP]   "..format_active_entry(p, d))
 			end
 		elseif tab == "2" then  -- Active Mutes
 			for p,d in pairs(get_name_mutes()) do
 				table.insert(items, "[Name] "..format_active_entry(p, d))
 			end
-			for p,d in pairs(get_ip_mute_list()) do
+			for p,d in pairs(get_storage_table("ip_mute_list")) do
 				table.insert(items, "[IP]   "..format_active_entry(p, d))
 			end
 		elseif tab == "3" then  -- Player Log
@@ -831,7 +795,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 						os.date("%H:%M", e.time), e.type, e.scope, e.target, e.source)
 					if e.reason and e.reason ~= "" then line = line .. " ("..e.reason..")" end
 					if e.duration and e.duration > 0 then
-						line = line .. " for " .. time_to_string(e.duration)
+						line = line .. " for " .. algorithms.time_to_string(e.duration)
 					end
 					table.insert(items, line)
 				end
@@ -839,7 +803,6 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 				table.insert(items, "Enter a player name and click View Log")
 			end
 		elseif tab == "4" then
-			-- Actions tab: we don't populate items, just show the action form (handled above)
 			show_gui(name, tab, filter, fields.action_player, fields.action_scope, fields.action_template, fields.action_duration)
 			return
 		end

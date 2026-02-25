@@ -674,7 +674,7 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	action_duration = action_duration or ""
 
 	local formspec = "size[12,10]"..
-		"tabheader[0,0;tabs;Active Bans;Active Mutes;Player Log;Actions;"..tab..";false;false]"..
+		"tabheader[0,0;tabs;Active Bans,Active Mutes,Player Log,Actions;"..tab..";false;false]"..
 		"field[0,1;6,1;player_filter;Player name (for log tab);"..core.formspec_escape(filter_player).."]"..
 		"button[6,0.9;2,1;view_log;View Log]"
 
@@ -810,7 +810,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		if #items == 0 then table.insert(items, "(none)") end
 
 		local new_fs = "size[12,10]"..
-			"tabheader[0,0;tabs;Active Bans;Active Mutes;Player Log;Actions;"..tab..";false;false]"..
+			"tabheader[0,0;tabs;Active Bans,Active Mutes,Player Log,Actions;"..tab..";false;false]"..
 			"field[0,1;6,1;player_filter;Player name (for log tab);"..core.formspec_escape(filter).."]"..
 			"button[6,0.9;2,1;view_log;View Log]"..
 			"textlist[0,2;12,6;main_list;"..table.concat(items, ",")..";0]"..

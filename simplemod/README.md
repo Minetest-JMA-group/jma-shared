@@ -6,12 +6,13 @@ simplemod provides name‑based and IP‑based bans and mutes for Minetest, leve
 
 - **Name‑based bans/mutes** – stored in core mod storage.
 - **IP‑based bans/mutes** – stored in `ipdb` per‑entry storage, automatically merged when IP‑linked accounts are merged.
-- **Per‑player logs** – each player has a combined log showing both name and IP actions (ban/unban/mute/unmute). Logs are capped at the newest 100 entries.
+- **Per‑player logs** – combined log of name and IP actions (ban/unban/mute/unmute), capped at the newest 100 entries.
 - **Active lists** – commands to list all currently banned or muted players (name + IP).
 - **Chat commands** – full set of commands usable from Discord/relays or in‑game.
-- **GUI** – three‑tab interface showing active bans, active mutes, and a player’s combined log.
+- **GUI** – four‑tab interface: Active Bans, Active Mutes, Player Log, and Actions (for applying new actions).
 - **API** – other mods can call `simplemod.ban_name()`, `simplemod.is_muted_ip()`, etc.
 - **Relay support** – optionally sends action reports to `relays` mod.
+- **Discord mute‑log** – optionally forwards muted chat to a Discord channel via `discordmt`.
 
 ## Dependencies
 
@@ -40,6 +41,15 @@ All commands require `ban` privilege (for bans) or `pmute` privilege (for mutes)
 | `/sb` | Open the GUI |
 
 Time format examples: `30m`, `2h`, `1d`, `2w`, `3M` (month = 30 days). If omitted, the punishment is permanent.
+
+## GUI
+
+Opened with `/sb`. Four tabs:
+
+- **Active Bans** – lists all name and IP bans.
+- **Active Mutes** – lists all name and IP mutes.
+- **Player Log** – enter a name and click "View Log" to see that player's combined history.
+- **Actions** – perform bans/unbans/mutes/unmutes with reason templates (spam, grief, hack, language, custom). Fields can be prefilled by selecting an entry in the first two tabs and clicking "Open In Actions".
 
 ## API
 
@@ -72,14 +82,6 @@ simplemod.get_player_log(player) → { {type, scope, target, source, reason, dur
 - `source` – moderator name or `"(console)"` (string)
 - `reason` – optional reason (string)
 - `duration_sec` – seconds, `0` or `nil` = permanent
-
-## GUI
-
-Opened with `/sb`. Three tabs:
-
-- **Active Bans** – lists all name and IP bans.
-- **Active Mutes** – lists all name and IP mutes.
-- **Player Log** – enter a name and click "View Log" to see that player's combined history.
 
 ## Storage Details
 

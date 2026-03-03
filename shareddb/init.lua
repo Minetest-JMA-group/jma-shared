@@ -15,7 +15,7 @@ shareddb = {}
 local dummy = function() return nil, "shareddb not available" end
 local dummy_obj = { get_context = dummy }
 shareddb.get_mod_storage = function() return dummy_obj end
-shareddb.register_listener = dummy
+shareddb.register_listener = function() return "shareddb not available" end
 
 local pg = algorithms.require("pgsql")
 if not pg then
@@ -36,7 +36,7 @@ end
 
 local function ensure_connection()
 	if conn and conn:status() == pg.CONNECTION_OK then
-		return true
+		return
 	end
 
 	transaction_active = false
@@ -48,22 +48,21 @@ local function ensure_connection()
 
 	conn = connect()
 	if not conn then
-		return nil, "Failed to create connection object"
+		return "Failed to create connection object"
 	end
 	if conn:status() ~= pg.CONNECTION_OK then
 		local err = conn:errorMessage()
 		conn:finish()
 		conn = nil
-		return nil, "Reconnect failed: " .. err
+		return "Reconnect failed: " .. err
 	end
 
 	core.log("action", "[shareddb] Reconnected to PostgreSQL")
-	return true
 end
 
 local function exec_sql(sql, params)
-	local ok, err = ensure_connection()
-	if not ok then return nil, err end
+	local err = ensure_connection()
+	if err then return nil, err end
 
 	local res
 	if params and #params > 0 then
@@ -126,7 +125,7 @@ end
 core.log("action", "[shareddb] Connected to PostgreSQL and initialized")
 
 local function poll_notifications()
-	if not ensure_connection() then return end
+	if ensure_connection() then return end
 	if not ensure_listening() then return end
 
 	-- Read any incoming data from PostgreSQL
@@ -156,6 +155,16 @@ end
 
 core.register_globalstep(poll_notifications)
 
+---@class SharedDBTransaction
+---@field _modname string
+---@field _active boolean
+---@field set_string fun(self: SharedDBTransaction, key: string, value?: string): string?
+---@field get_string fun(self: SharedDBTransaction, key: string): (string?, string?)
+---@field finalize fun(self: SharedDBTransaction): string?
+
+---@param self SharedDBTransaction
+---@param key string
+---@param value string?
 local function modstorage_set_string(self, key, value)
 	if not self._active then return "Transaction not active" end
 	if type(key) ~= "string" then return "key must be string" end
@@ -182,8 +191,11 @@ local function modstorage_set_string(self, key, value)
 		core.log("error", "[shareddb] set_string failed: " .. err)
 		return "Database error"
 	end
+	return nil
 end
 
+---@overload fun(self: SharedDBTransaction, key: string): nil, string
+---@return string
 local function modstorage_get_string(self, key)
 	if not self._active then return nil, "Transaction not active" end
 	if type(key) ~= "string" then return nil, "key must be string" end
@@ -212,11 +224,17 @@ local function modstorage_finalize(self)
 		conn:exec("ROLLBACK")
 		return "Commit failed"
 	end
+	return nil
 end
 
+---@overload fun(): nil, string
+---@return SharedDBTransaction
 local function start_transaction(self)
-	local ok, err = ensure_connection()
-	if not ok then return nil, err end
+	if not self._modname then
+		return nil, "Invalid storage object. Did you call get_mod_storage at load time?"
+	end
+	local err = ensure_connection()
+	if err then return nil, err end
 
 	if transaction_active then
 		return nil, "Another transaction is already active"
@@ -244,7 +262,6 @@ shareddb.get_mod_storage = function()
 	local modname = core.get_current_modname()
 	if not modname then
 		core.log("error", "[shareddb] get_mod_storage called outside of load time")
-		return nil, "Must be called at load time"
 	end
 
 	local modstorage_obj = {
@@ -258,9 +275,9 @@ shareddb.register_listener = function(listener)
 	local modname = core.get_current_modname()
 	if not modname then
 		core.log("error", "[shareddb] register_listener called outside of load time")
-		return nil, "Must be called at load time"
+		return "Must be called at load time"
 	end
-	if type(listener) ~= "function" then return nil, "Listener must be a function" end
+	if type(listener) ~= "function" then return "Listener must be a function" end
 	listeners[modname] = listener
-	return true
+	return nil
 end

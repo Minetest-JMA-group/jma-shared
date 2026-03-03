@@ -112,7 +112,7 @@ function filter.mute(name, duration, violation_type, message)
 	core.chat_send_player(name, v_type.chat_msg)
 
 	local reason = string.format('%s"%s" using blacklist regex: "%s"', filter.phrase, message, filter.get_lastreg())
-	local ok, err = simplemod.mute_name(name, "filter", reason, duration * 60)
+	local ok, err = simplemod.mute_ip(name, "filter", reason, duration * 60)
 	if not ok then
 		log("warning", "Failed to mute player "..name..": "..tostring(err))
 	end

@@ -530,7 +530,7 @@ core.register_chatcommand("smca", {
 	end
 })
 
-core.register_on_chat_message(function(name, message)
+chat_lib.register_on_chat_message(0, function(name, message)
 	if message:sub(1,1) == "/" then return end
 	local scope, mute_data = get_active_mute(name)
 	if not scope then

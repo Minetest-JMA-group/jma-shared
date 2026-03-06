@@ -8,6 +8,7 @@ local discord_mute_log_channel = "1210689151993774180"
 local storage = core.get_mod_storage()
 local LOG_LIMIT = 100
 local MODERATOR_MAX_BAN_DURATION = 15 * 60
+local OVERRIDE_CONFIRM_WINDOW_SEC = 30
 local BAN_APPEAL_SUFFIX = [[
 
 If you think that you got banned by mistake, please contact us on Discord: ctf.jma-sig.de or write an email to loki@jma-sig.de.
@@ -83,6 +84,10 @@ end
 local function format_ban_message(prefix, reason)
 	local msg = prefix .. (reason ~= "" and ": "..reason or "")
 	return msg .. BAN_APPEAL_SUFFIX
+end
+
+local function format_duration_text(duration_sec)
+	return (duration_sec and duration_sec > 0) and algorithms.time_to_string(duration_sec) or "permanent"
 end
 
 local function ban_extends_existing(existing_ban, duration_sec)
@@ -663,7 +668,73 @@ local function format_active_entry(player, data)
 	return string.format("%s: %s (by %s)%s", player, data.reason, data.source, expiry)
 end
 
+local function get_active_punishment_entry(scope, target, kind)
+	if scope == "ip" then
+		if kind == "mute" then
+			return get_ip_mute(target)
+		end
+		return get_ip_ban(target)
+	end
+	if kind == "mute" then
+		if not simplemod.is_muted_name(target) then
+			return nil
+		end
+		return get_storage_table(NAME_MUTES_KEY)[target]
+	end
+	if not simplemod.is_banned_name(target) then
+		return nil
+	end
+	return get_storage_table(NAME_BANS_KEY)[target]
+end
+
+local function can_override_punishment(action_type, source, existing, duration_sec)
+	if not existing then
+		return true
+	end
+	if action_type ~= "ban" then
+		return true
+	end
+	if core.check_player_privs(source, {ban=true}) then
+		return true
+	end
+	if ban_extends_existing(existing, duration_sec) then
+		return true
+	end
+	return false, "Ban already exists; new ban must extend current ban duration"
+end
+
+local function format_existing_punishment_lines(action_type, scope, target, data)
+	local lines = {
+		"Existing "..action_type.." details:",
+		"  target: "..target.." ("..scope..")",
+		"  source: "..(data.source or "unknown"),
+		"  reason: "..((data.reason and data.reason ~= "") and data.reason or "none"),
+		"  issued: "..(data.time and os.date("%Y-%m-%d %H:%M:%S", data.time) or "unknown"),
+	}
+	if data.expiry then
+		local total = data.time and math.max(0, data.expiry - data.time) or nil
+		lines[#lines + 1] = "  duration: "..format_duration_text(total)
+		lines[#lines + 1] = "  expires: "..os.date("%Y-%m-%d %H:%M:%S", data.expiry)
+	else
+		lines[#lines + 1] = "  duration: permanent"
+		lines[#lines + 1] = "  expires: never"
+	end
+	return lines
+end
+
+local function format_new_punishment_lines(action_type, scope, target, source, reason, duration_sec)
+	return {
+		"New "..action_type.." request:",
+		"  target: "..target.." ("..scope..")",
+		"  source: "..(source or "unknown"),
+		"  reason: "..((reason and reason ~= "") and reason or "none"),
+		"  duration: "..format_duration_text(duration_sec),
+	}
+end
+
 local ui_state = {}
+local pending_cli_confirmations = {}
+local pending_cli_confirmation_id = 0
 
 local function get_ui_state(name)
 	local state = ui_state[name]
@@ -679,14 +750,54 @@ local function get_ui_state(name)
 		action_duration = "",
 		action_custom_reason = "",
 		selected_row = 1,
+		pending_override = nil,
 	}
 	ui_state[name] = state
 	return state
 end
 
 core.register_on_leaveplayer(function(player)
-	ui_state[player:get_player_name()] = nil
+	local name = player:get_player_name()
+	ui_state[name] = nil
+	pending_cli_confirmations[name] = nil
 end)
+
+local function set_cli_confirmation(name, command, pending)
+	pending_cli_confirmation_id = pending_cli_confirmation_id + 1
+	pending.id = pending_cli_confirmation_id
+	pending.expires_at = os.time() + OVERRIDE_CONFIRM_WINDOW_SEC
+	pending.command = command
+	pending_cli_confirmations[name] = pending_cli_confirmations[name] or {}
+	pending_cli_confirmations[name][command] = pending
+	local expected_id = pending.id
+	core.after(OVERRIDE_CONFIRM_WINDOW_SEC, function()
+		local by_player = pending_cli_confirmations[name]
+		if not by_player then
+			return
+		end
+		local current = by_player[command]
+		if current and current.id == expected_id then
+			by_player[command] = nil
+			core.chat_send_player(name, "Override request timed out and was aborted.")
+		end
+	end)
+end
+
+local function take_cli_confirmation(name, command)
+	local by_player = pending_cli_confirmations[name]
+	if not by_player then
+		return nil
+	end
+	local pending = by_player[command]
+	if not pending then
+		return nil
+	end
+	by_player[command] = nil
+	if pending.expires_at <= os.time() then
+		return nil, "Override request timed out and was aborted."
+	end
+	return pending
+end
 
 local function severity_color(action_type)
 	if action_type == "ban" then
@@ -836,9 +947,36 @@ end
 local function handle_ban(name, params, is_mute)
 	local args = {}
 	for w in params:gmatch("%S+") do table.insert(args, w) end
+	local cmd = is_mute and "sbmute" or "sbban"
+	local action_type = is_mute and "mute" or "ban"
+	if #args == 1 and (args[1] == "confirm" or args[1] == "abort") then
+		local pending, pending_err = take_cli_confirmation(name, cmd)
+		if not pending then
+			return false, pending_err or "No pending override request"
+		end
+		if args[1] == "abort" then
+			return true, "Override request aborted."
+		end
+		local ok, err = run_action(pending.action_type, pending.scope, pending.target, pending.source, pending.reason, pending.duration)
+		if not ok then
+			return false, ("%s failed for %s (%s): %s"):format(
+				pending.action_type == "mute" and "Mute" or "Ban",
+				pending.target,
+				pending.scope,
+				err or "unknown")
+		end
+		local done = pending.action_type == "mute" and "Muted" or "Banned"
+		local reason_text = pending.reason ~= "" and pending.reason or "none"
+		return true, ("%s %s (%s) for %s. Reason: %s."):format(
+			done,
+			pending.target,
+			pending.scope,
+			format_duration_text(pending.duration),
+			reason_text
+		)
+	end
 	if #args < 3 then
-		local cmd = is_mute and "sbmute" or "sbban"
-		return false, "Usage: /"..cmd.." <player> <name|ip> [duration] <reason>"
+		return false, "Usage: /"..cmd.." <player> <name|ip> [duration] <reason> | /"..cmd.." <confirm|abort>"
 	end
 	local target = args[1]
 	local scope = args[2]
@@ -867,7 +1005,37 @@ local function handle_ban(name, params, is_mute)
 		end
 	end
 
-	local ok, err = run_action(is_mute and "mute" or "ban", scope, target, name, expanded_reason, duration)
+	local existing, existing_err = get_active_punishment_entry(scope, target, action_type)
+	if existing_err then
+		return false, existing_err
+	end
+	if existing then
+		local can_override, override_err = can_override_punishment(action_type, name, existing, duration)
+		if not can_override then
+			return false, override_err
+		end
+		set_cli_confirmation(name, cmd, {
+			action_type = action_type,
+			scope = scope,
+			target = target,
+			source = name,
+			reason = expanded_reason,
+			duration = duration,
+		})
+		for _, line in ipairs(format_existing_punishment_lines(action_type, scope, target, existing)) do
+			core.chat_send_player(name, line)
+		end
+		for _, line in ipairs(format_new_punishment_lines(action_type, scope, target, name, expanded_reason, duration)) do
+			core.chat_send_player(name, line)
+		end
+		core.chat_send_player(
+			name,
+			"Type /"..cmd.." confirm to proceed or /"..cmd.." abort within "..OVERRIDE_CONFIRM_WINDOW_SEC.."s."
+		)
+		return true, "Override confirmation required."
+	end
+
+	local ok, err = run_action(action_type, scope, target, name, expanded_reason, duration)
 	if not ok then
 		local action = is_mute and "Mute" or "Ban"
 		return false, ("%s failed for %s (%s): %s"):format(action, target, scope, err or "unknown")
@@ -1107,6 +1275,68 @@ local function show_gui(name, tab, filter_player, action_player, action_scope, a
 	core.show_formspec(name, "simplemod:main", formspec)
 end
 
+local function show_override_confirm_gui(name, pending)
+	local state = get_ui_state(name)
+	state.pending_override = pending
+	local lines = {}
+	for _, line in ipairs(format_existing_punishment_lines(pending.action_type, pending.scope, pending.target, pending.existing)) do
+		lines[#lines + 1] = line
+	end
+	lines[#lines + 1] = ""
+	for _, line in ipairs(format_new_punishment_lines(pending.action_type, pending.scope, pending.target, pending.source, pending.reason, pending.duration)) do
+		lines[#lines + 1] = line
+	end
+	lines[#lines + 1] = ""
+	lines[#lines + 1] = "Proceed with override?"
+
+	local formspec = "formspec_version[6]size[12,8]"..
+		"bgcolor[#1a1a1acc;true]"..
+		"style_type[label;font_size=18]"..
+		"label[0.4,0.3;Confirm override]"..
+		"textarea[0.4,0.9;11.2,5.9;override_info;;"..core.formspec_escape(table.concat(lines, "\n")).."]"..
+		"button[2.0,7.0;3.2,1;override_confirm_yes;Confirm]"..
+		"button[6.8,7.0;3.2,1;override_confirm_no;Abort]"
+	core.show_formspec(name, "simplemod:override_confirm", formspec)
+end
+
+core.register_on_player_receive_fields(function(player, formname, fields)
+	if formname ~= "simplemod:override_confirm" then return end
+	local name = player:get_player_name()
+	local state = get_ui_state(name)
+	local pending = state.pending_override
+	state.pending_override = nil
+	if not pending then
+		show_gui(name, "4")
+		return
+	end
+
+	if fields.override_confirm_yes then
+		local success, msg = run_action(
+			pending.action_type,
+			pending.scope,
+			pending.target,
+			pending.source,
+			pending.reason,
+			pending.duration
+		)
+		if success then
+			core.chat_send_player(name, "Action completed")
+		else
+			core.chat_send_player(name, "Error: " .. (msg or "unknown"))
+		end
+	end
+	show_gui(
+		name,
+		"4",
+		pending.filter_player,
+		pending.target,
+		pending.scope,
+		pending.template_key,
+		pending.duration_str,
+		pending.custom_reason
+	)
+end)
+
 core.register_on_player_receive_fields(function(player, formname, fields)
 	if formname ~= "simplemod:main" then return end
 	local name = player:get_player_name()
@@ -1273,7 +1503,6 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			end
 		end
 
-		local success, msg
 		local action_type
 		if fields.action_ban then
 			action_type = "ban"
@@ -1284,7 +1513,39 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		elseif fields.action_unmute then
 			action_type = "unmute"
 		end
-		success, msg = run_action(action_type, scope, target, name, reason, duration)
+
+		if action_type == "ban" or action_type == "mute" then
+			local existing, existing_err = get_active_punishment_entry(scope, target, action_type)
+			if existing_err then
+				core.chat_send_player(name, "Error: " .. existing_err)
+				show_gui(name, "4", "", target, scope, template_key, duration_str, custom)
+				return
+			end
+			if existing then
+				local can_override, override_err = can_override_punishment(action_type, name, existing, duration)
+				if not can_override then
+					core.chat_send_player(name, "Error: " .. (override_err or "unknown"))
+					show_gui(name, "4", "", target, scope, template_key, duration_str, custom)
+					return
+				end
+				show_override_confirm_gui(name, {
+					action_type = action_type,
+					scope = scope,
+					target = target,
+					source = name,
+					reason = reason,
+					duration = duration,
+					existing = existing,
+					filter_player = "",
+					template_key = template_key,
+					duration_str = duration_str,
+					custom_reason = custom,
+				})
+				return
+			end
+		end
+
+		local success, msg = run_action(action_type, scope, target, name, reason, duration)
 
 		if success then
 			core.chat_send_player(name, "Action completed")

@@ -7,6 +7,7 @@ local discord_mute_log_channel = "1210689151993774180"
 -- Core mod storage
 local storage = core.get_mod_storage()
 local LOG_LIMIT = 100
+local MODERATOR_MAX_BAN_DURATION = 15 * 60
 local BAN_APPEAL_SUFFIX = [[
 
 If you think that you got banned by mistake, please contact us on Discord: ctf.jma-sig.de or write an email to loki@jma-sig.de.
@@ -82,6 +83,32 @@ end
 local function format_ban_message(prefix, reason)
 	local msg = prefix .. (reason ~= "" and ": "..reason or "")
 	return msg .. BAN_APPEAL_SUFFIX
+end
+
+local function ban_extends_existing(existing_ban, duration_sec)
+	if not existing_ban then
+		return true
+	end
+	if not existing_ban.expiry then
+		return false
+	end
+	if not duration_sec or duration_sec <= 0 then
+		return true
+	end
+	return os.time() + duration_sec > existing_ban.expiry
+end
+
+local function can_issue_ban(name, duration_sec)
+	if core.check_player_privs(name, {ban=true}) then
+		return true
+	end
+	if not core.check_player_privs(name, {moderator=true}) then
+		return false, "Insufficient privileges"
+	end
+	if not duration_sec or duration_sec <= 0 or duration_sec > MODERATOR_MAX_BAN_DURATION then
+		return false, "Moderators without ban can only ban for up to "..algorithms.time_to_string(MODERATOR_MAX_BAN_DURATION)
+	end
+	return true
 end
 
 -- --------------------------------------------------------------------------
@@ -314,6 +341,11 @@ end
 -- Name ban
 function simplemod.ban_name(target, source, reason, duration_sec)
 	local bans = get_storage_table(NAME_BANS_KEY)
+	local existing_ban = simplemod.is_banned_name(target) and bans[target] or nil
+	local can_overwrite_existing = not source or source == "" or core.check_player_privs(source, {ban=true})
+	if existing_ban and not can_overwrite_existing and not ban_extends_existing(existing_ban, duration_sec) then
+		return false, "Ban already exists; new ban must extend current ban duration"
+	end
 	local ban = make_punishment_entry(source, reason, duration_sec)
 	bans[target] = ban
 	save_storage_table(NAME_BANS_KEY, bans)
@@ -380,8 +412,15 @@ end
 
 -- IP ban
 function simplemod.ban_ip(target, source, reason, duration_sec)
+	local existing_ban, err = get_ip_ban(target)
+	if err then return false, err end
+	local can_overwrite_existing = not source or source == "" or core.check_player_privs(source, {ban=true})
+	if existing_ban and not can_overwrite_existing and not ban_extends_existing(existing_ban, duration_sec) then
+		return false, "Ban already exists; new ban must extend current ban duration"
+	end
 	local ban = make_punishment_entry(source, reason, duration_sec)
-	local ok, err = set_ip_data(target, "ban", core.serialize(ban))
+	local ok
+	ok, err = set_ip_data(target, "ban", core.serialize(ban))
 	if not ok then return false, err end
 	local list = get_storage_table(IP_BAN_LIST_KEY)
 	list[target] = ban
@@ -427,6 +466,40 @@ end
 function simplemod.is_banned_ip(target)
 	local ban = get_ip_ban(target)
 	return ban ~= nil
+end
+
+local function ban_duration_within_moderator_limit(ban)
+	if not ban or not ban.time or not ban.expiry then
+		return false
+	end
+	return (ban.expiry - ban.time) <= MODERATOR_MAX_BAN_DURATION
+end
+
+local function can_issue_unban(name, scope, target)
+	if core.check_player_privs(name, {ban=true}) then
+		return true
+	end
+	if not core.check_player_privs(name, {moderator=true}) then
+		return false, "Insufficient privileges"
+	end
+	local ban, err
+	if scope == "ip" then
+		ban, err = get_ip_ban(target)
+		if err then
+			return false, err
+		end
+	else
+		if simplemod.is_banned_name(target) then
+			ban = get_storage_table(NAME_BANS_KEY)[target]
+		end
+	end
+	if not ban then
+		return false, "Not banned"
+	end
+	if not ban_duration_within_moderator_limit(ban) then
+		return false, "Moderators without ban can only unban bans up to "..algorithms.time_to_string(MODERATOR_MAX_BAN_DURATION)
+	end
+	return true
 end
 
 -- IP mute
@@ -783,9 +856,15 @@ local function handle_ban(name, params, is_mute)
 	local duration = time_str and algorithms.parse_time(time_str) or 0
 	local expanded_reason = expand_reason(reason)
 
-	local priv = is_mute and "pmute" or "ban"
-	if not core.check_player_privs(name, {[priv]=true}) then
-		return false, "Insufficient privileges"
+	if is_mute then
+		if not core.check_player_privs(name, {pmute=true}) then
+			return false, "Insufficient privileges"
+		end
+	else
+		local allowed, err = can_issue_ban(name, duration)
+		if not allowed then
+			return false, err
+		end
 	end
 
 	local ok, err = run_action(is_mute and "mute" or "ban", scope, target, name, expanded_reason, duration)
@@ -815,9 +894,15 @@ local function handle_unban(name, params, is_mute)
 	local reason = table.concat(args, " ", 3)
 	local expanded_reason = expand_reason(reason)
 
-	local priv = is_mute and "pmute" or "ban"
-	if not core.check_player_privs(name, {[priv]=true}) then
-		return false, "Insufficient privileges"
+	if is_mute then
+		if not core.check_player_privs(name, {pmute=true}) then
+			return false, "Insufficient privileges"
+		end
+	else
+		local allowed, err = can_issue_unban(name, scope, target)
+		if not allowed then
+			return false, err
+		end
 	end
 
 	local ok, err = run_action(is_mute and "unmute" or "unban", scope, target, name, expanded_reason)
@@ -836,13 +921,13 @@ end
 core.register_chatcommand("sbban", {
 	description = "Ban a player by name or IP",
 	params = "<player> <name|ip> [duration] <reason>",
-	privs = {ban=true},
+	privs = {moderator=true},
 	func = function(n,p) return handle_ban(n,p,false) end,
 })
 core.register_chatcommand("sbunban", {
 	description = "Unban a player by name or IP",
 	params = "<player> <name|ip> [reason]",
-	privs = {ban=true},
+	privs = {moderator=true},
 	func = function(n,p) return handle_unban(n,p,false) end,
 })
 core.register_chatcommand("sbmute", {
@@ -1165,11 +1250,27 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			return
 		end
 
-		local priv = (fields.action_mute or fields.action_unmute) and "pmute" or "ban"
-		if not core.check_player_privs(name, {[priv]=true}) then
-			core.chat_send_player(name, "Insufficient privileges")
-			show_gui(name, "4", "", target, scope, template_key, duration_str, custom)
-			return
+		if fields.action_ban then
+			local allowed, err = can_issue_ban(name, duration)
+			if not allowed then
+				core.chat_send_player(name, err or "Insufficient privileges")
+				show_gui(name, "4", "", target, scope, template_key, duration_str, custom)
+				return
+			end
+		elseif fields.action_unban then
+			local allowed, err = can_issue_unban(name, scope, target)
+			if not allowed then
+				core.chat_send_player(name, err or "Insufficient privileges")
+				show_gui(name, "4", "", target, scope, template_key, duration_str, custom)
+				return
+			end
+		else
+			local priv = (fields.action_mute or fields.action_unmute) and "pmute" or "ban"
+			if not core.check_player_privs(name, {[priv]=true}) then
+				core.chat_send_player(name, "Insufficient privileges")
+				show_gui(name, "4", "", target, scope, template_key, duration_str, custom)
+				return
+			end
 		end
 
 		local success, msg

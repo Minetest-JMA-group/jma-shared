@@ -491,6 +491,7 @@ end
 local unit_to_secs = {
 	s = 1, m = 60, h = 3600,
 	D = 86400, W = 604800, M = 2592000, Y = 31104000,
+	d = 86400, w = 604800, y = 31104000,
 	[""] = 1,
 }
 -- Convert input using time labels (s, m, h, etc) into seconds

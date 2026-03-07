@@ -37,6 +37,11 @@ end
 list = nil
 
 
+-- A small helper to check if the given mod is trusted
+algorithms.is_trusted = function(modname)
+	return trusted_mods[modname] == true
+end
+
 -- A small wrapper around require that handles the issue when the loaded module uses require itself
 -- Use this instead of ie.require directly
 -- Require only secure.c_mods because in practice it's a shared object load like load_library

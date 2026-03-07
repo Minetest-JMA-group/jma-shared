@@ -6,6 +6,7 @@
 ## API reference
 _Functions marked with (C++) depend on the C++ module of this mod. Functions marked with (OSname) depend on that operating system. If you can access them in an unsupported environment, you will find a dummy implementation in their place to avoid crashes. The dummy implementation will just return failure on every call._
 
+- boolean `algorithms.is_trusted(modname: string)` - Check if the given mod is trusted
 - boolean `algorithms.load_library(libpath: string)` - load library at the path libpath relative to the mod folder, or (default) `lib<modname>.[so|dll]` in the calling mod folder. Return true if successful. Must be called during load time.
 - library `algorithms.require(libname: string)` - A wrapper around ie.require that handles nested require calls. Should be used instead of ie.require directly. Must be called during load time.
 - boolean `algorithms.table_contains(t: indexed_table, value)` - return true if value exists in indexed table t, and false otherwise

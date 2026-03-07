@@ -1,22 +1,27 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
-ipdb = {}
+ipdb = { disabled = false }
 
 local function register_dummmies()
+	---@param name string?
+	---@param ip string?
 	ipdb.register_new_ids = function(name, ip)
 		core.log("error", "[ipdb]: ipdb.register_new_ids called while ipdb is disabled")
 	end
+	---@param func fun(entry1: table, entry2: table): table
 	ipdb.register_merger = function(func)
 		local msg = "[ipdb]: ipdb.register_merger called while ipdb is disabled"
 		core.log("error", msg)
 		return msg
 	end
+	---@param func? fun(entry1: table, entry2: table): table
 	ipdb.get_mod_storage = function(func)
 		local msg = "[ipdb]: ipdb.get_mod_storage called while ipdb is disabled"
 		core.log("error", msg)
 		return nil, msg
 	end
+	---@param func fun(name: string, ip: string): string?
 	ipdb.register_on_login = function(func)
 		local msg = "[ipdb]: ipdb.register_on_login called while ipdb is disabled"
 		core.log("error", msg)
@@ -150,13 +155,17 @@ core.register_on_authplayer(function(name, ip, is_success)
 	end
 end)
 
+---@param func fun(name: string, ip: string): string?
 ipdb.register_on_login = function(func)
 	if type(func) ~= "function" then
 		return "Argument must be a function(name, ip)"
 	end
 	table.insert(registered_callbacks, func)
+	return nil
 end
 
+---@param name string?
+---@param ip string?
 ipdb.register_new_ids = function(name, ip)
 	-- We don't want to trigger enforcement here
 	local old_no_newentries = no_newentries
@@ -333,6 +342,7 @@ core.register_chatcommand("ipdb", {
 
 dofile(modpath .. "/migration.lua")
 
+---@param func fun(entry1: table, entry2: table): table
 ipdb.register_merger = function(func)
 	if type(func) ~= "function" then
 		return "Argument must be a function(entry1, entry2)"
@@ -342,6 +352,7 @@ ipdb.register_merger = function(func)
 		return "ipdb.register_merger can only be called at load time"
 	end
 	mergers[modname] = func
+	return nil
 end
 
 local is_in_transaction = false
@@ -419,6 +430,9 @@ local function modstorage_getcontext(modname, id, getter)
 	return context
 end
 
+---@param func? fun(entry1: table, entry2: table): table
+---@return IPDBStorage
+---@overload fun(func?: fun(entry1: table, entry2: table): table): nil, string
 ipdb.get_mod_storage = function(func)
 	if func and type(func) ~= "function" then
 		return nil, "If supplied, the argument must be a function(entry1, entry2)"

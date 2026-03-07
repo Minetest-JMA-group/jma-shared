@@ -46,7 +46,29 @@ if not db then
 	register_dummmies()
 	return
 end
-ipdb.dbmanager = dbmanager
+
+local get_current_modname = core.get_current_modname
+---@param version integer
+---@param resource string
+ipdb.get_internal = function(version, resource)
+	if version ~= 2 then
+		return nil, "The requested version doesn't match the currently loaded software."
+	end
+	local modname = get_current_modname()
+	if not modname then
+		return nil, "ipdb.get_internal can only be called during load time"
+	end
+	if not algorithms.is_trusted(modname) then
+		return nil, "Permission denied"
+	end
+	if resource == "dbmanager" then
+		return dbmanager
+	end
+	if resource == "database" then
+		return db
+	end
+	return nil, "Unknown resource"
+end
 
 local function log(err)
 	core.log("error", "[ipdb]: Database operation failed with code: "..tostring(err))
@@ -357,15 +379,16 @@ end
 
 local is_in_transaction = false
 
-local function modstorage_set_string(self, key, value)
+local function modstorage_set_string(self, key, value, aux)
 	if type(self) ~= "table" or type(key) ~= "string" or (type(value) ~= "string" and type(value) ~= "nil") or
 	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
-	   self._userentry_id ~= math.floor(self._userentry_id) or not is_in_transaction then
+	   self._userentry_id ~= math.floor(self._userentry_id) or not is_in_transaction or
+	   (aux ~= nil and (type(aux) ~= "number" or math.floor(aux) ~= aux)) then
 		return "Invalid argument"
 	end
 	local ok, ret
 	if value then
-		ok, ret = pcall(dbmanager.insert_into_modstorage, self._userentry_id, self._modname, key, value)
+		ok, ret = pcall(dbmanager.insert_into_modstorage, self._userentry_id, self._modname, key, value, aux)
 	else
 		ok, ret = pcall(dbmanager.delete_modstorage, self._userentry_id, self._modname, key)
 	end

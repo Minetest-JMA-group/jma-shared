@@ -2,10 +2,36 @@
 -- Copyright (c) 2026 Marko Petrović
 local modpath = core.get_modpath(core.get_current_modname())
 local dbpath = core.get_worldpath() .. "/ipdb.sqlite"
-local schema_path = modpath .. "/schema.sql"
+local schema1_path = modpath .. "/schema.sql"
+local schema2_path = modpath .. "/migration_1.sql"
 local dbmanager = {}
 local ipdb
 local sqlite
+
+local function apply_schema(db, schema)
+	local f = io.open(schema, "rb")
+	if not f then
+		core.log("error", "[ipdb]: Failed to open schema file: " .. schema)
+		db:close()
+		return false
+	end
+	local sql = f:read("*a")
+	f:close()
+
+	if not sql or #sql == 0 then
+		core.log("error", "[ipdb]: Schema file is empty or unreadable: " .. schema)
+		db:close()
+		return false
+	end
+
+	local ret = db:exec(sql)
+	if ret ~= sqlite.OK then
+		core.log("error", string.format("[ipdb]: Failed to execute schema (%i): %s", ret, schema))
+		db:close()
+		return false
+	end
+	return true
+end
 
 dbmanager.init_ipdb = function(sqlite_param)
 	if sqlite then
@@ -32,29 +58,15 @@ dbmanager.init_ipdb = function(sqlite_param)
 	end
 
 	if version == 0 then
-		local f = io.open(schema_path, "rb")
-		if not f then
-			core.log("error", "[ipdb]: Failed to open schema file: " .. schema_path)
-			db:close()
-			return nil
-		end
-		local sql = f:read("*a")
-		f:close()
-
-		if not sql or #sql == 0 then
-			core.log("error", "[ipdb]: Schema file is empty or unreadable: " .. schema_path)
-			db:close()
-			return nil
-		end
-
-		local ret = db:exec(sql)
-		if ret ~= sqlite.OK then
-			core.log("error", string.format("[ipdb]: Failed to execute schema (%i): %s", ret, schema_path))
-			db:close()
-			return nil
-		end
-		core.log("action", "[ipdb]: Schema applied successfully, version set to 1")
-	elseif version ~= 1 then
+		if not apply_schema(db, schema1_path) then return nil end
+		version = 1
+	end
+	if version == 1 then
+		if not apply_schema(db, schema2_path) then return nil end
+		version = 2
+		core.log("action", "[ipdb]: Schema applied successfully, version set to 2")
+	end
+	if version ~= 2 then
 		core.log("error", "[ipdb]: Unknown database version")
 		db:close()
 		return nil
@@ -332,18 +344,20 @@ dbmanager.reassociate = function(newentryid, nameid, ipid)
 end
 
 local modstorage_insert
-local modstorage_insert_stmt = [[INSERT INTO Modstorage (userentry_id, modname, key, data)
-VALUES (?, ?, ?, ?)
+local modstorage_insert_stmt = [[INSERT INTO Modstorage (userentry_id, modname, key, data, auxiliary)
+VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(userentry_id, modname, key) 
-DO UPDATE SET data = excluded.data]]
+DO UPDATE SET data = excluded.data, auxiliary = excluded.auxiliary]]
 -- Insert a value into modstorage table, potentially replacing the old one
-dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value)
+dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value, aux)
 	if not modstorage_insert then
 		modstorage_insert = ipdb:prepare(modstorage_insert_stmt)
 	else
 		modstorage_insert:reset()
 	end
 	local ret = modstorage_insert:bind_values(userentry_id, modname, key, value)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = modstorage_insert:bind(5, aux)
 	if ret ~= sqlite.OK then error(ret) end
 	ret = modstorage_insert:step()
 	if ret ~= sqlite.DONE then error(ret) end

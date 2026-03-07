@@ -47,6 +47,7 @@ Requires `dev` privilege.
 - `/ipdb_migrate euban` – Import data from EUBan.
 
 ## API for Mods
+_`ipdb.disabled` can be quickly checked to determine whether ipdb is functional_
 
 ### Register a Merger Function
 Called when two user entries are merged. Must be registered at load time.
@@ -67,7 +68,7 @@ Returns a table with methods:
 - `:get_context_by_ip(ip)` – obtain a context for the user entry associated with that IP.
 
 The context object provides:
-- `:set_string(key, value)` – store a string (or `nil` to delete).
+- `:set_string(key, value, aux)` – store a string (or `nil` to delete) with an optional auxiliary integer.
 - `:get_string(key)` – retrieve a string.
 - `:finalize()` – commit the transaction (automatically called when context is garbage‑collected).
 

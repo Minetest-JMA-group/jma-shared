@@ -2,7 +2,7 @@
 
 ---@class IPDBContext
 ---@field _userentry_id integer
----@field set_string fun(self: IPDBContext, key: string, value: string?): nil|string
+---@field set_string fun(self: IPDBContext, key: string, value: string?, aux: integer?): nil|string
 ---@field get_string fun(self: IPDBContext, key: string): string?
 ---@field finalize fun(self: IPDBContext): nil|string
 local IPDBContext = {}

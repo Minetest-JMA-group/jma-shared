@@ -1,3 +1,5 @@
+---@meta
+
 ---@class IPDBContext
 ---@field _userentry_id integer
 ---@field set_string fun(self: IPDBContext, key: string, value: string?): nil|string

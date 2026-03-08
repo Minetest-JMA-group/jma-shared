@@ -383,71 +383,71 @@ end
 local modstorage_get_all
 -- Get all key-value pairs associated with given user entry and modname
 dbmanager.get_all_modstorage = function(userentry_id, modname)
-    if not modstorage_get_all then
-        modstorage_get_all = ipdb:prepare("SELECT key, data FROM Modstorage WHERE userentry_id = ? AND modname = ?")
-    else
-        modstorage_get_all:reset()
-    end
+	if not modstorage_get_all then
+		modstorage_get_all = ipdb:prepare("SELECT key, data FROM Modstorage WHERE userentry_id = ? AND modname = ?")
+	else
+		modstorage_get_all:reset()
+	end
 
-    local ret = modstorage_get_all:bind_values(userentry_id, modname)
-    if ret ~= sqlite.OK then error(ret) end
+	local ret = modstorage_get_all:bind_values(userentry_id, modname)
+	if ret ~= sqlite.OK then error(ret) end
 
-    local results = {}
-    while true do
-        ret = modstorage_get_all:step()
-        if ret == sqlite.DONE then
-            break
-        elseif ret ~= sqlite.ROW then
-            error(ret)
-        end
-        local key = modstorage_get_all:get_value(0)
-        local data = modstorage_get_all:get_value(1)
-        results[key] = data
-    end
+	local results = {}
+	while true do
+		ret = modstorage_get_all:step()
+		if ret == sqlite.DONE then
+			break
+		elseif ret ~= sqlite.ROW then
+			error(ret)
+		end
+		local key = modstorage_get_all:get_value(0)
+		local data = modstorage_get_all:get_value(1)
+		results[key] = data
+	end
 
-    return results
+	return results
 end
 
 local modstorage_update
 -- Reassociate modstorage to a new entry that must not have its own modstorage that could cause a conflict
 dbmanager.update_modstorage = function(modname, old_userentry_id, new_userentry_id)
-    if not modstorage_update then
-        modstorage_update = ipdb:prepare("UPDATE Modstorage SET userentry_id = ? WHERE userentry_id = ? AND modname = ?")
-    else
-        modstorage_update:reset()
-    end
+	if not modstorage_update then
+		modstorage_update = ipdb:prepare("UPDATE Modstorage SET userentry_id = ? WHERE userentry_id = ? AND modname = ?")
+	else
+		modstorage_update:reset()
+	end
 
-    local ret = modstorage_update:bind_values(new_userentry_id, old_userentry_id, modname)
-    if ret ~= sqlite.OK then error(ret) end
+	local ret = modstorage_update:bind_values(new_userentry_id, old_userentry_id, modname)
+	if ret ~= sqlite.OK then error(ret) end
 
-    ret = modstorage_update:step()
-    if ret ~= sqlite.DONE then error(ret) end
+	ret = modstorage_update:step()
+	if ret ~= sqlite.DONE then error(ret) end
 end
 
 local modstorage_delete_one
 local modstorage_delete_all
 dbmanager.delete_modstorage = function(userentry_id, modname, key)
-    if key then
-        if not modstorage_delete_one then
-            modstorage_delete_one = ipdb:prepare("DELETE FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ?")
-        else
-            modstorage_delete_one:reset()
-        end
-        local ret = modstorage_delete_one:bind_values(userentry_id, modname, key)
-        if ret ~= sqlite.OK then error(ret) end
-        ret = modstorage_delete_one:step()
-        if ret ~= sqlite.DONE then error(ret) end
-    else
-        if not modstorage_delete_all then
-            modstorage_delete_all = ipdb:prepare("DELETE FROM Modstorage WHERE userentry_id = ? AND modname = ?")
-        else
-            modstorage_delete_all:reset()
-        end
-        local ret = modstorage_delete_all:bind_values(userentry_id, modname)
-        if ret ~= sqlite.OK then error(ret) end
-        ret = modstorage_delete_all:step()
-        if ret ~= sqlite.DONE then error(ret) end
-    end
+	if key then
+		if not modstorage_delete_one then
+			modstorage_delete_one = ipdb:prepare("DELETE FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ?")
+		else
+			modstorage_delete_one:reset()
+		end
+		local ret = modstorage_delete_one:bind_values(userentry_id, modname, key)
+		if ret ~= sqlite.OK then error(ret) end
+		ret = modstorage_delete_one:step()
+		if ret ~= sqlite.DONE then error(ret) end
+	else
+		if not modstorage_delete_all then
+			modstorage_delete_all = ipdb:prepare("DELETE FROM Modstorage WHERE userentry_id = ? AND modname = ?")
+		else
+			modstorage_delete_all:reset()
+		end
+		local ret = modstorage_delete_all:bind_values(userentry_id, modname)
+		if ret ~= sqlite.OK then error(ret) end
+		ret = modstorage_delete_all:step()
+		if ret ~= sqlite.DONE then error(ret) end
+	end
 end
 
 return dbmanager

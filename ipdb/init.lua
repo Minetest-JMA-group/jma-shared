@@ -30,7 +30,7 @@ local function register_dummmies()
 	ipdb.get_internal = function(version, resource)
 		return nil, "ipdb is disabled"
 	end
-	---@param func fun(entry1: integer, entry2: integer)
+	---@param func fun(entrysrcid: integer, entrydestid: integer)
 	ipdb.register_entryid_merger = function(func)
 		local msg = "[ipdb]: ipdb.register_entryid_merger called while ipdb is disabled"
 		core.log("error", msg)
@@ -493,7 +493,7 @@ ipdb.register_merger = function(func)
 	return nil
 end
 
----@param func fun(entry1: integer, entry2: integer)
+---@param func fun(entrysrcid: integer, entrydestid: integer)
 ipdb.register_entryid_merger = function(func)
 	if type(func) ~= "function" then
 		return "Argument must be a function(entrysrcid, entrydestid)"

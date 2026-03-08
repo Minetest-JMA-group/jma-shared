@@ -40,6 +40,8 @@ Requires `ban` privilege.
 | `/ipdb rm_ip <IPv4>` | Remove an IP address from the database. |
 | `/ipdb isolate name\|ip <identifier>` | Create an isolated entry (cannot be merged) and move/add the identifier to it. |
 | `/ipdb newentries [yes\|no]` | Show or change whether new entries are allowed. |
+| `/ipdb list <IP\|username>` | List all IPs and usernames linked with the given one |
+| `/ipdb log_merges [yes\|no]` | Show or change whether entry merge events are logged |
 
 ### Migration Commands
 Requires `dev` privilege.
@@ -55,6 +57,11 @@ Called when two user entries are merged. Must be registered at load time.
 ipdb.register_merger(function(entry1_data, entry2_data)
     -- entryX_data is a table of key‑value pairs from modstorage for that entry.
     -- Return a merged table that will replace entry2’s data.
+end)
+-- Alternatively you can register a callback that gets entry IDs and merges them with custom database operations
+ipdb.register_entryid_merger(function(entrysrcid, entrydestid)
+	-- Have good knowledge of ipdb and use dbmanager or connection object to more efficiently merge data directly
+	-- Check ipdb.get_internal() in source
 end)
 ```
 
@@ -93,6 +100,8 @@ The database (`worldpath/ipdb.sqlite`) contains tables:
 - `IPs` – IP addresses linked to an entry.
 - `Modstorage` – per‑mod key‑value data.
 - `Metadata` – settings like `no_new_entries`.
+- `Modstorage_log` - Logs the state of modstorage at the time of merge
+- `MergeEvent` - Records merge events themselves
 
 Foreign keys and triggers ensure orphaned entries are cleaned up automatically.
 

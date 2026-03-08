@@ -42,5 +42,6 @@ CREATE TABLE Modstorage_log (
 CREATE INDEX idx_modstorage_log_mergeid ON Modstorage_log(merge_id);
 
 INSERT INTO Metadata (key, value) VALUES ('log_merges', 'true');
+INSERT INTO Metadata (key, value) VALUES ('db_migrated_v3', CURRENT_TIMESTAMP);
 
 COMMIT;

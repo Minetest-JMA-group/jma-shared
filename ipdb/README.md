@@ -77,6 +77,8 @@ Returns a table with methods:
 The context object provides:
 - `:set_string(key, value, aux)` – store a string (or `nil` to delete) with an optional auxiliary integer.
 - `:get_string(key)` – retrieve a string.
+- `:get_strings(key, limit)` - (multimap) retrieve strings under the given key in the form of a table<modstorage_id, string>
+- `:add_string(key, value, aux)` - (multimap) Same as set_string, except that it doesn't overwrite existing values 
 - `:finalize()` – commit the transaction (automatically called when context is garbage‑collected).
 
 **Note:** A transaction is started when you obtain a context; always call `:finalize()` or let the context go out of scope.

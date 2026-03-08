@@ -330,7 +330,7 @@ core.register_chatcommand("ipdb", {
 					return true, "Logging of entry merges is disabled."
 				end
 			else
-				local state = log_merges and "not logged" or "logged"
+				local state = log_merges and "logged" or "not logged"
 				return true, "Entry merges are currently " .. state .. "."
 			end
 		end

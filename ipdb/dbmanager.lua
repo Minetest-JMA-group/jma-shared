@@ -4,6 +4,7 @@ local modpath = core.get_modpath(core.get_current_modname())
 local dbpath = core.get_worldpath() .. "/ipdb.sqlite"
 local schema1_path = modpath .. "/schema.sql"
 local schema2_path = modpath .. "/migration_1.sql"
+local schema3_path = modpath .. "/migration_2.sql"
 local dbmanager = {}
 local ipdb
 local sqlite
@@ -64,9 +65,13 @@ dbmanager.init_ipdb = function(sqlite_param)
 	if version == 1 then
 		if not apply_schema(db, schema2_path) then return nil end
 		version = 2
-		core.log("action", "[ipdb]: Schema applied successfully, version set to 2")
 	end
-	if version ~= 2 then
+	if version == 2 then
+		if not apply_schema(db, schema3_path) then return nil end
+		version = 3
+		core.log("action", "[ipdb]: Schema applied successfully, version set to 3")
+	end
+	if version ~= 3 then
 		core.log("error", "[ipdb]: Unknown database version")
 		db:close()
 		return nil
@@ -227,31 +232,48 @@ dbmanager.delete_entry = function(entryid)
 	if ret ~= sqlite.DONE then error(ret) end
 end
 
-local set_no_newentries
-local get_no_newentries
-dbmanager.no_newentries = function(newval)
+local set_meta
+local delete_meta
+dbmanager.set_meta = function(key, newval)
 	if newval ~= nil then
-		if not set_no_newentries then
-			set_no_newentries = ipdb:prepare("UPDATE Metadata SET value = ? WHERE key = 'no_new_entries'")
+		if not set_meta then
+			set_meta = ipdb:prepare("UPDATE Metadata SET value = ? WHERE key = ?")
 		else
-			set_no_newentries:reset()
+			set_meta:reset()
 		end
-		newval = newval and "true" or "false"
-		local ret = set_no_newentries:bind(1, newval)
+		newval = tostring(newval)
+		local ret = set_meta:bind_values(newval, key)
 		if ret ~= sqlite.OK then error(ret) end
-		ret = set_no_newentries:step()
+		ret = set_meta:step()
 		if ret ~= sqlite.DONE then error(ret) end
 	else
-		if not get_no_newentries then
-			get_no_newentries = ipdb:prepare("SELECT value FROM Metadata WHERE key = 'no_new_entries'")
+		if not delete_meta then
+			delete_meta = ipdb:prepare("DELETE FROM Metadata WHERE key = ?")
 		else
-			get_no_newentries:reset()
+			delete_meta:reset()
 		end
-		local ret = get_no_newentries:step()
-		if ret ~= sqlite.ROW then error(ret) end
-		local no_newentries = get_no_newentries:get_value(0)
-		return no_newentries == "true"
+		local ret = delete_meta:bind(1, key)
+		if ret ~= sqlite.OK then error(ret) end
+		ret = delete_meta:step()
+		if ret ~= sqlite.DONE then error(ret) end
 	end
+end
+
+local get_meta
+dbmanager.get_meta = function(key)
+	if not get_meta then
+		get_meta = ipdb:prepare("SELECT value FROM Metadata WHERE key = ?")
+	else
+		get_meta:reset()
+	end
+	local ret = get_meta:bind(1, key)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = get_meta:step()
+	if ret ~= sqlite.ROW then error(ret) end
+	local val = get_meta:get_value(0)
+	ret = get_meta:step()
+	if ret ~= sqlite.DONE then error(ret) end
+	return val
 end
 
 local set_merge_perm
@@ -286,6 +308,9 @@ dbmanager.can_merge = function(entryid1, entryid2)
 	if ret ~= sqlite.ROW then error(ret) end
 
 	local blocked_count = check_merge_blocked:get_value(0)
+	ret = check_merge_blocked:step()
+	if ret ~= sqlite.DONE then error(ret) end
+
 	return blocked_count == 0
 end
 
@@ -377,7 +402,11 @@ dbmanager.get_from_modstorage = function(userentry_id, modname, key)
 	ret = modstorage_get:step()
 	if ret == sqlite.DONE then return nil end
 	if ret ~= sqlite.ROW then error(ret) end
-	return modstorage_get:get_value(0)
+	local val = modstorage_get:get_value(0)
+	ret = modstorage_get:step()
+	if ret ~= sqlite.DONE then error(ret) end
+
+	return val
 end
 
 local modstorage_get_all
@@ -448,6 +477,49 @@ dbmanager.delete_modstorage = function(userentry_id, modname, key)
 		ret = modstorage_delete_all:step()
 		if ret ~= sqlite.DONE then error(ret) end
 	end
+end
+
+local new_merge
+local log_modstorage
+local log_modstorage_stmt = [[INSERT INTO Modstorage_log (modname, userentry_id, key, data, auxiliary, merge_id)
+SELECT modname, userentry_id, key, data, auxiliary, ?
+FROM Modstorage
+WHERE userentry_id IN (?, ?)]]
+dbmanager.new_merge_event = function(entry_src, entry_dst, name, ip)
+	if not new_merge then
+		new_merge = ipdb:prepare("INSERT INTO MergeEvent (entry_src, entry_dst, name, ip) VALUES (?, ?, ?, ?)")
+	else
+		new_merge:reset()
+	end
+	if not log_modstorage then
+		log_modstorage = ipdb:prepare(log_modstorage_stmt)
+	else
+		log_modstorage:reset()
+	end
+
+	local ret = new_merge:bind_values(entry_src, entry_dst, name, ip)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = new_merge:step()
+	if ret ~= sqlite.DONE then error(ret) end
+	local merge_id = new_merge:last_insert_rowid()
+
+	ret = log_modstorage:bind_values(merge_id, entry_src, entry_dst)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = log_modstorage:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+local prune_merge
+dbmanager.prune_merge_events = function(max_age)
+	if not prune_merge then
+		prune_merge = ipdb:prepare("DELETE FROM MergeEvent WHERE timestamp < unixepoch('now') - ?")
+	else
+		prune_merge:reset()
+	end
+	local ret = prune_merge:bind(1, max_age)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = prune_merge:step()
+	if ret ~= sqlite.DONE then error(ret) end
 end
 
 return dbmanager

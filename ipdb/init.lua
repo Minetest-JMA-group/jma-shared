@@ -43,6 +43,9 @@ local modpath = core.get_modpath(core.get_current_modname())
 local dbmanager = dofile(modpath .. "/dbmanager.lua")
 local db = dbmanager.init_ipdb(sqlite)
 local no_newentries
+local log_merges
+local LOG_PRUNING_INTERVAL = algorithms.parse_time("3h")
+local LOG_RETENTION_TIME = algorithms.parse_time("15D")
 local mergers = {}
 if not db then
 	core.log("error", "[ipdb]: Database initialization failed, mod cannot function")
@@ -50,11 +53,40 @@ if not db then
 	return
 end
 
+local function log(err)
+	core.log("error", "[ipdb]: Database operation failed with code: "..tostring(err))
+end
+
+do
+	local ok, err = pcall(function()
+		no_newentries = dbmanager.get_meta("no_new_entries") == "true"
+		log_merges = dbmanager.get_meta("log_merges") == "true"
+	end)
+	if not ok then
+		log(err)
+		no_newentries = true
+		log_merges = true
+	end
+end
+
+local function start_mergelog_cleanup()
+	if not log_merges then
+		return
+	end
+	local ok, err = pcall(dbmanager.prune_merge_events, LOG_RETENTION_TIME)
+	if not ok then
+		log(err)
+		core.log("error", "[ipdb]: Failed to prune merge log")
+	end
+	core.after(LOG_PRUNING_INTERVAL, start_mergelog_cleanup)
+end
+start_mergelog_cleanup()
+
 local get_current_modname = core.get_current_modname
 ---@param version integer
 ---@param resource string
 ipdb.get_internal = function(version, resource)
-	if version ~= 2 then
+	if version ~= 3 then
 		return nil, "The requested version doesn't match the currently loaded software."
 	end
 	local modname = get_current_modname()
@@ -71,10 +103,6 @@ ipdb.get_internal = function(version, resource)
 		return db
 	end
 	return nil, "Unknown resource"
-end
-
-local function log(err)
-	core.log("error", "[ipdb]: Database operation failed with code: "..tostring(err))
 end
 
 local function merge_modstorage(entrysrcid, entrydestid)
@@ -104,9 +132,6 @@ local function register_new_ids(name, ip)
 
 	-- Almost every statement needs error checking. Just use pcall to catch exceptions instead of bloating the code
 	local ok, err_or_ret = pcall(function()
-		if no_newentries == nil then
-			no_newentries = dbmanager.no_newentries()
-		end
 		local user
 		local ipent
 		if name then user = dbmanager.user_exists(name) end
@@ -134,6 +159,9 @@ local function register_new_ids(name, ip)
 					dbmanager.update_last_seen(user.userentry_id, user.id)
 					dbmanager.update_last_seen(ipent.userentry_id, nil, ipent.id)
 					return
+				end
+				if log_merges then
+					dbmanager.new_merge_event(ipent.userentry_id, user.userentry_id, name, ip)
 				end
 				merge_modstorage(ipent.userentry_id, user.userentry_id)
 				local ids = dbmanager.get_all_identifiers(ipent.userentry_id)
@@ -250,7 +278,7 @@ core.register_chatcommand("ipdb", {
 					return false, "Usage: /ipdb newentries [yes|no]"
 				end
 				no_newentries = (arg == "no")
-				local ok, err = pcall(dbmanager.no_newentries, no_newentries)
+				local ok, err = pcall(dbmanager.set_meta, "no_new_entries", no_newentries)
 				if not ok then
 					log(err)
 					return false, "Internal error"
@@ -263,6 +291,30 @@ core.register_chatcommand("ipdb", {
 			else
 				local state = no_newentries and "not allowed" or "allowed"
 				return true, "Auto-generation of new user entries is currently " .. state .. "."
+			end
+		end
+
+		if cmd == "log_merges" then
+			local arg = iter()
+			if arg then
+				if arg ~= "yes" and arg ~= "no" then
+					return false, "Usage: /ipdb log_merges [yes|no]"
+				end
+				log_merges = (arg == "yes")
+				local ok, err = pcall(dbmanager.set_meta, "log_merges", log_merges)
+				if not ok then
+					log(err)
+					return false, "Internal error"
+				end
+				if log_merges then
+					start_mergelog_cleanup()
+					return true, "Entry merges will be logged from now on."
+				else
+					return true, "Logging of entry merges is disabled."
+				end
+			else
+				local state = log_merges and "not logged" or "logged"
+				return true, "Entry merges are currently " .. state .. "."
 			end
 		end
 

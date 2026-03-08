@@ -35,17 +35,22 @@ local function apply_schema(db, schema)
 	return true
 end
 
+local function open_database()
+	local db, errcode, errmsg = sqlite.open(dbpath)
+	if not db then
+		core.log("error", string.format("[ipdb]: Failed to open database (%s): %s", errmsg, dbpath))
+		return nil
+	end
+	return db
+end
 dbmanager.init_ipdb = function(sqlite_param)
 	if sqlite then
 		core.log("error", "[ipdb]: dbmanager.init_ipdb called more than once")
 		return nil
 	end
 	sqlite = sqlite_param
-	local db, errcode, errmsg = sqlite.open(dbpath)
-	if not db then
-		core.log("error", string.format("[ipdb]: Failed to open database (%s): %s", errmsg, dbpath))
-		return nil
-	end
+	local db = open_database()
+	if not db then return nil end
 	local ret = db:exec("PRAGMA foreign_keys = ON")
 	if ret ~= sqlite.OK then
 		core.log("error", "[ipdb]: Failed to enable foreign keys and set journal mode")
@@ -59,6 +64,14 @@ dbmanager.init_ipdb = function(sqlite_param)
 		break
 	end
 
+	-- Let's try to open a fresh connection, SQLite seems to complain about some DDL statements on an used connection
+	ret = db:close()
+	if ret ~= sqlite.OK then
+		core.log("error", "[ipdb]: Failed to close a connection? (code: "..tostring(ret)..")")
+		return nil
+	end
+	db = open_database()
+	if not db then return nil end
 	if version == 0 then
 		if not apply_schema(db, schema1_path) then return nil end
 		version = 1

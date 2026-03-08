@@ -5,6 +5,7 @@ local dbpath = core.get_worldpath() .. "/ipdb.sqlite"
 local schema1_path = modpath .. "/schema.sql"
 local schema2_path = modpath .. "/migration_1.sql"
 local schema3_path = modpath .. "/migration_2.sql"
+---@class DBManager
 local dbmanager = {}
 local ipdb
 local sqlite
@@ -83,6 +84,8 @@ end
 
 local user_check
 -- Search for the given username and return the row as Lua key-value table if it exists
+---@param username string
+---@return UsernameEntity?
 dbmanager.user_exists = function(username)
 	if not user_check then
 		user_check = ipdb:prepare("SELECT * FROM Usernames WHERE name = ?;")
@@ -98,6 +101,8 @@ end
 
 local ip_check
 -- Search for the given IP and return the row as Lua key-value table if it exists
+---@param ip string
+---@return IPEntity?
 dbmanager.ip_exists = function(ip)
 	if not ip_check then
 		ip_check = ipdb:prepare("SELECT * FROM IPs WHERE ip = ?;")
@@ -111,23 +116,27 @@ dbmanager.ip_exists = function(ip)
 	end
 end
 
-local new_entry_stmt
+local new_entry
 -- Create a new user entry and return its id
+---@return integer
 dbmanager.new_entry = function()
-	if not new_entry_stmt then
-		new_entry_stmt = ipdb:prepare("INSERT INTO UserEntry (last_seen) VALUES (CURRENT_TIMESTAMP);")
+	if not new_entry then
+		new_entry = ipdb:prepare("INSERT INTO UserEntry (last_seen) VALUES (CURRENT_TIMESTAMP);")
 	else
-		new_entry_stmt:reset()
+		new_entry:reset()
 	end
-	local ret = new_entry_stmt:step()
+	local ret = new_entry:step()
 	if ret ~= sqlite.DONE then error(ret) end
-	return new_entry_stmt:last_insert_rowid()
+	return new_entry:last_insert_rowid()
 end
 
 local update_entry_time
 local update_name_time
 local update_ip_time
 -- Update last_seen time for given entries
+---@param entryid integer?
+---@param nameid integer?
+---@param ipid integer?
 dbmanager.update_last_seen = function(entryid, nameid, ipid)
 	local now = os.date("!%Y-%m-%d %H:%M:%S")
 	if entryid then
@@ -168,6 +177,8 @@ end
 -- Return a table { ips = {}, names = {}} with a list of ips and names belonging to this entry.
 local get_ips
 local get_names
+---@param entryid integer
+---@return { ips: string[], names: string[] }
 dbmanager.get_all_identifiers = function(entryid)
 	local res = { ips = {}, names = {} }
 	if not get_ips then
@@ -193,6 +204,9 @@ end
 
 local insert_ip
 -- Return the id of the new IP row
+---@param entryid integer
+---@param ip string
+---@return integer
 dbmanager.add_ip = function(entryid, ip)
 	if not insert_ip then
 		insert_ip = ipdb:prepare("INSERT INTO IPs (userentry_id, ip, last_seen) VALUES (?, ?, CURRENT_TIMESTAMP)")
@@ -207,6 +221,8 @@ dbmanager.add_ip = function(entryid, ip)
 end
 
 local insert_name
+---@param entryid integer
+---@param name string
 dbmanager.add_name = function(entryid, name)
 	if not insert_name then
 		insert_name = ipdb:prepare("INSERT INTO Usernames (userentry_id, name, last_seen) VALUES (?, ?, CURRENT_TIMESTAMP)")
@@ -220,6 +236,7 @@ dbmanager.add_name = function(entryid, name)
 end
 
 local delete_entry
+---@param entryid integer
 dbmanager.delete_entry = function(entryid)
 	if not delete_entry then
 		delete_entry = ipdb:prepare("DELETE FROM UserEntry WHERE id = ?")
@@ -234,6 +251,8 @@ end
 
 local set_meta
 local delete_meta
+---@param key string
+---@param newval string?
 dbmanager.set_meta = function(key, newval)
 	if newval ~= nil then
 		if not set_meta then
@@ -260,6 +279,8 @@ dbmanager.set_meta = function(key, newval)
 end
 
 local get_meta
+---@param key string
+---@return string
 dbmanager.get_meta = function(key)
 	if not get_meta then
 		get_meta = ipdb:prepare("SELECT value FROM Metadata WHERE key = ?")
@@ -278,6 +299,8 @@ end
 
 local set_merge_perm
 -- Set no_merging flag in entry
+---@param entryid integer
+---@param allowed boolean
 dbmanager.set_merge_allowance = function(entryid, allowed)
 	local no_merging = nil
 	if not allowed then no_merging = 1 end
@@ -294,6 +317,8 @@ dbmanager.set_merge_allowance = function(entryid, allowed)
 end
 
 local check_merge_blocked
+---@param entryid1 integer
+---@param entryid2 integer
 dbmanager.can_merge = function(entryid1, entryid2)
 	if not check_merge_blocked then
 		check_merge_blocked = ipdb:prepare("SELECT COUNT(*) FROM UserEntry WHERE id IN (?, ?) AND no_merging = 1;")
@@ -315,6 +340,7 @@ dbmanager.can_merge = function(entryid1, entryid2)
 end
 
 local remove_ip
+---@param ipid integer
 dbmanager.remove_ip = function(ipid)
 	if not remove_ip then
 		remove_ip = ipdb:prepare("DELETE FROM IPs WHERE id = ?")
@@ -328,6 +354,7 @@ dbmanager.remove_ip = function(ipid)
 end
 
 local remove_name
+---@param nameid integer
 dbmanager.remove_name = function(nameid)
 	if not remove_name then
 		remove_name = ipdb:prepare("DELETE FROM Usernames WHERE id = ?")
@@ -343,7 +370,10 @@ end
 local reassociate_ip
 local reassociate_name
 -- Change the userentry_id of an IP row and/or a Username row to the given new entry ID
-dbmanager.reassociate = function(newentryid, nameid, ipid)
+---@param newentryid integer
+---@param nameid integer?
+---@param ipid integer?
+dbmanager.reassociate_ids = function(newentryid, nameid, ipid)
 	if ipid then
 		if not reassociate_ip then
 			reassociate_ip = ipdb:prepare("UPDATE IPs SET userentry_id = ? WHERE id = ?")
@@ -369,14 +399,16 @@ dbmanager.reassociate = function(newentryid, nameid, ipid)
 end
 
 local modstorage_insert
-local modstorage_insert_stmt = [[INSERT INTO Modstorage (userentry_id, modname, key, data, auxiliary)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(userentry_id, modname, key) 
-DO UPDATE SET data = excluded.data, auxiliary = excluded.auxiliary]]
--- Insert a value into modstorage table, potentially replacing the old one
+-- Insert a value into modstorage table
+---@param userentry_id integer
+---@param modname string
+---@param key string
+---@param value string?
+---@param aux string?
 dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value, aux)
 	if not modstorage_insert then
-		modstorage_insert = ipdb:prepare(modstorage_insert_stmt)
+		modstorage_insert = ipdb:prepare("INSERT INTO Modstorage (userentry_id, modname, key, data, auxiliary) "..
+	                                     "VALUES (?, ?, ?, ?, ?)")
 	else
 		modstorage_insert:reset()
 	end
@@ -389,31 +421,94 @@ dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value, a
 end
 
 local modstorage_get
--- Get the value associated with the given key in modstorage table
-dbmanager.get_from_modstorage = function(userentry_id, modname, key)
-	if not modstorage_get then
-		modstorage_get = ipdb:prepare("SELECT data FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ?")
+local modstorage_get_all
+-- Get the values associated with the given key in modstorage table
+---@param userentry_id integer
+---@param modname string
+---@param key string
+---@param limit integer?
+---@return table<integer, string>
+dbmanager.get_from_modstorage = function(userentry_id, modname, key, limit)
+	local mystmt
+	local ret
+	if limit then
+		if not modstorage_get then
+			modstorage_get = ipdb:prepare("SELECT id, data FROM Modstorage WHERE userentry_id = ? AND modname = ? "..
+			                              "AND key = ? LIMIT ?")
+		else
+			modstorage_get:reset()
+		end
+		ret = modstorage_get:bind_values(userentry_id, modname, key, limit)
+		mystmt = modstorage_get
 	else
-		modstorage_get:reset()
+		if not modstorage_get_all then
+			modstorage_get_all = ipdb:prepare("SELECT id, data FROM Modstorage WHERE userentry_id = ? AND modname = ? "..
+			                                  "AND key = ?")
+		else
+			modstorage_get_all:reset()
+		end
+		ret = modstorage_get_all:bind_values(userentry_id, modname, key)
+		mystmt = modstorage_get_all
 	end
-	local ret = modstorage_get:bind_values(userentry_id, modname, key)
 	if ret ~= sqlite.OK then error(ret) end
 
-	ret = modstorage_get:step()
-	if ret == sqlite.DONE then return nil end
-	if ret ~= sqlite.ROW then error(ret) end
-	local val = modstorage_get:get_value(0)
-	ret = modstorage_get:step()
+	local values = {}
+	ret = mystmt:step()
+	while ret == sqlite.ROW do
+		local id = mystmt:get_value(0)
+		local data = mystmt:get_value(1)
+		values[id] = data
+		ret = mystmt:step()
+	end
 	if ret ~= sqlite.DONE then error(ret) end
+	return values
+end
 
-	return val
+local update_modstorage1
+-- Update a value identified by modstorage_id
+---@param modstorage_id integer
+---@param value string
+---@param aux string?
+dbmanager.update_modstorage1 = function(modstorage_id, value, aux)
+	if not update_modstorage1 then
+		update_modstorage1 = ipdb:prepare("UPDATE Modstorage SET data = ?, auxiliary = ? WHERE id = ?")
+	else
+		update_modstorage1:reset()
+	end
+	local ret = update_modstorage1:bind_values(value, aux, modstorage_id)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = update_modstorage1:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+local update_modstorage2
+-- Update all values identified by (userentry_id, modname, key) tuple
+---@param userentry_id integer
+---@param modname string
+---@param key string
+---@param value string
+---@param aux string?
+dbmanager.update_modstorage2 = function(userentry_id, modname, key, value, aux)
+	if not update_modstorage2 then
+		update_modstorage2 = ipdb:prepare("UPDATE Modstorage SET data = ?, auxiliary = ? WHERE userentry_id = ? "..
+		                                  "AND modname = ? AND KEY = ?")
+	else
+		update_modstorage2:reset()
+	end
+	local ret = update_modstorage2:bind_values(value, aux, userentry_id, modname, key)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = update_modstorage2:step()
+	if ret ~= sqlite.DONE then error(ret) end
 end
 
 local modstorage_get_all
 -- Get all key-value pairs associated with given user entry and modname
+---@param userentry_id integer
+---@param modname string
+---@return table<string, string|table<integer, string>>
 dbmanager.get_all_modstorage = function(userentry_id, modname)
 	if not modstorage_get_all then
-		modstorage_get_all = ipdb:prepare("SELECT key, data FROM Modstorage WHERE userentry_id = ? AND modname = ?")
+		modstorage_get_all = ipdb:prepare("SELECT key, data, id FROM Modstorage WHERE userentry_id = ? AND modname = ?")
 	else
 		modstorage_get_all:reset()
 	end
@@ -422,6 +517,8 @@ dbmanager.get_all_modstorage = function(userentry_id, modname)
 	if ret ~= sqlite.OK then error(ret) end
 
 	local results = {}
+	local is_multimap = {}
+	local saved_ids = {}
 	while true do
 		ret = modstorage_get_all:step()
 		if ret == sqlite.DONE then
@@ -431,30 +528,52 @@ dbmanager.get_all_modstorage = function(userentry_id, modname)
 		end
 		local key = modstorage_get_all:get_value(0)
 		local data = modstorage_get_all:get_value(1)
-		results[key] = data
+		local id = modstorage_get_all:get_value(2)
+		if not results[key] then
+			results[key] = data
+			saved_ids[key] = id
+		else
+			if not is_multimap[key] then
+				local val = results[key]
+				local val_id = saved_ids[key]
+				saved_ids[key] = nil
+				results[key] = {[val_id] = val}
+				is_multimap[key] = true
+			end
+			results[key][id] = data
+		end
 	end
 
 	return results
 end
 
-local modstorage_update
--- Reassociate modstorage to a new entry that must not have its own modstorage that could cause a conflict
-dbmanager.update_modstorage = function(modname, old_userentry_id, new_userentry_id)
-	if not modstorage_update then
-		modstorage_update = ipdb:prepare("UPDATE Modstorage SET userentry_id = ? WHERE userentry_id = ? AND modname = ?")
+local reassociate_modstorage
+-- Reassociate modstorage to a new entry
+---@param modname string
+---@param old_userentry_id integer
+---@param new_userentry_id integer
+dbmanager.reassociate_modstorage = function(modname, old_userentry_id, new_userentry_id)
+	if not reassociate_modstorage then
+		reassociate_modstorage = ipdb:prepare("UPDATE Modstorage SET userentry_id = ? WHERE userentry_id = ? "..
+		                                      "AND modname = ?")
 	else
-		modstorage_update:reset()
+		reassociate_modstorage:reset()
 	end
 
-	local ret = modstorage_update:bind_values(new_userentry_id, old_userentry_id, modname)
+	local ret = reassociate_modstorage:bind_values(new_userentry_id, old_userentry_id, modname)
 	if ret ~= sqlite.OK then error(ret) end
 
-	ret = modstorage_update:step()
+	ret = reassociate_modstorage:step()
 	if ret ~= sqlite.DONE then error(ret) end
 end
 
 local modstorage_delete_one
 local modstorage_delete_all
+-- Delete all rows identified by the given (userentry_id, modname, key) or,
+-- if the key is missing, (userentry_id, modname) tuple
+---@param userentry_id integer
+---@param modname string
+---@param key string?
 dbmanager.delete_modstorage = function(userentry_id, modname, key)
 	if key then
 		if not modstorage_delete_one then
@@ -479,12 +598,31 @@ dbmanager.delete_modstorage = function(userentry_id, modname, key)
 	end
 end
 
+local remove_modstorage
+-- Delete the given row from Modstorage
+---@param modstorage_id integer
+dbmanager.remove_modstorage = function(modstorage_id)
+	if not remove_modstorage then
+		remove_modstorage = ipdb:prepare("DELETE FROM Modstorage WHERE id = ?")
+	else
+		remove_modstorage:reset()
+	end
+	local ret = remove_modstorage:bind(1, modstorage_id)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = remove_modstorage:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
 local new_merge
 local log_modstorage
 local log_modstorage_stmt = [[INSERT INTO Modstorage_log (modname, userentry_id, key, data, auxiliary, merge_id)
 SELECT modname, userentry_id, key, data, auxiliary, ?
 FROM Modstorage
 WHERE userentry_id IN (?, ?)]]
+---@param entry_src integer
+---@param entry_dst integer
+---@param name string
+---@param ip string
 dbmanager.new_merge_event = function(entry_src, entry_dst, name, ip)
 	if not new_merge then
 		new_merge = ipdb:prepare("INSERT INTO MergeEvent (entry_src, entry_dst, name, ip) VALUES (?, ?, ?, ?)")
@@ -510,6 +648,7 @@ dbmanager.new_merge_event = function(entry_src, entry_dst, name, ip)
 end
 
 local prune_merge
+---@param max_age integer
 dbmanager.prune_merge_events = function(max_age)
 	if not prune_merge then
 		prune_merge = ipdb:prepare("DELETE FROM MergeEvent WHERE timestamp < unixepoch('now') - ?")

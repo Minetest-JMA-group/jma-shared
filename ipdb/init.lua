@@ -30,6 +30,12 @@ local function register_dummmies()
 	ipdb.get_internal = function(version, resource)
 		return nil, "ipdb is disabled"
 	end
+	---@param func fun(entry1: integer, entry2: integer)
+	ipdb.register_entryid_merger = function(func)
+		local msg = "[ipdb]: ipdb.register_entryid_merger called while ipdb is disabled"
+		core.log("error", msg)
+		return msg
+	end
 	ipdb.disabled = true
 end
 local sqlite = algorithms.require("lsqlite3")
@@ -39,14 +45,17 @@ if not sqlite then
 	return
 end
 
-local modpath = core.get_modpath(core.get_current_modname())
+local get_current_modname = core.get_current_modname
+local modpath = core.get_modpath(get_current_modname())
 local dbmanager = dofile(modpath .. "/dbmanager.lua")
+---@cast dbmanager DBManager
 local db = dbmanager.init_ipdb(sqlite)
 local no_newentries
 local log_merges
 local LOG_PRUNING_INTERVAL = algorithms.parse_time("3h")
 local LOG_RETENTION_TIME = algorithms.parse_time("15D")
 local mergers = {}
+local entryid_mergers = {}
 if not db then
 	core.log("error", "[ipdb]: Database initialization failed, mod cannot function")
 	register_dummmies()
@@ -82,7 +91,6 @@ local function start_mergelog_cleanup()
 end
 start_mergelog_cleanup()
 
-local get_current_modname = core.get_current_modname
 ---@param version integer
 ---@param resource string
 ipdb.get_internal = function(version, resource)
@@ -107,12 +115,17 @@ end
 
 local function merge_modstorage(entrysrcid, entrydestid)
 	for modname, merger in pairs(mergers) do
+		if entryid_mergers[modname] then
+			-- The merger will take userentry IDs and do whatever it wants on its own
+			merger(entrysrcid, entrydestid)
+			goto continue
+		end
 		local srctable = dbmanager.get_all_modstorage(entrysrcid, modname)
 		local desttable = dbmanager.get_all_modstorage(entrydestid, modname)
 		if next(srctable) == nil then goto continue end -- Destination is already the exact thing we preserve
 		if next(desttable) == nil then
 			-- We need to reassociate srctable to destid userentry
-			dbmanager.update_modstorage(modname, entrysrcid, entrydestid)
+			dbmanager.reassociate_modstorage(modname, entrysrcid, entrydestid)
 			goto continue
 		end
 		-- We passed the simple situations, now we need to actually call the custom merger to decide what to do
@@ -389,14 +402,14 @@ core.register_chatcommand("ipdb", {
 				if subtype == "name" then
 					local user = dbmanager.user_exists(identifier)
 					if user then
-						dbmanager.reassociate(entryid, user.id)
+						dbmanager.reassociate_ids(entryid, user.id)
 					else
 						dbmanager.add_name(entryid, identifier)
 					end
 				else
 					local ipent = dbmanager.ip_exists(identifier)
 					if ipent then
-						dbmanager.reassociate(entryid, nil, ipent.id)
+						dbmanager.reassociate_ids(entryid, nil, ipent.id)
 					else
 						dbmanager.add_ip(entryid, identifier)
 					end
@@ -424,7 +437,7 @@ ipdb.register_merger = function(func)
 	if type(func) ~= "function" then
 		return "Argument must be a function(entry1, entry2)"
 	end
-	local modname = core.get_current_modname()
+	local modname = get_current_modname()
 	if not modname then
 		return "ipdb.register_merger can only be called at load time"
 	end
@@ -432,9 +445,30 @@ ipdb.register_merger = function(func)
 	return nil
 end
 
-local is_in_transaction = false
+---@param func fun(entry1: integer, entry2: integer)
+ipdb.register_entryid_merger = function(func)
+	if type(func) ~= "function" then
+		return "Argument must be a function(entrysrcid, entrydestid)"
+	end
+	local modname = get_current_modname()
+	if not modname then
+		return "ipdb.register_entryid_merger can only be called at load time"
+	end
+	mergers[modname] = func
+	entryid_mergers[modname] = true
+	return nil
+end
 
-local function modstorage_set_string(self, key, value, aux)
+local is_in_transaction = false
+---@class IPDBContext
+---@field _modname string
+---@field _userentry_id integer
+local DBContext = {}
+
+---@param key string
+---@param value string?
+---@param aux string?
+function DBContext:set_string(key, value, aux)
 	if type(self) ~= "table" or type(key) ~= "string" or (type(value) ~= "string" and type(value) ~= "nil") or
 	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
 	   self._userentry_id ~= math.floor(self._userentry_id) or not is_in_transaction or
@@ -443,7 +477,14 @@ local function modstorage_set_string(self, key, value, aux)
 	end
 	local ok, ret
 	if value then
-		ok, ret = pcall(dbmanager.insert_into_modstorage, self._userentry_id, self._modname, key, value, aux)
+		ok, ret = pcall(function()
+			local existing_val = dbmanager.get_from_modstorage(self._userentry_id, self._modname, key, 1)
+			if next(existing_val) == nil then
+				dbmanager.insert_into_modstorage(self._userentry_id, self._modname, key, value, aux)
+			else
+				dbmanager.update_modstorage2(self._userentry_id, self._modname, key, value, aux)
+			end
+		end)
 	else
 		ok, ret = pcall(dbmanager.delete_modstorage, self._userentry_id, self._modname, key)
 	end
@@ -453,31 +494,75 @@ local function modstorage_set_string(self, key, value, aux)
 		is_in_transaction = false
 		return "Internal error"
 	end
+	return nil
 end
 
-local function modstorage_get_string(self, key)
-	if type(self) ~= "table" or type(key) ~= "string" or
-	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
-	   self._userentry_id ~= math.floor(self._userentry_id) or not is_in_transaction then
-		return nil, "Invalid argument"
-	end
-	local ok, ret = pcall(dbmanager.get_from_modstorage, self._userentry_id, self._modname, key)
-	if not ok then
-		log(ret)
-		db:exec("ROLLBACK")
-		is_in_transaction = false
-		return "Internal error"
-	end
-	return ret
-end
-
-local function modstorage_finalize()
+function DBContext.finalize()
 	if not is_in_transaction then return end
 	local err = db:exec("COMMIT")
 	if err ~= sqlite.OK then log(err); db:exec("ROLLBACK"); return "Internal error" end
 	is_in_transaction = false
 end
 
+---@param key string
+---@param value string
+---@param aux string?
+function DBContext:add_string(key, value, aux)
+	if type(self) ~= "table" or type(key) ~= "string" or type(value) ~= "string" or
+	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
+	   self._userentry_id ~= math.floor(self._userentry_id) or not is_in_transaction or
+	   (aux ~= nil and (type(aux) ~= "number" or math.floor(aux) ~= aux)) then
+		return "Invalid argument"
+	end
+	local ok, ret = pcall(dbmanager.insert_into_modstorage, self._userentry_id, self._modname, key, value, aux)
+	if not ok then
+		log(ret)
+		db:exec("ROLLBACK")
+		is_in_transaction = false
+		return "Internal error"
+	end
+	return nil
+end
+
+---@param key string
+---@param limit integer?
+---@return table<integer, string>
+---@overload fun(self, key: string, limit?: integer): nil, string
+function DBContext:get_strings(key, limit)
+	if type(self) ~= "table" or type(key) ~= "string" or
+	   (limit and (type(limit) ~= "number" or limit ~= math.floor(limit))) or
+	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
+	   self._userentry_id ~= math.floor(self._userentry_id) or not is_in_transaction then
+		return nil, "Invalid argument"
+	end
+	local ok, ret = pcall(dbmanager.get_from_modstorage, self._userentry_id, self._modname, key, limit)
+	if not ok then
+		log(ret)
+		db:exec("ROLLBACK")
+		is_in_transaction = false
+		return nil, "Internal error"
+	end
+	return ret
+end
+
+---@param key string
+---@return string|nil
+---@overload fun(self, key: string): nil, string
+function DBContext:get_string(key)
+	local ret, err = self:get_strings(key, 1)
+	if err then return nil, err end
+	---@cast ret -nil
+	local _, v = next(ret)
+	return v
+end
+
+do
+	local meta = { __gc = DBContext.finalize }
+	setmetatable(DBContext, meta)
+end
+
+---@return IPDBContext
+---@overload fun(modname, id, getter): nil, string
 local function modstorage_getcontext(modname, id, getter)
 	if is_in_transaction then
 		return nil, "Database locked by another context"
@@ -493,18 +578,12 @@ local function modstorage_getcontext(modname, id, getter)
 		return nil, "Internal error"
 	end
 	if not ident then
-		modstorage_finalize()
+		DBContext.finalize()
 		return nil, "This id is unknown to ipdb"
 	end
-	local context = {
-		_modname = modname,
-		_userentry_id = ident.userentry_id,
-		set_string = modstorage_set_string,
-		get_string = modstorage_get_string,
-		finalize = modstorage_finalize
-	}
-	local meta = { __gc = modstorage_finalize }
-	setmetatable(context, meta)
+	local context = table.copy_with_metatables(DBContext)
+	context._modname = modname
+	context._userentry_id = ident.userentry_id
 	return context
 end
 
@@ -515,7 +594,7 @@ ipdb.get_mod_storage = function(func)
 	if func and type(func) ~= "function" then
 		return nil, "If supplied, the argument must be a function(entry1, entry2)"
 	end
-	local modname = core.get_current_modname()
+	local modname = get_current_modname()
 	if not modname then
 		return nil, "ipdb.get_mod_storage can only be called at load time"
 	end

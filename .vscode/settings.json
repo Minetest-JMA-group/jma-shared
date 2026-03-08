@@ -1,5 +1,8 @@
 {
 	"Lua.runtime.version": "LuaJIT",
+	"Lua.workspace.library": [
+		"${workspace}/.vscode/lua_definitions/"
+	],
 	"Lua.diagnostics.globals": [
 		"core",
 		"cloudai",

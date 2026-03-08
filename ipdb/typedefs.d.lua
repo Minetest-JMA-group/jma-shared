@@ -1,16 +1,5 @@
 ---@meta
 
----@class IPDBContext
----@field _userentry_id integer
----@field set_string fun(self: IPDBContext, key: string, value: string?, aux: integer?): nil|string
----@field get_string fun(self: IPDBContext, key: string): string?
----@field finalize fun(self: IPDBContext): nil|string
-local IPDBContext = {}
-
--- The second argument is a string only on error
----@overload fun(self: IPDBContext): nil, string
-IPDBContext.get_string = function(self) return nil, "" end
-
 ---@class IPDBStorage
 ---@field get_context_by_name fun(self: IPDBStorage, name: string): IPDBContext
 ---@field get_context_by_ip fun(self: IPDBStorage, ip: string): IPDBContext
@@ -21,3 +10,17 @@ IPDBStorage.get_context_by_name = function(self, name) return nil, "" end
 
 ---@overload fun(self: IPDBStorage, ip: string): nil, string
 IPDBStorage.get_context_by_ip = function(self, ip) return nil, "" end
+
+---@class UsernameEntity
+---@field id integer
+---@field userentry_id integer
+---@field name string
+---@field created_at string
+---@field last_seen string
+
+---@class IPEntity
+---@field id integer
+---@field userentry_id integer
+---@field ip string
+---@field created_at string
+---@field last_seen string

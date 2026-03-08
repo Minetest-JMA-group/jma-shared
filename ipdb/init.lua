@@ -201,11 +201,10 @@ local function register_new_ids(name, ip)
 		log(err_or_ret)
 		db:exec("ROLLBACK")
 		return "The server has experienced an internal database error, please try again..."
-	else
-		err = db:exec("COMMIT")
-		if err ~= sqlite.OK then log(err); db:exec("ROLLBACK") end
-		if err_or_ret then return err_or_ret end
 	end
+	err = db:exec("COMMIT")
+	if err ~= sqlite.OK then log(err); db:exec("ROLLBACK") end
+	if err_or_ret then return err_or_ret end
 end
 
 local registered_callbacks = {}
@@ -245,6 +244,7 @@ local function is_ipv4(str)
 	return str:match(pattern) ~= nil
 end
 
+local is_in_transaction = false
 local help_string = [[
   • ipdb console:
 help: Print this text
@@ -254,11 +254,15 @@ rm_name <username>: Remove the given username from the database
 rm_ip <IP Address>: Remove the given IP address from the database
 isolate name|ip <identifier>: Create an isolated entry (no_merging flag set) and move or add the specified name/IP to it
 newentries [yes|no]: If the argument is given, change whether new user entries are allowed or not. Otherwise print current value.
+list <IP|username>: List all IPs and usernames linked with the given one
+log_merges [yes|no]: If the argument is given, change whether entry merge events are logged. Otherwise print the current value.
 ]]
 core.register_chatcommand("ipdb", {
 	description = "Interface to the IP-based player entry database",
 	params = "<subcommand> args",
 	privs = { ban = true },
+	---@param name string
+	---@param params string
 	func = function(name, params)
 		local iter = params:gmatch("%S+")
 		local cmd = iter()
@@ -329,6 +333,50 @@ core.register_chatcommand("ipdb", {
 				local state = log_merges and "not logged" or "logged"
 				return true, "Entry merges are currently " .. state .. "."
 			end
+		end
+
+		if cmd == "list" then
+			local arg = iter()
+			if not arg then
+				return false, "Usage: /ipdb list <name|IP>"
+			end
+			if is_in_transaction then
+				return true, "Some mod is holding the context open. Cannot lock the database."
+			end
+			local err = db:exec("BEGIN")
+			if err ~= sqlite.OK then
+				log(err)
+				return true, "Internal error"
+			end
+			local ok, ret = pcall(function()
+				local ident
+				local idtype
+				if is_ipv4(arg) then
+					ident = dbmanager.ip_exists(arg)
+					idtype = "IP"
+				else
+					ident = dbmanager.user_exists(arg)
+					idtype = "username"
+				end
+				if not ident then
+					return "The given "..idtype.." is not known to ipdb."
+				end
+				local allids = dbmanager.get_all_identifiers(ident.userentry_id)
+				return allids
+			end)
+			if not ok then
+				log(ret)
+				db:exec("ROLLBACK")
+				return "Internal error"
+			end
+			err = db:exec("COMMIT")
+			if err ~= sqlite.OK then log(err); db:exec("ROLLBACK") end
+
+			if type(ret) == "string" then
+				return true, ret
+			end
+			core.chat_send_player(name, dump(ret))
+			return true
 		end
 
 		if cmd == "rm_name" then
@@ -459,7 +507,6 @@ ipdb.register_entryid_merger = function(func)
 	return nil
 end
 
-local is_in_transaction = false
 ---@class IPDBContext
 ---@field _modname string
 ---@field _userentry_id integer

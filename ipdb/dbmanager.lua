@@ -91,9 +91,17 @@ dbmanager.init_ipdb = function(sqlite_param)
 		version = val
 	end
 	if version >= 4 then
-		local try_meta = dbmanager.get_meta("db_version")
-		if try_meta then
-			version = tonumber(try_meta)
+		ipdb = db
+		local ok, err_or_try_meta = pcall(dbmanager.get_meta, "db_version")
+		ipdb = nil
+		if not ok then
+			core.log("error", "[ipdb]: Database operation failed with code: "..tostring(err_or_try_meta))
+			db:exec("ROLLBACK")
+			db:close()
+			return nil
+		end
+		if err_or_try_meta then
+			version = tonumber(err_or_try_meta)
 		end
 	end
 	if not run_migration(db, version) then

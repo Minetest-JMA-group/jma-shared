@@ -19,7 +19,7 @@ CREATE TABLE Modstorage_log (
 	userentry_id INTEGER,
 	key TEXT NOT NULL,
 	data ANY NOT NULL,
-	auxiliary INTEGER,
+	ancillary INTEGER,
 	merge_id INTEGER NOT NULL REFERENCES MergeEvent(id) ON DELETE CASCADE
 ) STRICT;
 
@@ -28,7 +28,7 @@ INSERT INTO MergeEvent (id, entry_src, entry_dst, name, ip, timestamp)
 SELECT id, entry_src, entry_dst, name, ip, timestamp
 FROM MergeEvent_old;
 
-INSERT INTO Modstorage_log (id, modname, userentry_id, key, data, auxiliary, merge_id)
+INSERT INTO Modstorage_log (id, modname, userentry_id, key, data, ancillary, merge_id)
 SELECT id, modname, userentry_id, key, data, auxiliary, merge_id
 FROM Modstorage_log_old;
 
@@ -59,6 +59,8 @@ CREATE TABLE IPs_log (
 	merge_id INTEGER NOT NULL REFERENCES MergeEvent(id) ON DELETE CASCADE
 ) STRICT;
 CREATE INDEX idx_ips_log_mergeid ON IPs_log(merge_id);
+
+ALTER TABLE Modstorage RENAME COLUMN auxiliary TO ancillary;
 
 INSERT INTO Metadata (key, value) VALUES ('db_migrated_v4', CURRENT_TIMESTAMP);
 INSERT INTO Metadata (key, value) VALUES ('db_version', '4');

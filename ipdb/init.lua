@@ -517,12 +517,12 @@ local DBContext = {}
 
 ---@param key string
 ---@param value string?
----@param aux integer?
-function DBContext:set_string(key, value, aux)
+---@param ancillary integer?
+function DBContext:set_string(key, value, ancillary)
 	if type(self) ~= "table" or type(key) ~= "string" or (type(value) ~= "string" and type(value) ~= "nil") or
 	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
 	   self._userentry_id ~= math.floor(self._userentry_id) or not is_in_transaction or
-	   (aux ~= nil and (type(aux) ~= "number" or math.floor(aux) ~= aux)) then
+	   (ancillary ~= nil and (type(ancillary) ~= "number" or math.floor(ancillary) ~= ancillary)) then
 		return "Invalid argument"
 	end
 	local ok, ret
@@ -530,9 +530,9 @@ function DBContext:set_string(key, value, aux)
 		ok, ret = pcall(function()
 			local existing_val = dbmanager.get_from_modstorage(self._userentry_id, self._modname, key, 1)
 			if next(existing_val) == nil then
-				dbmanager.insert_into_modstorage(self._userentry_id, self._modname, key, value, aux)
+				dbmanager.insert_into_modstorage(self._userentry_id, self._modname, key, value, ancillary)
 			else
-				dbmanager.update_modstorage2(self._userentry_id, self._modname, key, value, aux)
+				dbmanager.update_modstorage2(self._userentry_id, self._modname, key, value, ancillary)
 			end
 		end)
 	else
@@ -556,15 +556,15 @@ end
 
 ---@param key string
 ---@param value string
----@param aux integer?
-function DBContext:add_string(key, value, aux)
+---@param ancillary integer?
+function DBContext:add_string(key, value, ancillary)
 	if type(self) ~= "table" or type(key) ~= "string" or type(value) ~= "string" or
 	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
 	   self._userentry_id ~= math.floor(self._userentry_id) or not is_in_transaction or
-	   (aux ~= nil and (type(aux) ~= "number" or math.floor(aux) ~= aux)) then
+	   (ancillary ~= nil and (type(ancillary) ~= "number" or math.floor(ancillary) ~= ancillary)) then
 		return "Invalid argument"
 	end
-	local ok, ret = pcall(dbmanager.insert_into_modstorage, self._userentry_id, self._modname, key, value, aux)
+	local ok, ret = pcall(dbmanager.insert_into_modstorage, self._userentry_id, self._modname, key, value, ancillary)
 	if not ok then
 		log(ret)
 		db:exec("ROLLBACK")

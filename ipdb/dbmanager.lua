@@ -449,15 +449,15 @@ local modstorage_insert
 ---@param modname string
 ---@param key string
 ---@param value string?
----@param aux integer?
-dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value, aux)
+---@param ancillary integer?
+dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value, ancillary)
 	if not modstorage_insert then
-		modstorage_insert = ipdb:prepare("INSERT INTO Modstorage (userentry_id, modname, key, data, auxiliary) "..
+		modstorage_insert = ipdb:prepare("INSERT INTO Modstorage (userentry_id, modname, key, data, ancillary) "..
 	                                     "VALUES (?, ?, ?, ?, ?)")
 	else
 		modstorage_insert:reset()
 	end
-	local ret = modstorage_insert:bind_values(userentry_id, modname, key, value, aux)
+	local ret = modstorage_insert:bind_values(userentry_id, modname, key, value, ancillary)
 	if ret ~= sqlite.OK then error(ret) end
 	ret = modstorage_insert:step()
 	if ret ~= sqlite.DONE then error(ret) end
@@ -511,14 +511,14 @@ local update_modstorage1
 -- Update a value identified by modstorage_id
 ---@param modstorage_id integer
 ---@param value string
----@param aux integer?
-dbmanager.update_modstorage1 = function(modstorage_id, value, aux)
+---@param ancillary integer?
+dbmanager.update_modstorage1 = function(modstorage_id, value, ancillary)
 	if not update_modstorage1 then
-		update_modstorage1 = ipdb:prepare("UPDATE Modstorage SET data = ?, auxiliary = ? WHERE id = ?")
+		update_modstorage1 = ipdb:prepare("UPDATE Modstorage SET data = ?, ancillary = ? WHERE id = ?")
 	else
 		update_modstorage1:reset()
 	end
-	local ret = update_modstorage1:bind_values(value, aux, modstorage_id)
+	local ret = update_modstorage1:bind_values(value, ancillary, modstorage_id)
 	if ret ~= sqlite.OK then error(ret) end
 	ret = update_modstorage1:step()
 	if ret ~= sqlite.DONE then error(ret) end
@@ -530,15 +530,15 @@ local update_modstorage2
 ---@param modname string
 ---@param key string
 ---@param value string
----@param aux integer?
-dbmanager.update_modstorage2 = function(userentry_id, modname, key, value, aux)
+---@param ancillary integer?
+dbmanager.update_modstorage2 = function(userentry_id, modname, key, value, ancillary)
 	if not update_modstorage2 then
-		update_modstorage2 = ipdb:prepare("UPDATE Modstorage SET data = ?, auxiliary = ? WHERE userentry_id = ? "..
+		update_modstorage2 = ipdb:prepare("UPDATE Modstorage SET data = ?, ancillary = ? WHERE userentry_id = ? "..
 		                                  "AND modname = ? AND KEY = ?")
 	else
 		update_modstorage2:reset()
 	end
-	local ret = update_modstorage2:bind_values(value, aux, userentry_id, modname, key)
+	local ret = update_modstorage2:bind_values(value, ancillary, userentry_id, modname, key)
 	if ret ~= sqlite.OK then error(ret) end
 	ret = update_modstorage2:step()
 	if ret ~= sqlite.DONE then error(ret) end
@@ -658,8 +658,8 @@ end
 
 local new_merge
 local log_modstorage
-local log_modstorage_stmt = [[INSERT INTO Modstorage_log (modname, userentry_id, key, data, auxiliary, merge_id)
-SELECT modname, userentry_id, key, data, auxiliary, ?
+local log_modstorage_stmt = [[INSERT INTO Modstorage_log (modname, userentry_id, key, data, ancillary, merge_id)
+SELECT modname, userentry_id, key, data, ancillary, ?
 FROM Modstorage
 WHERE userentry_id IN (?, ?)]]
 local log_usernames

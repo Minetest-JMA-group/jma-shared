@@ -75,10 +75,10 @@ Returns a table with methods:
 - `:get_context_by_ip(ip)` – obtain a context for the user entry associated with that IP.
 
 The context object provides:
-- `:set_string(key, value, aux)` – store a string (or `nil` to delete) with an optional auxiliary integer.
+- `:set_string(key, value, ancillary)` – store a string (or `nil` to delete) with an optional ancillary integer.
 - `:get_string(key)` – retrieve a string.
 - `:get_strings(key, limit)` - (multimap) retrieve strings under the given key in the form of a table<modstorage_id, string>
-- `:add_string(key, value, aux)` - (multimap) Same as set_string, except that it doesn't overwrite existing values 
+- `:add_string(key, value, ancillary)` - (multimap) Same as set_string, except that it doesn't overwrite existing values
 - `:finalize()` – commit the transaction (automatically called when context is garbage‑collected).
 
 **Note:** A transaction is started when you obtain a context; always call `:finalize()` or let the context go out of scope.

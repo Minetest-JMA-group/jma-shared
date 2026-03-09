@@ -1,26 +1,6 @@
 BEGIN TRANSACTION;
 PRAGMA user_version = 4;
 
-CREATE TABLE Usernames_log (
-	id INTEGER PRIMARY KEY,
-	userentry_id INTEGER NOT NULL,
-	name TEXT NOT NULL,
-	created_at TEXT NOT NULL,
-	last_seen TEXT NOT NULL,
-	merge_id INTEGER NOT NULL REFERENCES MergeEvent(id) ON DELETE CASCADE
-) STRICT;
-CREATE INDEX idx_usernames_log_mergeid ON Usernames_log(merge_id);
-
-CREATE TABLE IPs_log (
-	id INTEGER PRIMARY KEY,
-	userentry_id INTEGER NOT NULL,
-	ip TEXT NOT NULL,
-	created_at TEXT NOT NULL,
-	last_seen TEXT NOT NULL,
-	merge_id INTEGER NOT NULL REFERENCES MergeEvent(id) ON DELETE CASCADE
-) STRICT;
-CREATE INDEX idx_ips_log_mergeid ON IPs_log(merge_id);
-
 -- Forgot to make tables STRICT in previous script, so recreate them now
 ALTER TABLE MergeEvent RENAME TO MergeEvent_old;
 ALTER TABLE Modstorage_log RENAME TO Modstorage_log_old;
@@ -59,5 +39,26 @@ DROP TABLE Modstorage_log_old;
 -- Recreate indexes
 CREATE INDEX idx_mergeevent_timestamp ON MergeEvent(timestamp);
 CREATE INDEX idx_modstorage_log_mergeid ON Modstorage_log(merge_id);
+
+-- And now add new tables
+CREATE TABLE Usernames_log (
+	id INTEGER PRIMARY KEY,
+	userentry_id INTEGER NOT NULL,
+	name TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	last_seen TEXT NOT NULL,
+	merge_id INTEGER NOT NULL REFERENCES MergeEvent(id) ON DELETE CASCADE
+) STRICT;
+CREATE INDEX idx_usernames_log_mergeid ON Usernames_log(merge_id);
+
+CREATE TABLE IPs_log (
+	id INTEGER PRIMARY KEY,
+	userentry_id INTEGER NOT NULL,
+	ip TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	last_seen TEXT NOT NULL,
+	merge_id INTEGER NOT NULL REFERENCES MergeEvent(id) ON DELETE CASCADE
+) STRICT;
+CREATE INDEX idx_ips_log_mergeid ON IPs_log(merge_id);
 
 COMMIT;

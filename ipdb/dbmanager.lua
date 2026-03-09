@@ -109,6 +109,13 @@ dbmanager.init_ipdb = function(sqlite_param)
 		db:close()
 		return nil
 	end
+	ret = db:exec("COMMIT")
+	if ret ~= sqlite.OK then
+		core.log("error", "[ipdb]: Failed to commit initial transaction. Error: "..tostring(ret))
+		db:exec("ROLLBACK")
+		db:close()
+		return nil
+	end
 
 	ipdb = db
 	return db

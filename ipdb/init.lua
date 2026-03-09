@@ -514,7 +514,7 @@ local DBContext = {}
 
 ---@param key string
 ---@param value string?
----@param aux string?
+---@param aux integer?
 function DBContext:set_string(key, value, aux)
 	if type(self) ~= "table" or type(key) ~= "string" or (type(value) ~= "string" and type(value) ~= "nil") or
 	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or
@@ -553,7 +553,7 @@ end
 
 ---@param key string
 ---@param value string
----@param aux string?
+---@param aux integer?
 function DBContext:add_string(key, value, aux)
 	if type(self) ~= "table" or type(key) ~= "string" or type(value) ~= "string" or
 	   type(self._userentry_id) ~= "number" or type(self._modname) ~= "string" or

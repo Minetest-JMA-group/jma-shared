@@ -448,7 +448,7 @@ local modstorage_insert
 ---@param modname string
 ---@param key string
 ---@param value string?
----@param aux string?
+---@param aux integer?
 dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value, aux)
 	if not modstorage_insert then
 		modstorage_insert = ipdb:prepare("INSERT INTO Modstorage (userentry_id, modname, key, data, auxiliary) "..
@@ -512,7 +512,7 @@ local update_modstorage1
 -- Update a value identified by modstorage_id
 ---@param modstorage_id integer
 ---@param value string
----@param aux string?
+---@param aux integer?
 dbmanager.update_modstorage1 = function(modstorage_id, value, aux)
 	if not update_modstorage1 then
 		update_modstorage1 = ipdb:prepare("UPDATE Modstorage SET data = ?, auxiliary = ? WHERE id = ?")
@@ -531,7 +531,7 @@ local update_modstorage2
 ---@param modname string
 ---@param key string
 ---@param value string
----@param aux string?
+---@param aux integer?
 dbmanager.update_modstorage2 = function(userentry_id, modname, key, value, aux)
 	if not update_modstorage2 then
 		update_modstorage2 = ipdb:prepare("UPDATE Modstorage SET data = ?, auxiliary = ? WHERE userentry_id = ? "..

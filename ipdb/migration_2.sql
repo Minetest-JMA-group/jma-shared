@@ -4,12 +4,12 @@ PRAGMA user_version = 3;
 -- Migration to multimap
 -- Recreate table without the UNIQUE constraint
 CREATE TABLE Modstorage_new (
-    id INTEGER PRIMARY KEY,
-    modname TEXT NOT NULL,
-    userentry_id INTEGER NOT NULL REFERENCES UserEntry(id) ON DELETE CASCADE,
-    key TEXT NOT NULL,
-    data ANY NOT NULL,
-    auxiliary INTEGER
+	id INTEGER PRIMARY KEY,
+	modname TEXT NOT NULL,
+	userentry_id INTEGER NOT NULL REFERENCES UserEntry(id) ON DELETE CASCADE,
+	key TEXT NOT NULL,
+	data ANY NOT NULL,
+	auxiliary INTEGER
 ) STRICT;
 INSERT INTO Modstorage_new SELECT * FROM Modstorage;
 DROP TABLE Modstorage;

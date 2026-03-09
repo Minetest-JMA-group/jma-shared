@@ -26,22 +26,22 @@ ALTER TABLE MergeEvent RENAME TO MergeEvent_old;
 ALTER TABLE Modstorage_log RENAME TO Modstorage_log_old;
 
 CREATE TABLE MergeEvent (
-    id INTEGER PRIMARY KEY,
-    entry_src INTEGER,
-    entry_dst INTEGER,
-    name TEXT NOT NULL,
-    ip TEXT NOT NULL,
-    timestamp INTEGER NOT NULL DEFAULT (unixepoch('now'))
+	id INTEGER PRIMARY KEY,
+	entry_src INTEGER,
+	entry_dst INTEGER,
+	name TEXT NOT NULL,
+	ip TEXT NOT NULL,
+	timestamp INTEGER NOT NULL DEFAULT (unixepoch('now'))
 ) STRICT;
 
 CREATE TABLE Modstorage_log (
-    id INTEGER PRIMARY KEY,
-    modname TEXT NOT NULL,
-    userentry_id INTEGER,
-    key TEXT NOT NULL,
-    data ANY NOT NULL,
-    auxiliary INTEGER,
-    merge_id INTEGER NOT NULL REFERENCES MergeEvent(id) ON DELETE CASCADE
+	id INTEGER PRIMARY KEY,
+	modname TEXT NOT NULL,
+	userentry_id INTEGER,
+	key TEXT NOT NULL,
+	data ANY NOT NULL,
+	auxiliary INTEGER,
+	merge_id INTEGER NOT NULL REFERENCES MergeEvent(id) ON DELETE CASCADE
 ) STRICT;
 
 -- Copy data from old tables to new STRICT tables

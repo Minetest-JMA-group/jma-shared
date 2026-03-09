@@ -49,40 +49,40 @@ CREATE INDEX idx_modstorage_user_mod_key ON Modstorage(userentry_id, modname, ke
 CREATE TRIGGER cleanup_userentry_after_username_delete
 AFTER DELETE ON Usernames
 BEGIN
-    DELETE FROM UserEntry
-    WHERE id = OLD.userentry_id
-    AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
-    AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
+	DELETE FROM UserEntry
+	WHERE id = OLD.userentry_id
+	AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
+	AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
 END;
 
 -- Trigger for when IPs are deleted
 CREATE TRIGGER cleanup_userentry_after_ip_delete
 AFTER DELETE ON IPs
 BEGIN
-    DELETE FROM UserEntry
-    WHERE id = OLD.userentry_id
-    AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
-    AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
+	DELETE FROM UserEntry
+	WHERE id = OLD.userentry_id
+	AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
+	AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
 END;
 
 -- Trigger for when Usernames are updated (if they change userentry_id)
 CREATE TRIGGER cleanup_userentry_after_username_update
 AFTER UPDATE OF userentry_id ON Usernames
 BEGIN
-    DELETE FROM UserEntry
-    WHERE id = OLD.userentry_id
-    AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
-    AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
+	DELETE FROM UserEntry
+	WHERE id = OLD.userentry_id
+	AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
+	AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
 END;
 
 -- Trigger for when IPs are updated (if they change userentry_id)
 CREATE TRIGGER cleanup_userentry_after_ip_update
 AFTER UPDATE OF userentry_id ON IPs
 BEGIN
-    DELETE FROM UserEntry
-    WHERE id = OLD.userentry_id
-    AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
-    AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
+	DELETE FROM UserEntry
+	WHERE id = OLD.userentry_id
+	AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
+	AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
 END;
 
 COMMIT;

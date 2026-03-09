@@ -643,6 +643,16 @@ local log_modstorage_stmt = [[INSERT INTO Modstorage_log (modname, userentry_id,
 SELECT modname, userentry_id, key, data, auxiliary, ?
 FROM Modstorage
 WHERE userentry_id IN (?, ?)]]
+local log_usernames
+local log_usernames_stmt = [[INSERT INTO Usernames_log (userentry_id, name, created_at, last_seen, merge_id)
+SELECT userentry_id, name, created_at, last_seen, ?
+FROM Usernames
+WHERE userentry_id = ?]]
+local log_ips
+local log_ips_stmt = [[INSERT INTO IPs_log (userentry_id, ip, created_at, last_seen, merge_id)
+SELECT userentry_id, ip, created_at, last_seen, ?
+FROM IPs
+WHERE userentry_id = ?]]
 ---@param entry_src integer
 ---@param entry_dst integer
 ---@param name string
@@ -658,6 +668,16 @@ dbmanager.new_merge_event = function(entry_src, entry_dst, name, ip)
 	else
 		log_modstorage:reset()
 	end
+	if not log_usernames then
+		log_usernames = ipdb:prepare(log_usernames_stmt)
+	else
+		log_usernames:reset()
+	end
+	if not log_ips then
+		log_ips = ipdb:prepare(log_ips_stmt)
+	else
+		log_ips:reset()
+	end
 
 	local ret = new_merge:bind_values(entry_src, entry_dst, name, ip)
 	if ret ~= sqlite.OK then error(ret) end
@@ -668,6 +688,16 @@ dbmanager.new_merge_event = function(entry_src, entry_dst, name, ip)
 	ret = log_modstorage:bind_values(merge_id, entry_src, entry_dst)
 	if ret ~= sqlite.OK then error(ret) end
 	ret = log_modstorage:step()
+	if ret ~= sqlite.DONE then error(ret) end
+
+	ret = log_usernames:bind_values(merge_id, entry_src)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = log_usernames:step()
+	if ret ~= sqlite.DONE then error(ret) end
+
+	ret = log_ips:bind_values(merge_id, entry_src)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = log_ips:step()
 	if ret ~= sqlite.DONE then error(ret) end
 end
 

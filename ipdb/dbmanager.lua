@@ -59,7 +59,7 @@ local function run_migration(db, current_version)
 	end
 	for _, v in ipairs(migrations) do
 		if v.num > current_version then
-			if not apply_schema(db, modpath..v.file) then return false end
+			if not apply_schema(db, modpath.."/"..v.file) then return false end
 		end
 	end
 	if current_version ~= max_version then

@@ -61,7 +61,7 @@ local function run_migration(db, current_version)
 	if current_version ~= max_version then
 		core.log("action", "[ipdb]: Schema applied successfully, version set to "..tostring(max_version))
 	end
-	return true
+	return true, max_version
 end
 dbmanager.init_ipdb = function(sqlite_param)
 	if sqlite then
@@ -104,7 +104,8 @@ dbmanager.init_ipdb = function(sqlite_param)
 			version = tonumber(err_or_try_meta)
 		end
 	end
-	if not run_migration(db, version) then
+	local ok, new_version = run_migration(db, version)
+	if not ok then
 		db:exec("ROLLBACK")
 		db:close()
 		return nil
@@ -118,7 +119,7 @@ dbmanager.init_ipdb = function(sqlite_param)
 	end
 
 	ipdb = db
-	return db
+	return { db = db, version = new_version }
 end
 
 local user_check

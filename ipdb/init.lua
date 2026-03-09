@@ -49,18 +49,21 @@ local get_current_modname = core.get_current_modname
 local modpath = core.get_modpath(get_current_modname())
 local dbmanager = dofile(modpath .. "/dbmanager.lua")
 ---@cast dbmanager DBManager
-local db = dbmanager.init_ipdb(sqlite)
+local dbconn = dbmanager.init_ipdb(sqlite)
 local no_newentries
 local log_merges
 local LOG_PRUNING_INTERVAL = algorithms.parse_time("3h")
 local LOG_RETENTION_TIME = algorithms.parse_time("15D")
 local mergers = {}
 local entryid_mergers = {}
-if not db then
+if not dbconn then
 	core.log("error", "[ipdb]: Database initialization failed, mod cannot function")
 	register_dummmies()
 	return
 end
+---@type integer
+local version = dbconn.version
+local db = dbconn.db
 
 local function log(err)
 	core.log("error", "[ipdb]: Database operation failed with code: "..tostring(err))
@@ -91,10 +94,10 @@ local function start_mergelog_cleanup()
 end
 start_mergelog_cleanup()
 
----@param version integer
+---@param requested_version integer
 ---@param resource string
-ipdb.get_internal = function(version, resource)
-	if version ~= 3 then
+ipdb.get_internal = function(requested_version, resource)
+	if requested_version ~= version then
 		return nil, "The requested version doesn't match the currently loaded software."
 	end
 	local modname = get_current_modname()

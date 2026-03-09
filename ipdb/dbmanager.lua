@@ -457,9 +457,7 @@ dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value, a
 	else
 		modstorage_insert:reset()
 	end
-	local ret = modstorage_insert:bind_values(userentry_id, modname, key, value)
-	if ret ~= sqlite.OK then error(ret) end
-	ret = modstorage_insert:bind(5, aux)
+	local ret = modstorage_insert:bind_values(userentry_id, modname, key, value, aux)
 	if ret ~= sqlite.OK then error(ret) end
 	ret = modstorage_insert:step()
 	if ret ~= sqlite.DONE then error(ret) end

@@ -2,9 +2,6 @@
 -- Copyright (c) 2026 Marko Petrović
 local modpath = core.get_modpath(core.get_current_modname())
 local dbpath = core.get_worldpath() .. "/ipdb.sqlite"
-local schema1_path = modpath .. "/schema.sql"
-local schema2_path = modpath .. "/migration_1.sql"
-local schema3_path = modpath .. "/migration_2.sql"
 ---@class DBManager
 local dbmanager = {}
 local ipdb
@@ -43,6 +40,33 @@ local function open_database()
 	end
 	return db
 end
+local function run_migration(db, current_version)
+	local file_list = core.get_dir_list(modpath, false)
+	local migrations = { [0] = {num = 1, file = modpath.."/schema.sqlite"} }
+	for _, filename in ipairs(file_list) do
+		local num = filename:match("^migration_(%d+)%.sql$")
+		if num then
+			-- Version is one larger because version 1 is schema.sql
+			table.insert(migrations, {num = num+1, file = filename})
+		end
+	end
+	table.sort(migrations, function(a, b) return a.num < b.num end)
+	local max_version = migrations[#migrations].num
+	if current_version > max_version then
+		core.log("error", "[ipdb]: Unknown database version")
+		db:close()
+		return false
+	end
+	for _, v in ipairs(migrations) do
+		if v.num > current_version then
+			if not apply_schema(db, modpath..v.file) then return false end
+		end
+	end
+	if current_version ~= max_version then
+		core.log("action", "[ipdb]: Schema applied successfully, version set to "..tostring(max_version))
+	end
+	return true
+end
 dbmanager.init_ipdb = function(sqlite_param)
 	if sqlite then
 		core.log("error", "[ipdb]: dbmanager.init_ipdb called more than once")
@@ -71,23 +95,10 @@ dbmanager.init_ipdb = function(sqlite_param)
 		return nil
 	end
 	db = open_database()
-	if not db then return nil end
-	if version == 0 then
-		if not apply_schema(db, schema1_path) then return nil end
-		version = 1
+	if not db then
+		return nil
 	end
-	if version == 1 then
-		if not apply_schema(db, schema2_path) then return nil end
-		version = 2
-	end
-	if version == 2 then
-		if not apply_schema(db, schema3_path) then return nil end
-		version = 3
-		core.log("action", "[ipdb]: Schema applied successfully, version set to 3")
-	end
-	if version ~= 3 then
-		core.log("error", "[ipdb]: Unknown database version")
-		db:close()
+	if not run_migration(db, version) then
 		return nil
 	end
 

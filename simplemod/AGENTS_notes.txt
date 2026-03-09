@@ -1,0 +1,178 @@
+IP Workflow Notes (simplemod + ipdb)
+Date: 2026-03-07
+
+Scope
+- These notes capture agreed direction for IP-based moderation behavior and performance.
+
+Key Environment/API Facts
+- ipdb exposes trusted internal access:
+  - ipdb.get_internal(version, resource)
+  - version must match exactly (currently expected: 2)
+  - resource can be "dbmanager" or "database"
+  - access is restricted to trusted mods and load-time calls.
+- ipdb.dbmanager global path used previously is no longer valid; callers should use ipdb.get_internal(...).
+- Context API supports auxiliary value writes:
+  - ctx:set_string(key, value, aux)
+  - omitted/nil aux => SQL NULL.
+
+Modstorage Schema Context (relevant fields)
+- Modstorage rows are uniquely identified by:
+  - (userentry_id, modname, key)
+- Auxiliary field exists for indexed/filtered expiration use:
+  - auxiliary INTEGER (or equivalent aux column in implementation)
+- Existing index plan discussed and assumed present:
+  - (userentry_id, modname, aux)
+
+Design Decisions / Preferences
+- No fallback compatibility path is needed when ipdb.get_internal fails.
+  - Treat as misconfiguration.
+  - Degraded mode: simplemod continues with name-based moderation only.
+  - IP-based moderation/log lookups should be unavailable and return explicit errors.
+- For reading expired IP entries in bulk, use SQL set queries (not one-key loops).
+- For setting aux, prefer ctx:set_string(..., aux) rather than manual SQL UPDATE.
+- Raw DB exposure is allowed in trusted path; use carefully.
+
+Performance Goals Discussed
+- Remove expensive per-message mute checks that scan full tables.
+- Prefer indexed SQL pruning for IP expirations over Lua iteration of large lists.
+- Keep code understandable; avoid unnecessary complexity and unnecessary fallback branches.
+
+SQL Query Shape Discussion
+- Query with exact key is not useful for bulk prune because unique tuple returns at most one row.
+- Bulk expired fetch/prune shape should be set-based, e.g.:
+  - SELECT key, data FROM Modstorage
+    WHERE userentry_id = ? AND modname = 'simplemod' AND aux IS NOT NULL AND aux < ?
+  - DELETE FROM Modstorage
+    WHERE userentry_id = ? AND modname = 'simplemod' AND aux IS NOT NULL AND aux < ?
+- Optional key-prefix narrowing is only needed if aux gets reused for non-expiry semantics.
+
+Aux Type Discussion
+- INTEGER aux is preferred for expiry comparisons and indexing.
+- SQLite INTEGER is 64-bit signed (no Y2038 problem).
+- TEXT timestamp ordering can work if canonical format is strict, but INTEGER remains preferable for speed/clarity.
+
+Open Direction
+- Continue optimizing name-based storage path after IP path modernization.
+- Consider stronger data layout for name logs/mutes to avoid full-blob deserialize/serialize hotspots.
+
+Additional Architecture Decisions (2026-03-08)
+- Preferred backend strategy for advanced simplemod data (especially log/pagination/expiry queries):
+  - Use a dedicated synthetic ipdb UserEntry created via dbmanager.new_entry().
+  - Do NOT use fake username trick (e.g., "simplemod.") unless absolutely needed.
+  - Do NOT repurpose Metadata table for bulk/simplemod data.
+  - Do NOT add a dedicated ipdb table at this stage.
+- Store/persist synthetic entry id in simplemod regular modstorage as a tiny pointer.
+- Use dbmanager.insert_into_modstorage(userentry_id, modname, key, value, aux) for writes.
+- Use dbmanager.delete_modstorage(...) for key deletion and optional full namespace clear when needed.
+- dbmanager does not manage transactions and can throw errors; wrap write sequences with:
+  - BEGIN / COMMIT / ROLLBACK
+  - pcall around dbmanager operations.
+
+Coupling Policy
+- Accept moderate coupling to ipdb internals via trusted + version-gated get_internal(2, ...).
+- Keep coupling isolated in adapter-style backend code so most of simplemod remains backend-agnostic.
+
+Name-based Path Notes
+- Name punishments currently stored as serialized blobs in regular modstorage.
+- Chat mute hot path currently suffers from expensive repeated full-table deserialize/scan.
+- In-memory name cache is intended as low-risk optimization for O(1)-ish checks per message.
+- For scalable logs, plain Minetest modstorage key scanning (to_table) is not acceptable for large datasets.
+- Long-term, log retrieval/pagination should use SQL-backed path (through ipdb internal DB access), not global modstorage scans.
+
+Immediate Practical Ordering
+1) Stabilize codebase (remove/finish partial interrupted edits first).
+2) Implement IP backend modernization (new get_internal usage, degrade mode, aux writes, SQL-assisted expiry handling).
+3) Then implement name-path performance improvements (cache + optional layout evolution).
+
+Final Implementation Plan (2026-03-08)
+1) Hard Dependency Init
+- At load, require ipdb.get_internal(2, "dbmanager") and ipdb.get_internal(2, "database").
+- If unavailable/version mismatch/not trusted: disable simplemod startup (no hooks/commands/forms).
+
+2) Synthetic Stores
+- Create/persist dedicated synthetic UserEntry IDs:
+  - entry_name_bans
+  - entry_name_mutes
+  - entry_logs
+- Persist IDs + backend schema version in simplemod metadata keys.
+
+3) Data Layout
+- Name bans:
+  - key: <playername>
+  - value: serialized punishment entry
+  - aux: expiry unix or NULL
+- Name mutes:
+  - same as bans
+- Logs:
+  - key: unique (<player>:<seq> or seq-based)
+  - value: serialized log entry
+  - aux: event unix timestamp
+
+4) Query Model
+- Expiry prune via SQL set queries using (userentry_id, modname, aux).
+- Active lists via SQL (aux IS NULL OR aux > now).
+- Logs via SQL ORDER BY aux DESC,key DESC LIMIT n (with player filter when needed).
+
+5) Write Model
+- Central with_txn() helper (BEGIN/COMMIT/ROLLBACK + pcall).
+- Use dbmanager.insert_into_modstorage(..., aux) and dbmanager.delete_modstorage(...).
+
+6) Compatibility
+- Keep existing simplemod public API and external behavior (CLI/GUI semantics).
+- Backend internals switch from regular blob modstorage to SQL-backed synthetic stores.
+
+7) Migration
+- One-time idempotent migration from old name blobs/logs.
+- Mark migration completion with backend schema flag.
+
+8) Performance Targets
+- Remove per-message O(M) name mute scan.
+- Remove large repeated blob serialize/deserialize for name punishments.
+- Let SQL handle ordering/paging for logs/lists where feasible.
+
+Refinements Agreed Later
+- Keep `modname` unchanged as actual mod name (`simplemod`) in Modstorage rows; do not shorten/hack per-row modname.
+- Prefer separate synthetic entries (bans/mutes/logs) over overloading one entry with key namespaces.
+- For name logs, keep direct SQL ordering (aux timestamp + key tie-break), avoiding Lua-side full-table sorting work.
+
+Final Unified Storage Plan (2026-03-09)
+- All moderation data uses ipdb-backed Modstorage; regular Minetest modstorage is used only for tiny metadata/pointers and migration marker.
+- Name bans:
+  - userentry_id = synthetic name-bans entry
+  - key = playername (map semantics)
+  - data = serialized punishment entry
+  - auxiliary = expiry unix or NULL
+- Name mutes:
+  - same model in synthetic name-mutes entry
+- Name logs:
+  - userentry_id = synthetic name-logs entry
+  - key = playername (multimap semantics)
+  - data = serialized log entry
+  - auxiliary = log unix timestamp
+- IP bans:
+  - userentry_id = real ipdb user entry
+  - key = "ban" (map semantics)
+  - data = serialized punishment entry
+  - auxiliary = expiry unix or NULL
+- IP mutes:
+  - same as IP bans with key = "mute"
+- IP logs:
+  - userentry_id = real ipdb user entry
+  - key = "log" (multimap semantics)
+  - data = serialized log entry
+  - auxiliary = log unix timestamp
+
+Migration Plan (single atomic ipdb transaction)
+1) Ensure synthetic entry IDs exist (name-bans, name-mutes, name-logs).
+2) Migrate legacy name bans/mutes blobs to synthetic rows.
+3) Migrate legacy name log blobs (log_name:<player>) to synthetic multimap rows.
+4) Migrate old IP log blob arrays into multimap "log" rows and remove blob row.
+5) Backfill missing auxiliary for existing IP ban/mute rows from serialized expiry.
+6) Perform all steps in one transaction: either fully migrated or not migrated.
+7) After successful commit, set migration marker in regular modstorage.
+8) Cleanup stale regular modstorage entries (legacy blobs/list caches) after marker set.
+
+Runtime Notes
+- Active lists should use SQL by auxiliary where possible (NULL or > now).
+- Log retrieval should use SQL ORDER BY auxiliary DESC, id DESC LIMIT ?.
+- Avoid get_string() on multimap keys ("log" and name-log keys); use explicit SQL queries.

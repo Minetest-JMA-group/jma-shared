@@ -4,9 +4,9 @@ simplemod provides name‑based and IP‑based bans and mutes for Minetest, leve
 
 ## Features
 
-- **Name‑based bans/mutes** – stored in core mod storage.
+- **Name‑based bans/mutes** – stored in dedicated synthetic `ipdb` modstorage entries.
 - **IP‑based bans/mutes** – stored in `ipdb` per‑entry storage, automatically merged when IP‑linked accounts are merged.
-- **Per‑player logs** – combined log of name and IP actions (ban/unban/mute/unmute), capped at the newest 100 entries.
+- **Per‑player logs** – combined log of name and IP actions (ban/unban/mute/unmute), capped at the newest 100 entries per scope.
 - **Active lists** – commands to list all currently banned or muted players (name + IP).
 - **Chat commands** – full set of commands usable from Discord/relays or in‑game.
 - **GUI** – four‑tab interface: Active Bans, Active Mutes, Player Log, and Actions (for applying new actions).
@@ -17,9 +17,9 @@ simplemod provides name‑based and IP‑based bans and mutes for Minetest, leve
 ## Dependencies
 
 - `algorithms` – for time parsing/formatting.
-- `ipdb` – for IP‑based storage and entry merging.
+- `ipdb` – required for both IP and name backends (trusted internal API + per-entry storage + merges).
 - `chat_lib` – for sending muted messages to privileged players.
-- `relays` (optional) – for external notifications.
+- `relays` – for external notifications.
 - `discordmt` (optional) – for forwarding muted chat to a Discord mute-log channel.
 
 All dependencies are part of the same modpack and must be enabled.
@@ -30,10 +30,10 @@ All commands require `ban` privilege (for bans) or `pmute` privilege (for mutes)
 
 | Command | Description |
 |--------|-------------|
-| `/sbban <player> <name\|ip> [time] <reason>` | Ban by name or IP |
-| `/sbunban <player> <name\|ip> [reason]` | Unban by name or IP |
-| `/sbmute <player> <name\|ip> [time] <reason>` | Mute by name or IP |
-| `/sbunmute <player> <name\|ip> [reason]` | Unmute by name or IP |
+| `/sbban <player_or_ip> <name\|ip> [--new] [time] <reason>` | Ban by name or IP |
+| `/sbunban <player_or_ip> <name\|ip> [reason]` | Unban by name or IP |
+| `/sbmute <player_or_ip> <name\|ip> [--new] [time] <reason>` | Mute by name or IP |
+| `/sbunmute <player_or_ip> <name\|ip> [reason]` | Unmute by name or IP |
 | `/sbbanlist` | List all active bans (name + IP) |
 | `/sbmutelist` | List all active mutes (name + IP) |
 | `/sblog <player>` | Show combined log for a player |
@@ -49,7 +49,8 @@ Opened with `/sb`. Four tabs:
 - **Active Bans** – lists all name and IP bans.
 - **Active Mutes** – lists all name and IP mutes.
 - **Player Log** – enter a name and click "View Log" to see that player's combined history.
-- **Actions** – perform bans/unbans/mutes/unmutes with reason templates (spam, grief, hack, language, custom). Fields can be prefilled by selecting an entry in the first two tabs and clicking "Open In Actions".
+- **Actions** – perform bans/unbans/mutes/unmutes with reason templates (spam, grief, hack, language, custom). Fields can be prefilled by selecting an entry in the first two tabs and clicking "Open In Actions".  
+  For IP scope, you can also enter raw IPv4 targets, and the `Ban/Mute unknown` checkbox will auto-register unknown targets in `ipdb` before ban/mute.
 
 ## API
 
@@ -85,11 +86,12 @@ simplemod.get_player_log(player) → { {type, scope, target, source, reason, dur
 
 ## Storage Details
 
-- **Name bans/mutes** – stored in core mod storage under keys `name_bans`, `name_mutes`.
-- **Name logs** – per player, key `log_name:playername`.
-- **IP bans/mutes** – stored in `ipdb` per‑entry storage under keys `"ban"` and `"mute"`. A lightweight copy for listing is kept in core mod storage under `ip_ban_list` and `ip_mute_list`.
-- **IP logs** – per player, stored in `ipdb` per‑entry storage under key `"log"`.
+- **Name bans/mutes** – stored as one row per target in synthetic `ipdb` modstorage entries (`key = playername`, `auxiliary = expiry`).
+- **Name logs** – stored as one row per action in synthetic `ipdb` modstorage (`key = playername`, multimap; `auxiliary = event time`).
+- **IP bans/mutes** – stored in `ipdb` per‑entry storage under keys `"ban"` and `"mute"` with `auxiliary = expiry` when applicable.
+- **IP logs** – stored as multimap rows in `ipdb` per‑entry storage under key `"log"` (`auxiliary = event time`).
 
 ## License
 
 GPL‑3.0‑or‑later © 2026 Marko Petrović
+Written using OpenAI Codex

@@ -508,17 +508,44 @@ dbmanager.get_from_modstorage = function(userentry_id, modname, key, limit)
 end
 
 local update_modstorage1
+local update_modstorage1_stmt = [[UPDATE Modstorage_new
+SET modname      = COALESCE(?, modname),
+    userentry_id = COALESCE(?, userentry_id),
+    key          = COALESCE(?, key),
+    data         = COALESCE(?, data),
+    ancillary    = CASE WHEN ? THEN ? ELSE ancillary END
+WHERE id = ?]]
 -- Update a value identified by modstorage_id
 ---@param modstorage_id integer
----@param value string
----@param ancillary integer?
-dbmanager.update_modstorage1 = function(modstorage_id, value, ancillary)
+---@param userentry_id integer?
+---@param modname string?
+---@param key string?
+---@param value string?
+---@param ... integer?	-- Supply ancillary if you want to modify it
+dbmanager.update_modstorage1 = function(modstorage_id, userentry_id, modname, key, value, ...)
+	local ancillary
+	local update_ancillary = false
+	local errmsg = "dbmanager.update_modstorage1 takes at most one variadic argument - ancillary integer|nil"
+	if select('#', ...) > 1 then
+		error(errmsg)
+	end
+	if select('#', ...) == 1 then
+		update_ancillary = true
+		ancillary = select(1, ...)
+		if type(ancillary) ~= "nil" and type(ancillary) ~= "number" then
+			error(errmsg)
+		end
+		if type(ancillary) == "number" and ancillary ~= math.floor(ancillary) then
+			error(errmsg)
+		end
+	end
+
 	if not update_modstorage1 then
-		update_modstorage1 = ipdb:prepare("UPDATE Modstorage SET data = ?, ancillary = ? WHERE id = ?")
+		update_modstorage1 = ipdb:prepare(update_modstorage1_stmt)
 	else
 		update_modstorage1:reset()
 	end
-	local ret = update_modstorage1:bind_values(value, ancillary, modstorage_id)
+	local ret = update_modstorage1:bind_values(modname, userentry_id, key, value, update_ancillary, ancillary, modstorage_id)
 	if ret ~= sqlite.OK then error(ret) end
 	ret = update_modstorage1:step()
 	if ret ~= sqlite.DONE then error(ret) end

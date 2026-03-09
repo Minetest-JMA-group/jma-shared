@@ -82,6 +82,7 @@ dbmanager.init_ipdb = function(sqlite_param)
 	ret = db:exec("BEGIN")
 	if ret ~= sqlite.OK then
 		core.log("error", "[ipdb]: Cannot start a transaction. Error: "..tostring(ret))
+		db:exec("ROLLBACK")
 		db:close()
 		return nil
 	end

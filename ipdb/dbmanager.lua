@@ -11,7 +11,6 @@ local function apply_schema(db, schema)
 	local f = io.open(schema, "rb")
 	if not f then
 		core.log("error", "[ipdb]: Failed to open schema file: " .. schema)
-		db:close()
 		return false
 	end
 	local sql = f:read("*a")
@@ -19,14 +18,12 @@ local function apply_schema(db, schema)
 
 	if not sql or #sql == 0 then
 		core.log("error", "[ipdb]: Schema file is empty or unreadable: " .. schema)
-		db:close()
 		return false
 	end
 
 	local ret = db:exec(sql)
 	if ret ~= sqlite.OK then
 		core.log("error", string.format("[ipdb]: Failed to execute schema (%i): %s", ret, schema))
-		db:close()
 		return false
 	end
 	return true
@@ -54,7 +51,6 @@ local function run_migration(db, current_version)
 	local max_version = migrations[#migrations].num
 	if current_version > max_version then
 		core.log("error", "[ipdb]: Unknown database version")
-		db:close()
 		return false
 	end
 	for _, v in ipairs(migrations) do
@@ -75,6 +71,7 @@ dbmanager.init_ipdb = function(sqlite_param)
 	sqlite = sqlite_param
 	local db = open_database()
 	if not db then return nil end
+	db:busy_timeout(1000)
 	local ret = db:exec("PRAGMA foreign_keys = ON")
 	if ret ~= sqlite.OK then
 		core.log("error", "[ipdb]: Failed to enable foreign keys and set journal mode")
@@ -82,23 +79,25 @@ dbmanager.init_ipdb = function(sqlite_param)
 		return nil
 	end
 
+	ret = db:exec("BEGIN")
+	if ret ~= sqlite.OK then
+		core.log("error", "[ipdb]: Cannot start a transaction. Error: "..tostring(ret))
+		db:close()
+		return nil
+	end
 	local version
 	for val in db:urows("PRAGMA user_version;") do
 		version = val
-		break
 	end
-
-	-- Let's try to open a fresh connection, SQLite seems to complain about some DDL statements on an used connection
-	ret = db:close()
-	if ret ~= sqlite.OK then
-		core.log("error", "[ipdb]: Failed to close a connection? (code: "..tostring(ret)..")")
-		return nil
-	end
-	db = open_database()
-	if not db then
-		return nil
+	if version >= 4 then
+		local try_meta = dbmanager.get_meta("db_version")
+		if try_meta then
+			version = tonumber(try_meta)
+		end
 	end
 	if not run_migration(db, version) then
+		db:exec("ROLLBACK")
+		db:close()
 		return nil
 	end
 
@@ -304,7 +303,7 @@ end
 
 local get_meta
 ---@param key string
----@return string
+---@return string?
 dbmanager.get_meta = function(key)
 	if not get_meta then
 		get_meta = ipdb:prepare("SELECT value FROM Metadata WHERE key = ?")
@@ -314,7 +313,12 @@ dbmanager.get_meta = function(key)
 	local ret = get_meta:bind(1, key)
 	if ret ~= sqlite.OK then error(ret) end
 	ret = get_meta:step()
-	if ret ~= sqlite.ROW then error(ret) end
+	if ret ~= sqlite.ROW then
+		if ret == sqlite.DONE then
+			return nil
+		end
+		error(ret)
+	end
 	local val = get_meta:get_value(0)
 	ret = get_meta:step()
 	if ret ~= sqlite.DONE then error(ret) end

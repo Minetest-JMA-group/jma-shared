@@ -1,4 +1,3 @@
-BEGIN TRANSACTION;
 PRAGMA user_version = 4;
 
 -- Forgot to make tables STRICT in previous script, so recreate them now
@@ -61,4 +60,5 @@ CREATE TABLE IPs_log (
 ) STRICT;
 CREATE INDEX idx_ips_log_mergeid ON IPs_log(merge_id);
 
-COMMIT;
+INSERT INTO Metadata (key, value) VALUES ('db_migrated_v4', CURRENT_TIMESTAMP);
+INSERT INTO Metadata (key, value) VALUES ('db_version', '4');

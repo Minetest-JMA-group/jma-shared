@@ -1,4 +1,3 @@
-BEGIN TRANSACTION;
 PRAGMA user_version = 1;
 
 CREATE TABLE UserEntry (
@@ -84,5 +83,3 @@ BEGIN
 	AND NOT EXISTS (SELECT 1 FROM Usernames WHERE userentry_id = OLD.userentry_id)
 	AND NOT EXISTS (SELECT 1 FROM IPs WHERE userentry_id = OLD.userentry_id);
 END;
-
-COMMIT;

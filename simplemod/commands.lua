@@ -202,11 +202,13 @@ end
 		if simplemod.is_banned_name(name) then
 			local ban = internal.get_active_punishment_entry("name", name, "ban")
 			if ban then
+				internal.log_ban_join_attempt("name", name, "login", ban.reason)
 				return internal.format_ban_message("You are banned", ban.reason)
 			end
 		end
 		local ban = internal.get_ip_ban(name)
 		if ban then
+			internal.log_ban_join_attempt("ip", name, "login", ban.reason)
 			return internal.format_ban_message("Your IP is banned", ban.reason)
 		end
 	end)
@@ -364,6 +366,21 @@ end
 				table.insert(lines, line)
 			end
 			return true, table.concat(lines, "\n")
+		end,
+	})
+
+	core.register_chatcommand("sblogjoins", {
+		description = "Enable or disable logging of join attempts by banned players",
+		params = "<on|off>",
+		privs = {ban = true},
+		func = function(_, param)
+			local flag = param:match("^%s*(%S+)%s*$")
+			if flag ~= "on" and flag ~= "off" then
+				return false, "Usage: /sblogjoins <on|off>"
+			end
+			local enabled = flag == "on"
+			internal.set_log_ban_join_attempts(enabled)
+			return true, "Ban join-attempt logging is now " .. (enabled and "enabled." or "disabled.")
 		end,
 	})
 

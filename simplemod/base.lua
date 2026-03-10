@@ -23,6 +23,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 	local META_ENTRY_NAME_BANS = "entry_name_bans"
 	local META_ENTRY_NAME_MUTES = "entry_name_mutes"
 	local META_ENTRY_LOGS = "entry_logs"
+	local META_LOG_BAN_JOIN_ATTEMPTS = "log_ban_join_attempts"
 
 	if not dbmanager or not db then
 		shared.disabled = true
@@ -646,6 +647,21 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 				end
 			end
 		end
+	end
+
+	local function should_log_ban_joins()
+		return storage:get_string(META_LOG_BAN_JOIN_ATTEMPTS) == "1"
+	end
+
+	function shared.set_log_ban_join_attempts(enabled)
+		storage:set_string(META_LOG_BAN_JOIN_ATTEMPTS, enabled and "1" or "")
+	end
+
+	function shared.log_ban_join_attempt(scope, target, source, reason)
+		if not should_log_ban_joins() then
+			return
+		end
+		add_action_log(scope, "ban_attempt", target, source, reason or "")
 	end
 
 	local function report_action(scope_text, action_type, target, source, reason, duration_sec)

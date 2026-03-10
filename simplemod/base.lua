@@ -154,7 +154,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 	end
 
 	local function query_modstorage_row(userentry_id, key)
-		local stmt = db:prepare("SELECT data,auxiliary FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ? ORDER BY auxiliary DESC, id DESC LIMIT 1")
+		local stmt = db:prepare("SELECT data,ancillary FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ? LIMIT 1")
 		if not stmt then
 			return nil, "failed to prepare modstorage row query"
 		end
@@ -209,7 +209,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 				AND id IN (
 					SELECT id FROM Modstorage
 					WHERE userentry_id = ? AND modname = ? AND key = ?
-					ORDER BY auxiliary DESC, id DESC
+					ORDER BY ancillary DESC, id DESC
 					LIMIT -1 OFFSET ?
 				)
 			]])
@@ -234,6 +234,82 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		end
 		prune_log_rows(userentry_id, key)
 		return true
+	end
+
+	local function choose_best_punishment_entry(current, candidate)
+		if not candidate then
+			return current
+		end
+		local now = os.time()
+		local candidate_active = (not candidate.expiry) or candidate.expiry > now
+		local current_active = current and ((not current.expiry) or current.expiry > now) or false
+		if not candidate_active then
+			return current
+		end
+		if not current_active then
+			return candidate
+		end
+		if not current.expiry then
+			return current
+		end
+		if not candidate.expiry then
+			return candidate
+		end
+		if candidate.expiry >= current.expiry then
+			return candidate
+		end
+		return current
+	end
+
+	local function collapse_ip_key_after_merge(entrydestid, key_name)
+		local ok_rows, rows_or_err = pcall(dbmanager.get_from_modstorage, entrydestid, MODNAME, key_name)
+		if not ok_rows then
+			core.log("warning", "[simplemod] failed to read modstorage for merge collapse: " .. tostring(rows_or_err))
+			return
+		end
+		local rows = rows_or_err
+		local best = nil
+		local best_id = nil
+		local ids = {}
+		for row_id, payload in pairs(rows) do
+			row_id = tonumber(row_id)
+			if row_id then
+				ids[#ids + 1] = row_id
+			end
+			local data = payload and payload.value or nil
+			local aux = payload and tonumber(payload.ancillary) or nil
+			local parsed = data and core.deserialize(data) or nil
+			if parsed then
+				if aux and not parsed.expiry then
+					parsed.expiry = aux
+				end
+				local prev_best = best
+				best = choose_best_punishment_entry(best, parsed)
+				if best ~= prev_best then
+					best_id = row_id
+				end
+			end
+		end
+
+		for _, row_id in ipairs(ids) do
+			if row_id ~= best_id then
+				local ok_remove, remove_err = pcall(dbmanager.remove_modstorage, row_id)
+				if not ok_remove then
+					core.log("warning", "[simplemod] failed to remove modstorage row " .. tostring(row_id) .. ": " .. tostring(remove_err))
+				end
+			end
+		end
+	end
+
+	local register_merger_err = ipdb.register_entryid_merger(function(entrysrcid, entrydestid)
+		dbmanager.reassociate_modstorage(MODNAME, entrysrcid, entrydestid)
+		collapse_ip_key_after_merge(entrydestid, "ban")
+		collapse_ip_key_after_merge(entrydestid, "mute")
+	end)
+	if register_merger_err then
+		shared.disabled = true
+		shared.disable_reason = "failed to register ipdb merger: " .. tostring(register_merger_err)
+		return
 	end
 
 	local ipdb_storage, ipdb_storage_err = ipdb.get_mod_storage()
@@ -337,7 +413,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 	local function prune_expired_name_entry_rows(userentry_id)
 		local now = os.time()
 		local ok, err = with_txn(function()
-			local stmt = db:prepare("DELETE FROM Modstorage WHERE userentry_id = ? AND modname = ? AND auxiliary IS NOT NULL AND auxiliary <= ?")
+			local stmt = db:prepare("DELETE FROM Modstorage WHERE userentry_id = ? AND modname = ? AND ancillary IS NOT NULL AND ancillary <= ?")
 			if not stmt then
 				error("failed to prepare name prune statement")
 			end
@@ -374,7 +450,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		prune_expired_name_entry_rows(userentry_id)
 		local now = os.time()
 		local values = {}
-		local stmt = db:prepare("SELECT key,data,auxiliary FROM Modstorage WHERE userentry_id = ? AND modname = ? AND (auxiliary IS NULL OR auxiliary > ?)")
+		local stmt = db:prepare("SELECT key,data,ancillary FROM Modstorage WHERE userentry_id = ? AND modname = ? AND (ancillary IS NULL OR ancillary > ?)")
 		if not stmt then
 			return values
 		end
@@ -395,50 +471,25 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		return values
 	end
 
-	local function choose_best_punishment(current, candidate)
-		if not candidate then
-			return current
-		end
-		local now = os.time()
-		local candidate_active = (not candidate.expiry) or candidate.expiry > now
-		local current_active = current and ((not current.expiry) or current.expiry > now) or false
-		if not candidate_active then
-			return current
-		end
-		if not current_active then
-			return candidate
-		end
-		if not current.expiry then
-			return current
-		end
-		if not candidate.expiry then
-			return candidate
-		end
-		if candidate.expiry >= current.expiry then
-			return candidate
-		end
-		return current
-	end
-
 	function get_best_ip_punishment(userentry_id, key_name)
-		local stmt = db:prepare("SELECT data,auxiliary FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ? ORDER BY id DESC")
-		if not stmt then
+		local ok_rows, rows_or_err = pcall(dbmanager.get_from_modstorage, userentry_id, MODNAME, key_name)
+		if not ok_rows then
+			core.log("warning", "[simplemod] failed to read modstorage for key " .. tostring(key_name) .. ": " .. tostring(rows_or_err))
 			return nil
 		end
-		stmt:bind_values(userentry_id, MODNAME, key_name)
+		local rows = rows_or_err
 		local best = nil
-		while stmt:step() == SQLITE_ROW do
-			local data = stmt:get_value(0)
-			local aux = tonumber(stmt:get_value(1))
+		for _, payload in pairs(rows) do
+			local data = payload and payload.value or nil
+			local aux = payload and tonumber(payload.ancillary) or nil
 			local parsed = data and core.deserialize(data) or nil
 			if parsed then
 				if aux and not parsed.expiry then
 					parsed.expiry = aux
 				end
-				best = choose_best_punishment(best, parsed)
+				best = choose_best_punishment_entry(best, parsed)
 			end
 		end
-		stmt:finalize()
 		return best
 	end
 
@@ -477,7 +528,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 	local function prune_expired_ip_entry_rows(key_name)
 		local now = os.time()
 		local ok, err = with_txn(function()
-			local stmt = db:prepare("DELETE FROM Modstorage WHERE modname = ? AND key = ? AND auxiliary IS NOT NULL AND auxiliary <= ?")
+			local stmt = db:prepare("DELETE FROM Modstorage WHERE modname = ? AND key = ? AND ancillary IS NOT NULL AND ancillary <= ?")
 			if not stmt then
 				error("failed to prepare IP prune statement")
 			end
@@ -493,7 +544,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 	local function get_active_ip_table(key_name)
 		prune_expired_ip_entry_rows(key_name)
 		local values = {}
-		local stmt = db:prepare("SELECT userentry_id,data,auxiliary FROM Modstorage WHERE modname = ? AND key = ? ORDER BY id DESC")
+		local stmt = db:prepare("SELECT userentry_id,data,ancillary FROM Modstorage WHERE modname = ? AND key = ?")
 		if not stmt then
 			return values
 		end
@@ -508,7 +559,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 				if aux and not parsed.expiry then
 					parsed.expiry = aux
 				end
-				best_by_entry[userentry_id] = choose_best_punishment(best_by_entry[userentry_id], parsed)
+				best_by_entry[userentry_id] = choose_best_punishment_entry(best_by_entry[userentry_id], parsed)
 			end
 		end
 		stmt:finalize()
@@ -541,7 +592,21 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		local serialized = core.serialize(value_table)
 		local aux = value_table.expiry or nil
 		local ok, err = with_txn(function()
-			dbmanager.insert_into_modstorage(userentry_id, MODNAME, target, serialized, aux)
+			local ok_rows, rows_or_err = pcall(dbmanager.get_from_modstorage, userentry_id, MODNAME, target, 1)
+			if not ok_rows then
+				error(rows_or_err)
+			end
+			local rows = rows_or_err
+			local has_row = false
+			for _ in pairs(rows) do
+				has_row = true
+				break
+			end
+			if has_row then
+				dbmanager.update_modstorage2(userentry_id, MODNAME, target, serialized, aux)
+			else
+				dbmanager.insert_into_modstorage(userentry_id, MODNAME, target, serialized, aux)
+			end
 		end)
 		if not ok then
 			return false, err
@@ -847,7 +912,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 
 	function simplemod.get_player_log(player)
 		local name_log = {}
-		local name_stmt = db:prepare("SELECT data FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ? ORDER BY auxiliary DESC, id DESC LIMIT ?")
+		local name_stmt = db:prepare("SELECT data FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ? ORDER BY ancillary DESC, id DESC LIMIT ?")
 		if name_stmt then
 			name_stmt:bind_values(logs_entry_id, MODNAME, player, LOG_LIMIT)
 			while name_stmt:step() == SQLITE_ROW do
@@ -862,7 +927,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		local ip_log = {}
 		local userentry_id, ip_err = get_ip_userentry_id(player)
 		if not ip_err and userentry_id then
-			local ip_stmt = db:prepare("SELECT data FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = 'log' ORDER BY auxiliary DESC, id DESC LIMIT ?")
+			local ip_stmt = db:prepare("SELECT data FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = 'log' ORDER BY ancillary DESC, id DESC LIMIT ?")
 			if ip_stmt then
 				ip_stmt:bind_values(userentry_id, MODNAME, LOG_LIMIT)
 				while ip_stmt:step() == SQLITE_ROW do

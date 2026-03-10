@@ -96,28 +96,9 @@ return function(shared)
 		end
 	end
 
-	local function normalize_old_intermediate_name_log_keys(entry_id)
-		local stmt = db:prepare("SELECT id,key,data,auxiliary FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key GLOB 'name:*:*'")
-		if not stmt then
-			return
-		end
-		stmt:bind_values(entry_id, MODNAME)
-		while stmt:step() == 100 do
-			local row_id = tonumber(stmt:get_value(0))
-			local old_key = stmt:get_value(1)
-			local data = stmt:get_value(2)
-			local aux = tonumber(stmt:get_value(3))
-			local player_name = type(old_key) == "string" and old_key:match("^name:(.+):%d+$") or nil
-			if row_id and player_name and data then
-				dbmanager.insert_into_modstorage(entry_id, MODNAME, player_name, data, aux)
-				dbmanager.remove_modstorage(row_id)
-			end
-		end
-		stmt:finalize()
-	end
 
 	local function migrate_ip_log_blobs_to_multimap()
-		local stmt = db:prepare("SELECT id,userentry_id,data FROM Modstorage WHERE modname = ? AND key = 'log' ORDER BY id ASC")
+		local stmt = db:prepare("SELECT id,userentry_id,data FROM Modstorage WHERE modname = ? AND key = 'log'")
 		if not stmt then
 			return
 		end
@@ -140,7 +121,7 @@ return function(shared)
 	end
 
 	local function backfill_ip_punishment_aux()
-		local stmt = db:prepare("SELECT id,data FROM Modstorage WHERE modname = ? AND key IN ('ban','mute') AND auxiliary IS NULL")
+		local stmt = db:prepare("SELECT id,data FROM Modstorage WHERE modname = ? AND key IN ('ban','mute') AND ancillary IS NULL")
 		if not stmt then
 			return
 		end
@@ -150,7 +131,7 @@ return function(shared)
 			local data = stmt:get_value(1)
 			local parsed = data and core.deserialize(data) or nil
 			if row_id and type(parsed) == "table" and tonumber(parsed.expiry) then
-				dbmanager.update_modstorage1(row_id, data, tonumber(parsed.expiry))
+				dbmanager.update_modstorage1(row_id, nil, nil, nil, data, tonumber(parsed.expiry))
 			end
 		end
 		stmt:finalize()
@@ -166,7 +147,6 @@ return function(shared)
 		migrate_blob_map_to_entry(LEGACY_NAME_BANS_KEY, name_bans_entry_id)
 		migrate_blob_map_to_entry(LEGACY_NAME_MUTES_KEY, name_mutes_entry_id)
 		migrate_legacy_name_logs(logs_entry_id)
-		normalize_old_intermediate_name_log_keys(logs_entry_id)
 		migrate_ip_log_blobs_to_multimap()
 		backfill_ip_punishment_aux()
 

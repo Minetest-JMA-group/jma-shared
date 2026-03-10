@@ -576,7 +576,7 @@ end
 
 ---@param key string
 ---@param limit integer?
----@return table<integer, string>
+---@return table<integer, ModstorageValue>
 ---@overload fun(self, key: string, limit?: integer): nil, string
 function DBContext:get_strings(key, limit)
 	if type(self) ~= "table" or type(key) ~= "string" or
@@ -595,20 +595,85 @@ function DBContext:get_strings(key, limit)
 	return ret
 end
 
+-- nil, errstring is returned on error
 ---@param key string
----@return string|nil
----@overload fun(self, key: string): nil, string
+---@return string, integer? -- Value and optional ancillary
+---@overload fun(self, key: string): nil, string -- Error
+---@overload fun(seld, key: string): nil -- Key not found
 function DBContext:get_string(key)
 	local ret, err = self:get_strings(key, 1)
 	if err then return nil, err end
 	---@cast ret -nil
 	local _, v = next(ret)
-	return v
+	if not v then
+		return nil
+	end
+	return v.value, v.ancillary
 end
 
-do
-	local meta = { __gc = DBContext.finalize }
-	setmetatable(DBContext, meta)
+-- Update key (if not nil), value (if not nil) and optionally ancillary on the given modstorage row
+---@param modstorage_id integer
+---@param key string?
+---@param value string?
+---@param ... integer? -- Supply ancillary if you want to modify it; nil gets turned to sqlite.NULL
+function DBContext:update_value(modstorage_id, key, value, ...)
+	if type(modstorage_id) ~= "number" or modstorage_id ~= math.floor(modstorage_id) or
+	   (key ~= nil and type(key) ~= "string") or (value ~= nil and type(value) ~= "string") then
+		return "Invalid argument"
+	end
+	local _, err = pcall(function(...)
+		local modstorage_info = dbmanager.get_modstorage_info(modstorage_id)
+		if not modstorage_info then
+			return "Value doesn't exist"
+		end
+		if modstorage_info.modname ~= self._modname or modstorage_info.userentry_id ~= self._userentry_id then
+			return "Value doesn't belong to you"
+		end
+		dbmanager.update_modstorage1(modstorage_id, nil, nil, key, value, ...)
+	end, ...)
+	if err then
+		---@cast err string
+		return err
+	end
+	return nil
+end
+
+-- Remove the value from modstorage based on id
+---@param modstorage_id integer
+function DBContext:remove(modstorage_id)
+	if type(modstorage_id) ~= "number" or modstorage_id ~= math.floor(modstorage_id) then
+		return "Invalid argument"
+	end
+	local _, err = pcall(function()
+		local modstorage_info = dbmanager.get_modstorage_info(modstorage_id)
+		if not modstorage_info then
+			return "Value doesn't exist"
+		end
+		if modstorage_info.modname ~= self._modname or modstorage_info.userentry_id ~= self._userentry_id then
+			return "Value doesn't belong to you"
+		end
+		dbmanager.remove_modstorage(modstorage_id)
+	end)
+	if err then
+		---@cast err string
+		return err
+	end
+	return nil
+end
+
+-- Get a table with names and IPs belonging to this entry
+---@return { ips: string[], names: string[] }
+---@overload fun(): nil, string
+function DBContext:get_linked_ids()
+	if type(self._userentry_id) ~= "number" or self._userentry_id ~= math.floor(self._userentry_id) then
+		return nil, "Invalid context"
+	end
+	local ok, ret = pcall(dbmanager.get_all_identifiers, self._userentry_id)
+	if not ok then
+		---@cast ret unknown
+		return nil, ret
+	end
+	return ret
 end
 
 ---@return IPDBContext

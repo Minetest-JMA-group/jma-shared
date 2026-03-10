@@ -463,35 +463,40 @@ dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value, a
 	if ret ~= sqlite.DONE then error(ret) end
 end
 
+---@class ModstorageValue
+---@field value string
+---@field ancillary integer?
+
 local modstorage_get
-local modstorage_get_all
--- Get the values associated with the given key in modstorage table
+local modstorage_get_no_limit
+-- Get the values associated with the given key in modstorage table.
+-- Returns { modstorage_id = { ["value"] = data, ["ancillary"] = ancillary } }
 ---@param userentry_id integer
 ---@param modname string
 ---@param key string
 ---@param limit integer?
----@return table<integer, string>
+---@return table<integer, ModstorageValue>
 dbmanager.get_from_modstorage = function(userentry_id, modname, key, limit)
 	local mystmt
 	local ret
 	if limit then
 		if not modstorage_get then
-			modstorage_get = ipdb:prepare("SELECT id, data FROM Modstorage WHERE userentry_id = ? AND modname = ? "..
-			                              "AND key = ? LIMIT ?")
+			modstorage_get = ipdb:prepare("SELECT id, data, ancillary FROM Modstorage WHERE userentry_id = ? "..
+			                              "AND modname = ? AND key = ? LIMIT ?")
 		else
 			modstorage_get:reset()
 		end
 		ret = modstorage_get:bind_values(userentry_id, modname, key, limit)
 		mystmt = modstorage_get
 	else
-		if not modstorage_get_all then
-			modstorage_get_all = ipdb:prepare("SELECT id, data FROM Modstorage WHERE userentry_id = ? AND modname = ? "..
-			                                  "AND key = ?")
+		if not modstorage_get_no_limit then
+			modstorage_get_no_limit = ipdb:prepare("SELECT id, data, ancillary FROM Modstorage WHERE userentry_id = ? "..
+			                                  "AND modname = ? AND key = ?")
 		else
-			modstorage_get_all:reset()
+			modstorage_get_no_limit:reset()
 		end
-		ret = modstorage_get_all:bind_values(userentry_id, modname, key)
-		mystmt = modstorage_get_all
+		ret = modstorage_get_no_limit:bind_values(userentry_id, modname, key)
+		mystmt = modstorage_get_no_limit
 	end
 	if ret ~= sqlite.OK then error(ret) end
 
@@ -500,7 +505,8 @@ dbmanager.get_from_modstorage = function(userentry_id, modname, key, limit)
 	while ret == sqlite.ROW do
 		local id = mystmt:get_value(0)
 		local data = mystmt:get_value(1)
-		values[id] = data
+		local ancillary = mystmt:get_value(2)
+		values[id] = { value = data, ancillary = ancillary }
 		ret = mystmt:step()
 	end
 	if ret ~= sqlite.DONE then error(ret) end
@@ -525,7 +531,7 @@ WHERE id = ?]]
 dbmanager.update_modstorage1 = function(modstorage_id, userentry_id, modname, key, value, ...)
 	local ancillary
 	local update_ancillary = false
-	local errmsg = "dbmanager.update_modstorage1 takes at most one variadic argument - ancillary integer|nil"
+	local errmsg = "Accepting at most one variadic argument - ancillary integer|nil"
 	if select('#', ...) > 1 then
 		error(errmsg)
 	end
@@ -571,14 +577,16 @@ dbmanager.update_modstorage2 = function(userentry_id, modname, key, value, ancil
 	if ret ~= sqlite.DONE then error(ret) end
 end
 
+---@alias ModstorageValueTypes string|ModstorageValue
 local modstorage_get_all
 -- Get all key-value pairs associated with given user entry and modname
 ---@param userentry_id integer
 ---@param modname string
----@return table<string, string|table<integer, string>>
+---@return table<string, ModstorageValueTypes|table<integer, ModstorageValueTypes>> -- { key = data } in the simplest case, { key = {id = data}} for multimap, data = {["value"] = data, ["ancillary"] = ancillary} when ancillary exists
 dbmanager.get_all_modstorage = function(userentry_id, modname)
 	if not modstorage_get_all then
-		modstorage_get_all = ipdb:prepare("SELECT key, data, id FROM Modstorage WHERE userentry_id = ? AND modname = ?")
+		modstorage_get_all = ipdb:prepare("SELECT key, data, id, ancillary FROM Modstorage WHERE userentry_id = ? "..
+		                                  "AND modname = ?")
 	else
 		modstorage_get_all:reset()
 	end
@@ -599,6 +607,10 @@ dbmanager.get_all_modstorage = function(userentry_id, modname)
 		local key = modstorage_get_all:get_value(0)
 		local data = modstorage_get_all:get_value(1)
 		local id = modstorage_get_all:get_value(2)
+		local ancillary = modstorage_get_all:get_value(3)
+		if ancillary then
+			data = { value = data, ancillary = ancillary }
+		end
 		if not results[key] then
 			results[key] = data
 			saved_ids[key] = id
@@ -615,6 +627,39 @@ dbmanager.get_all_modstorage = function(userentry_id, modname)
 	end
 
 	return results
+end
+
+---@class ModstorageInfo
+---@field modname string
+---@field userentry_id integer
+
+-- Get information about a modstorage row
+local get_modstorage_info
+---@param modstorage_id integer
+---@return ModstorageInfo?
+dbmanager.get_modstorage_info = function(modstorage_id)
+	if not get_modstorage_info then
+		get_modstorage_info = ipdb:prepare("SELECT modname, userentry_id FROM Modstorage WHERE id = ?")
+	else
+		get_modstorage_info:reset()
+	end
+	local ret = get_modstorage_info:bind(1, modstorage_id)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = get_modstorage_info:step()
+	if ret ~= sqlite.ROW then
+		if ret == sqlite.DONE then
+			return nil
+		end
+		error(ret)
+	end
+	local val = {
+		modname = get_modstorage_info:get_value(0),
+		userentry_id = get_modstorage_info:get_value(1)
+	}
+
+	ret = get_modstorage_info:step()
+	if ret ~= sqlite.DONE then error(ret) end
+	return val
 end
 
 local reassociate_modstorage

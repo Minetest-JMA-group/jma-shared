@@ -67,7 +67,7 @@ Requires `dev` privilege.
 _`ipdb.disabled` can be quickly checked to determine whether ipdb is functional_
 
 ### Register a Merger Function
-Called when two user entries are merged. Must be registered at load time.
+Called inside a transaction when two user entries are merged. Must be registered at load time.
 ```lua
 ipdb.register_merger(function(entry1_data, entry2_data)
     --[[ entryX_data is the table of { key = data_under_key }

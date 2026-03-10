@@ -61,6 +61,10 @@ if not dbconn then
 	register_dummmies()
 	return
 end
+
+-- To be removed. Present only for DEBUGGING
+ipdb.dbmanager = dbmanager
+
 ---@type integer
 local version = dbconn.version
 local db = dbconn.db

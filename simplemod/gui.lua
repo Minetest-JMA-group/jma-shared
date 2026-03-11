@@ -3,8 +3,6 @@
 
 return function(internal)
 	local ui_state = {}
-	local refresh_reopen = {}
-
 	local function bool_from_field(value, fallback)
 		if value == "true" then
 			return true
@@ -47,13 +45,9 @@ return function(internal)
 		return state
 	end
 
-	local function flash_refresh(name, tab, filter_player, action_player, action_scope, action_template, action_duration, action_custom_reason, action_allow_unknown)
-		refresh_reopen[name] = true
-		core.close_formspec(name, "simplemod:main")
-		core.after(0.18, function()
-			refresh_reopen[name] = nil
-			internal.show_gui(name, tab, filter_player, action_player, action_scope, action_template, action_duration, action_custom_reason, action_allow_unknown)
-		end)
+	local function handle_refresh(name, tab, filter_player, action_player, action_scope, action_template, action_duration, action_custom_reason, action_allow_unknown)
+		core.chat_send_player(name, "[simplemod] refreshed.")
+		internal.show_gui(name, tab, filter_player, action_player, action_scope, action_template, action_duration, action_custom_reason, action_allow_unknown)
 	end
 
 	function internal.show_gui(name, tab, filter_player, action_player, action_scope, action_template, action_duration, action_custom_reason, action_allow_unknown)
@@ -193,7 +187,6 @@ return function(internal)
 	core.register_on_leaveplayer(function(player)
 		local player_name = player:get_player_name()
 		ui_state[player_name] = nil
-		refresh_reopen[player_name] = nil
 		if internal.on_player_leave then
 			internal.on_player_leave(player_name)
 		end
@@ -252,11 +245,7 @@ return function(internal)
 		local state = get_ui_state(name)
 
 		if fields.close or fields.quit then
-			if refresh_reopen[name] and fields.quit then
-				return
-			end
 			ui_state[name] = nil
-			refresh_reopen[name] = nil
 			return
 		end
 
@@ -546,7 +535,7 @@ return function(internal)
 		end
 
 		if fields.refresh then
-			flash_refresh(
+			handle_refresh(
 				name,
 				state.tab,
 				fields.player_filter or state.filter,

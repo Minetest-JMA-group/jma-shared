@@ -129,6 +129,7 @@ local user_check
 dbmanager.user_exists = function(username)
 	if not user_check then
 		user_check = ipdb:prepare("SELECT * FROM Usernames WHERE name = ?;")
+		if not user_check then error(ipdb:errmsg()) end
 	else
 		user_check:reset()
 	end
@@ -146,6 +147,7 @@ local ip_check
 dbmanager.ip_exists = function(ip)
 	if not ip_check then
 		ip_check = ipdb:prepare("SELECT * FROM IPs WHERE ip = ?;")
+		if not ip_check then error(ipdb:errmsg()) end
 	else
 		ip_check:reset()
 	end
@@ -162,6 +164,7 @@ local new_entry
 dbmanager.new_entry = function()
 	if not new_entry then
 		new_entry = ipdb:prepare("INSERT INTO UserEntry (last_seen) VALUES (CURRENT_TIMESTAMP);")
+		if not new_entry then error(ipdb:errmsg()) end
 	else
 		new_entry:reset()
 	end
@@ -182,6 +185,7 @@ dbmanager.update_last_seen = function(entryid, nameid, ipid)
 	if entryid then
 		if not update_entry_time then
 			update_entry_time = ipdb:prepare("UPDATE UserEntry SET last_seen = ? WHERE id = ?")
+			if not update_entry_time then error(ipdb:errmsg()) end
 		else
 			update_entry_time:reset()
 		end
@@ -193,6 +197,7 @@ dbmanager.update_last_seen = function(entryid, nameid, ipid)
 	if nameid then
 		if not update_name_time then
 			update_name_time = ipdb:prepare("UPDATE Usernames SET last_seen = ? WHERE id = ?")
+			if not update_name_time then error(ipdb:errmsg()) end
 		else
 			update_name_time:reset()
 		end
@@ -204,6 +209,7 @@ dbmanager.update_last_seen = function(entryid, nameid, ipid)
 	if ipid then
 		if not update_ip_time then
 			update_ip_time = ipdb:prepare("UPDATE IPs SET last_seen = ? WHERE id = ?")
+			if not update_ip_time then error(ipdb:errmsg()) end
 		else
 			update_ip_time:reset()
 		end
@@ -224,6 +230,8 @@ dbmanager.get_all_identifiers = function(entryid)
 	if not get_ips then
 		get_ips = ipdb:prepare("SELECT ip FROM IPs WHERE userentry_id = ?")
 		get_names = ipdb:prepare("SELECT name FROM Usernames WHERE userentry_id = ?")
+		if not get_ips then error(ipdb:errmsg()) end
+		if not get_names then error(ipdb:errmsg()) end
 	else
 		get_ips:reset()
 		get_names:reset()
@@ -250,6 +258,7 @@ local insert_ip
 dbmanager.add_ip = function(entryid, ip)
 	if not insert_ip then
 		insert_ip = ipdb:prepare("INSERT INTO IPs (userentry_id, ip, last_seen) VALUES (?, ?, CURRENT_TIMESTAMP)")
+		if not insert_ip then error(ipdb:errmsg()) end
 	else
 		insert_ip:reset()
 	end
@@ -266,6 +275,7 @@ local insert_name
 dbmanager.add_name = function(entryid, name)
 	if not insert_name then
 		insert_name = ipdb:prepare("INSERT INTO Usernames (userentry_id, name, last_seen) VALUES (?, ?, CURRENT_TIMESTAMP)")
+		if not insert_name then error(ipdb:errmsg()) end
 	else
 		insert_name:reset()
 	end
@@ -280,6 +290,7 @@ local delete_entry
 dbmanager.delete_entry = function(entryid)
 	if not delete_entry then
 		delete_entry = ipdb:prepare("DELETE FROM UserEntry WHERE id = ?")
+		if not delete_entry then error(ipdb:errmsg()) end
 	else
 		delete_entry:reset()
 	end
@@ -297,6 +308,7 @@ dbmanager.set_meta = function(key, newval)
 	if newval ~= nil then
 		if not set_meta then
 			set_meta = ipdb:prepare("UPDATE Metadata SET value = ? WHERE key = ?")
+			if not set_meta then error(ipdb:errmsg()) end
 		else
 			set_meta:reset()
 		end
@@ -308,6 +320,7 @@ dbmanager.set_meta = function(key, newval)
 	else
 		if not delete_meta then
 			delete_meta = ipdb:prepare("DELETE FROM Metadata WHERE key = ?")
+			if not delete_meta then error(ipdb:errmsg()) end
 		else
 			delete_meta:reset()
 		end
@@ -324,6 +337,7 @@ local get_meta
 dbmanager.get_meta = function(key)
 	if not get_meta then
 		get_meta = ipdb:prepare("SELECT value FROM Metadata WHERE key = ?")
+		if not get_meta then error(ipdb:errmsg()) end
 	else
 		get_meta:reset()
 	end
@@ -352,6 +366,7 @@ dbmanager.set_merge_allowance = function(entryid, allowed)
 
 	if not set_merge_perm then
 		set_merge_perm = ipdb:prepare("UPDATE UserEntry SET no_merging = ? WHERE id = ?")
+		if not set_merge_perm then error(ipdb:errmsg()) end
 	else
 		set_merge_perm:reset()
 	end
@@ -367,6 +382,7 @@ local check_merge_blocked
 dbmanager.can_merge = function(entryid1, entryid2)
 	if not check_merge_blocked then
 		check_merge_blocked = ipdb:prepare("SELECT COUNT(*) FROM UserEntry WHERE id IN (?, ?) AND no_merging = 1;")
+		if not check_merge_blocked then error(ipdb:errmsg()) end
 	else
 		check_merge_blocked:reset()
 	end
@@ -389,6 +405,7 @@ local remove_ip
 dbmanager.remove_ip = function(ipid)
 	if not remove_ip then
 		remove_ip = ipdb:prepare("DELETE FROM IPs WHERE id = ?")
+		if not remove_ip then error(ipdb:errmsg()) end
 	else
 		remove_ip:reset()
 	end
@@ -403,6 +420,7 @@ local remove_name
 dbmanager.remove_name = function(nameid)
 	if not remove_name then
 		remove_name = ipdb:prepare("DELETE FROM Usernames WHERE id = ?")
+		if not remove_name then error(ipdb:errmsg()) end
 	else
 		remove_name:reset()
 	end
@@ -422,6 +440,7 @@ dbmanager.reassociate_ids = function(newentryid, nameid, ipid)
 	if ipid then
 		if not reassociate_ip then
 			reassociate_ip = ipdb:prepare("UPDATE IPs SET userentry_id = ? WHERE id = ?")
+			if not reassociate_ip then error(ipdb:errmsg()) end
 		else
 			reassociate_ip:reset()
 		end
@@ -433,6 +452,7 @@ dbmanager.reassociate_ids = function(newentryid, nameid, ipid)
 	if nameid then
 		if not reassociate_name then
 			reassociate_name = ipdb:prepare("UPDATE Usernames SET userentry_id = ? WHERE id = ?")
+			if not reassociate_name then error(ipdb:errmsg()) end
 		else
 			reassociate_name:reset()
 		end
@@ -454,6 +474,7 @@ dbmanager.insert_into_modstorage = function(userentry_id, modname, key, value, a
 	if not modstorage_insert then
 		modstorage_insert = ipdb:prepare("INSERT INTO Modstorage (userentry_id, modname, key, data, ancillary) "..
 	                                     "VALUES (?, ?, ?, ?, ?)")
+		if not modstorage_insert then error(ipdb:errmsg()) end
 	else
 		modstorage_insert:reset()
 	end
@@ -483,6 +504,7 @@ dbmanager.get_from_modstorage = function(userentry_id, modname, key, limit)
 		if not modstorage_get then
 			modstorage_get = ipdb:prepare("SELECT id, data, ancillary FROM Modstorage WHERE userentry_id = ? "..
 			                              "AND modname = ? AND key = ? LIMIT ?")
+			if not modstorage_get then error(ipdb:errmsg()) end
 		else
 			modstorage_get:reset()
 		end
@@ -492,6 +514,7 @@ dbmanager.get_from_modstorage = function(userentry_id, modname, key, limit)
 		if not modstorage_get_no_limit then
 			modstorage_get_no_limit = ipdb:prepare("SELECT id, data, ancillary FROM Modstorage WHERE userentry_id = ? "..
 			                                  "AND modname = ? AND key = ?")
+			if not modstorage_get_no_limit then error(ipdb:errmsg()) end
 		else
 			modstorage_get_no_limit:reset()
 		end
@@ -548,6 +571,7 @@ dbmanager.update_modstorage1 = function(modstorage_id, userentry_id, modname, ke
 
 	if not update_modstorage1 then
 		update_modstorage1 = ipdb:prepare(update_modstorage1_stmt)
+		if not update_modstorage1 then error(ipdb:errmsg()) end
 	else
 		update_modstorage1:reset()
 	end
@@ -568,6 +592,7 @@ dbmanager.update_modstorage2 = function(userentry_id, modname, key, value, ancil
 	if not update_modstorage2 then
 		update_modstorage2 = ipdb:prepare("UPDATE Modstorage SET data = ?, ancillary = ? WHERE userentry_id = ? "..
 		                                  "AND modname = ? AND KEY = ?")
+		if not update_modstorage2 then error(ipdb:errmsg()) end
 	else
 		update_modstorage2:reset()
 	end
@@ -587,6 +612,7 @@ dbmanager.get_all_modstorage = function(userentry_id, modname)
 	if not modstorage_get_all then
 		modstorage_get_all = ipdb:prepare("SELECT key, data, id, ancillary FROM Modstorage WHERE userentry_id = ? "..
 		                                  "AND modname = ?")
+		if not modstorage_get_all then error(ipdb:errmsg()) end
 	else
 		modstorage_get_all:reset()
 	end
@@ -640,6 +666,7 @@ local get_modstorage_info
 dbmanager.get_modstorage_info = function(modstorage_id)
 	if not get_modstorage_info then
 		get_modstorage_info = ipdb:prepare("SELECT modname, userentry_id FROM Modstorage WHERE id = ?")
+		if not get_modstorage_info then error(ipdb:errmsg()) end
 	else
 		get_modstorage_info:reset()
 	end
@@ -671,6 +698,7 @@ dbmanager.reassociate_modstorage = function(modname, old_userentry_id, new_usere
 	if not reassociate_modstorage then
 		reassociate_modstorage = ipdb:prepare("UPDATE Modstorage SET userentry_id = ? WHERE userentry_id = ? "..
 		                                      "AND modname = ?")
+		if not reassociate_modstorage then error(ipdb:errmsg()) end
 	else
 		reassociate_modstorage:reset()
 	end
@@ -693,6 +721,7 @@ dbmanager.delete_modstorage = function(userentry_id, modname, key)
 	if key then
 		if not modstorage_delete_one then
 			modstorage_delete_one = ipdb:prepare("DELETE FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ?")
+			if not modstorage_delete_one then error(ipdb:errmsg()) end
 		else
 			modstorage_delete_one:reset()
 		end
@@ -703,6 +732,7 @@ dbmanager.delete_modstorage = function(userentry_id, modname, key)
 	else
 		if not modstorage_delete_all then
 			modstorage_delete_all = ipdb:prepare("DELETE FROM Modstorage WHERE userentry_id = ? AND modname = ?")
+			if not modstorage_delete_all then error(ipdb:errmsg()) end
 		else
 			modstorage_delete_all:reset()
 		end
@@ -719,6 +749,7 @@ local remove_modstorage
 dbmanager.remove_modstorage = function(modstorage_id)
 	if not remove_modstorage then
 		remove_modstorage = ipdb:prepare("DELETE FROM Modstorage WHERE id = ?")
+		if not remove_modstorage then error(ipdb:errmsg()) end
 	else
 		remove_modstorage:reset()
 	end
@@ -751,21 +782,25 @@ WHERE userentry_id = ?]]
 dbmanager.new_merge_event = function(entry_src, entry_dst, name, ip)
 	if not new_merge then
 		new_merge = ipdb:prepare("INSERT INTO MergeEvent (entry_src, entry_dst, name, ip) VALUES (?, ?, ?, ?)")
+		if not new_merge then error(ipdb:errmsg()) end
 	else
 		new_merge:reset()
 	end
 	if not log_modstorage then
 		log_modstorage = ipdb:prepare(log_modstorage_stmt)
+		if not log_modstorage then error(ipdb:errmsg()) end
 	else
 		log_modstorage:reset()
 	end
 	if not log_usernames then
 		log_usernames = ipdb:prepare(log_usernames_stmt)
+		if not log_usernames then error(ipdb:errmsg()) end
 	else
 		log_usernames:reset()
 	end
 	if not log_ips then
 		log_ips = ipdb:prepare(log_ips_stmt)
+		if not log_ips then error(ipdb:errmsg()) end
 	else
 		log_ips:reset()
 	end
@@ -797,6 +832,7 @@ local prune_merge
 dbmanager.prune_merge_events = function(max_age)
 	if not prune_merge then
 		prune_merge = ipdb:prepare("DELETE FROM MergeEvent WHERE timestamp < unixepoch('now') - ?")
+		if not prune_merge then error(ipdb:errmsg()) end
 	else
 		prune_merge:reset()
 	end

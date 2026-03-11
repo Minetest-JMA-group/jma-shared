@@ -90,18 +90,18 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		local reason = (ban and ban.reason and ban.reason ~= "") and ban.reason or "none"
 		local tz = os.date("%Z")
 		local issued = (ban and ban.time) and os.date("%Y-%m-%d %H:%M:%S", ban.time) or "unknown"
-		local expires = (ban and ban.expiry) and os.date("%Y-%m-%d %H:%M:%S", ban.expiry) or "never"
-		local now = os.date("%Y-%m-%d %H:%M:%S")
+		local expires_in = "never"
+		if ban and ban.expiry then
+			local remaining = math.max(0, ban.expiry - os.time())
+			expires_in = algorithms.time_to_string(remaining)
+		end
 		local msg = string.format(
-			"%s Reason: %s. Issued: %s %s. Expires: %s %s. Server time now: %s %s.",
+			"%s Reason: %s. Issued: %s %s. Expires in: %s.",
 			scope_text,
 			reason,
 			issued,
 			tz,
-			expires,
-			tz,
-			now,
-			tz
+			expires_in
 		)
 		return msg .. BAN_APPEAL_SUFFIX
 	end

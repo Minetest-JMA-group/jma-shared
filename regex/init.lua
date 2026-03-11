@@ -88,7 +88,7 @@ rm <regex>: Remove regex from $LIST]]
 
 		local serialized = storage:get_string(self.storage_key)
 		if storage.finalize then storage:finalize() end
-		if serialized ~= "" then
+		if serialized and serialized ~= "" then
 			local decoded = core.deserialize(serialized)
 			if type(decoded) == "table" then
 				self.patterns = sanitize_patterns(decoded)

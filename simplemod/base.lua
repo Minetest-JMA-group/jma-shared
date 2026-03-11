@@ -13,6 +13,7 @@ return function(shared)
 	shared.OVERRIDE_CONFIRM_WINDOW_SEC = 30
 	local BAN_APPEAL_SUFFIX = [[
 
+
 If you think that you got banned by mistake, please contact us on Discord: ctf.jma-sig.de or write an email to loki@jma-sig.de.
 (de) Wenn Sie denken, dass es sich um ein Missverständnis handelt, dann schreiben Sie bitte eine E-Mail an loki@jma-sig.de oder kontaktieren Sie uns auf Discord über die Website ctf.jma-sig.de.]]
 	shared.ROW_SCROLL_STEP = 20

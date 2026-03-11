@@ -32,7 +32,7 @@ core.register_on_leaveplayer(function(player)
 end)
 
 local function mute_player(name)
-	local ok = simplemod.mute_name(
+	local ok = simplemod.mute_ip(
 		name,
 		"Antispam",
 		"Automatically muted by system, reason: Spamming. Please notify the server staff if you have been falsely muted.",

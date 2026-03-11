@@ -137,7 +137,7 @@ return function(internal)
 				"tooltip[action_allow_unknown;When using IP scope, auto-register unknown name/IP target in ipdb for Ban/Mute.]"
 			if is_other_reason then
 				formspec = formspec ..
-					"label[0.5,5.5;Custom reason]" ..
+					"label[0.5,5.65;Custom reason]" ..
 					"field[0.5,5.9;12.0,1;action_custom_reason;;" .. core.formspec_escape(action_custom_reason) .. "]"
 			end
 			formspec = formspec ..

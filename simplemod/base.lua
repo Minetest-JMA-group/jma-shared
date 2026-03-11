@@ -942,6 +942,13 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		return mute ~= nil
 	end
 
+	function simplemod.is_muted(target)
+		if simplemod.is_muted_name(target) then
+			return true
+		end
+		return simplemod.is_muted_ip(target)
+	end
+
 	function simplemod.get_player_log(player)
 		local name_log = {}
 		local name_stmt = db:prepare("SELECT data FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ? ORDER BY ancillary DESC, id DESC LIMIT ?")

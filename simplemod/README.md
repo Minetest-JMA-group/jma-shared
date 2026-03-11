@@ -13,6 +13,7 @@ simplemod provides name‑based and IP‑based bans and mutes for Minetest, leve
 - **API** – other mods can call `simplemod.ban_name()`, `simplemod.is_muted_ip()`, etc.
 - **Relay support** – optionally sends action reports to `relays` mod.
 - **Discord mute‑log** – optionally forwards muted chat to a Discord channel via `discordmt`.
+- **Ban‑join logging** – optional logging of join attempts by banned players.
 
 ## Dependencies
 
@@ -37,6 +38,7 @@ All commands require `ban` privilege (for bans) or `pmute` privilege (for mutes)
 | `/sbbanlist` | List all active bans (name + IP) |
 | `/sbmutelist` | List all active mutes (name + IP) |
 | `/sblog <player>` | Show combined log for a player |
+| `/sblogjoins <on\|off>` | Enable or disable logging of join attempts by banned players |
 | `/smca <player> <on\|off>` | Allow or block muted player's access to moderator mute-log chat |
 | `/sb` | Open the GUI |
 
@@ -75,6 +77,9 @@ simplemod.mute_ip(target, source, reason, duration_sec)   → success, err
 simplemod.unmute_ip(target, source, reason)                → success, err
 simplemod.is_muted_ip(target)                               → boolean
 
+-- Name or IP mute (combined)
+simplemod.is_muted(target)                                  → boolean
+
 -- Combined log for a player (table of entries, newest first)
 simplemod.get_player_log(player) → { {type, scope, target, source, reason, duration, time}, ... }
 ```
@@ -86,10 +91,10 @@ simplemod.get_player_log(player) → { {type, scope, target, source, reason, dur
 
 ## Storage Details
 
-- **Name bans/mutes** – stored as one row per target in synthetic `ipdb` modstorage entries (`key = playername`, `auxiliary = expiry`).
-- **Name logs** – stored as one row per action in synthetic `ipdb` modstorage (`key = playername`, multimap; `auxiliary = event time`).
-- **IP bans/mutes** – stored in `ipdb` per‑entry storage under keys `"ban"` and `"mute"` with `auxiliary = expiry` when applicable.
-- **IP logs** – stored as multimap rows in `ipdb` per‑entry storage under key `"log"` (`auxiliary = event time`).
+- **Name bans/mutes** – stored as one row per target in synthetic `ipdb` modstorage entries (`key = playername`, `ancillary = expiry`).
+- **Name logs** – stored as one row per action in synthetic `ipdb` modstorage (`key = playername`, multimap; `ancillary = event time`).
+- **IP bans/mutes** – stored in `ipdb` per‑entry storage under keys `"ban"` and `"mute"` with `ancillary = expiry` when applicable.
+- **IP logs** – stored as multimap rows in `ipdb` per‑entry storage under key `"log"` (`ancillary = event time`).
 
 ## License
 

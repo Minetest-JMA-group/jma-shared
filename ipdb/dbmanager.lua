@@ -537,7 +537,7 @@ dbmanager.get_from_modstorage = function(userentry_id, modname, key, limit)
 end
 
 local update_modstorage1
-local update_modstorage1_stmt = [[UPDATE Modstorage_new
+local update_modstorage1_stmt = [[UPDATE Modstorage
 SET modname      = COALESCE(?, modname),
     userentry_id = COALESCE(?, userentry_id),
     key          = COALESCE(?, key),

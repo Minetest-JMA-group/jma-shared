@@ -224,16 +224,29 @@ end
 
 		local player = core.get_player_by_name(name)
 		if player and player:get_meta():get_string("mute_chat_access") == "false" then
-			core.chat_send_player(name, "You're muted. No one can read your messages.")
+			core.chat_send_player(name, "You're muted. Your messages are not visible to anyone.")
 			return true
 		end
 
 		local expiry = mute_data.expiry and " until " .. os.date("%Y-%m-%d %H:%M", mute_data.expiry) or " permanently"
-		core.chat_send_player(name, "You are muted (" .. scope .. ")" .. expiry .. ". Reason: " .. (mute_data.reason or "none"))
+		core.chat_send_player(name, "You are muted (" .. scope .. ")" .. expiry .. ". Reason: " .. (mute_data.reason or "none") .. ". Moderators can still see your messages.")
 
 		local muted_message = string.format("[MUTED:%s] <%s>: %s", scope, name, message)
 		chat_lib.send_message_to_privileged(muted_message, {ban = true, pmute = true}, name)
 		internal.log_message_to_discord("**%s**: %s", name, message)
+		return true
+	end)
+
+	core.register_on_chatcommand(function(name, command, params)
+		local scope = internal.get_active_mute(name)
+		if not scope then
+			return
+		end
+		local def = core.registered_chatcommands[command]
+		if not def or not def.privs or not def.privs.shout then
+			return
+		end
+		core.chat_send_player(name, "You're muted. Commands that write to chat are disabled.")
 		return true
 	end)
 

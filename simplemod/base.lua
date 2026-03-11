@@ -292,10 +292,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		local best_id = nil
 		local ids = {}
 		for row_id, payload in pairs(rows) do
-			row_id = tonumber(row_id)
-			if row_id then
-				ids[#ids + 1] = row_id
-			end
+			ids[#ids + 1] = row_id
 			local data = payload and payload.value or nil
 			local aux = payload and tonumber(payload.ancillary) or nil
 			local parsed = data and core.deserialize(data) or nil

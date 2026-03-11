@@ -80,6 +80,9 @@ simplemod.is_muted_ip(target)                               → boolean
 -- Name or IP mute (combined)
 simplemod.is_muted(target)                                  → boolean
 
+-- Mute chat access restriction (online players only)
+simplemod.is_restricted(target)                             → boolean
+
 -- Combined log for a player (table of entries, newest first)
 simplemod.get_player_log(player) → { {type, scope, target, source, reason, duration, time}, ... }
 ```

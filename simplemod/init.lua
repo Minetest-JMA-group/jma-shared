@@ -27,6 +27,8 @@ local function disable_simplemod(reason)
 	simplemod.mute_ip = function() return false, reason end
 	simplemod.unmute_ip = function() return false, reason end
 	simplemod.is_muted_ip = function() return false end
+	simplemod.is_muted = function() return false end
+	simplemod.is_restricted = function() return false end
 	simplemod.get_player_log = function() return {} end
 end
 

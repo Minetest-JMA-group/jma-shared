@@ -203,13 +203,13 @@ end
 			local ban = internal.get_active_punishment_entry("name", name, "ban")
 			if ban then
 				internal.log_ban_join_attempt("name", name, "login", ban.reason)
-				return internal.format_ban_message("You are banned", ban.reason)
+				return internal.format_ban_message("name", ban)
 			end
 		end
 		local ban = internal.get_ip_ban(name)
 		if ban then
 			internal.log_ban_join_attempt("ip", name, "login", ban.reason)
-			return internal.format_ban_message("Your IP is banned", ban.reason)
+			return internal.format_ban_message("ip", ban)
 		end
 	end)
 

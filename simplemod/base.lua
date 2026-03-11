@@ -83,8 +83,26 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		}
 	end
 
-	function shared.format_ban_message(prefix, reason)
-		local msg = prefix .. (reason ~= "" and ": " .. reason or "")
+	function shared.format_ban_message(scope, ban)
+		local scope_text = scope == "ip"
+			and "This account and IP address are banned."
+			or "This account is banned by username."
+		local reason = (ban and ban.reason and ban.reason ~= "") and ban.reason or "none"
+		local tz = os.date("%Z")
+		local issued = (ban and ban.time) and os.date("%Y-%m-%d %H:%M:%S", ban.time) or "unknown"
+		local expires = (ban and ban.expiry) and os.date("%Y-%m-%d %H:%M:%S", ban.expiry) or "never"
+		local now = os.date("%Y-%m-%d %H:%M:%S")
+		local msg = string.format(
+			"%s Reason: %s. Issued: %s %s. Expires: %s %s. Server time now: %s %s.",
+			scope_text,
+			reason,
+			issued,
+			tz,
+			expires,
+			tz,
+			now,
+			tz
+		)
 		return msg .. BAN_APPEAL_SUFFIX
 	end
 
@@ -724,7 +742,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		report_action("name", "ban", target, source, reason, duration_sec)
 		local player = core.get_player_by_name(target)
 		if player then
-			local msg = shared.format_ban_message("You have been banned", ban.reason)
+			local msg = shared.format_ban_message("name", ban)
 			core.disconnect_player(target, msg)
 		end
 		return true
@@ -808,7 +826,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		add_action_log("ip", "ban", target, source, reason, duration_sec)
 		report_action("IP", "ban", target, source, reason, duration_sec)
 
-		local msg = shared.format_ban_message("Your IP has been banned", ban.reason)
+		local msg = shared.format_ban_message("ip", ban)
 		local ids, names_err = get_ip_identifiers(target)
 		if names_err then
 			core.log("warning", "[simplemod] failed to get linked names for IP ban target " .. target .. ": " .. tostring(names_err))

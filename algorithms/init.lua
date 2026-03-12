@@ -454,6 +454,18 @@ else
 	end
 end
 
+algorithms.is_ipv4 = function(str)
+	if type(str) ~= "string" then
+		return false
+	end
+	local pattern = "^%d+%.%d+%.%d+%.%d+$"
+	return str:match(pattern) ~= nil
+end
+
+algorithms.is_ip = function(str)
+	return algorithms.is_ipv4(str) or algorithms.is_ipv6(str)
+end
+
 algorithms.bit = algorithms.require("bit")
 if not algorithms.bit and verbose then
 	core.log("warning", "[algorithms]: bit module not available")

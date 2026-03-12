@@ -246,11 +246,6 @@ ipdb.register_new_ids = function(name, ip)
 	no_newentries = old_no_newentries
 end
 
-local function is_ipv4(str)
-	local pattern = "^%d+%.%d+%.%d+%.%d+$"
-	return str:match(pattern) ~= nil
-end
-
 local is_in_transaction = false
 local help_string = [[
   • ipdb console:
@@ -263,6 +258,7 @@ isolate name|ip <identifier>: Create an isolated entry (no_merging flag set) and
 newentries [yes|no]: If the argument is given, change whether new user entries are allowed or not. Otherwise print current value.
 list <IP|username>: List all IPs and usernames linked with the given one
 log_merges [yes|no]: If the argument is given, change whether entry merge events are logged. Otherwise print the current value.
+move <what> <where>: Move the name/IP given in `what` to the entry that name/IP given in `where` belongs to
 ]]
 core.register_chatcommand("ipdb", {
 	description = "Interface to the IP-based player entry database",
@@ -277,6 +273,48 @@ core.register_chatcommand("ipdb", {
 			return true, help_string
 		end
 
+		if cmd == "move" then
+			local what = iter()
+			local where  = iter()
+			if not what or not where then
+				return false, "Usage: /ipdb move <what> <where>"
+			end
+			local err = db:exec("BEGIN")
+			if err ~= sqlite.OK then log(err); return false, "Internal error" end
+			local ok, err = pcall(function()
+				local is_ipwhat = algorithms.is_ip(what)
+				local is_ipwhere = algorithms.is_ip(where)
+				local what_entry = is_ipwhat and dbmanager.ip_exists(what) or dbmanager.user_exists(what)
+				local where_entry = is_ipwhere and dbmanager.ip_exists(where) or dbmanager.user_exists(where)
+				if not what_entry then
+					return what.." is unknown to ipdb"
+				end
+				if not where_entry then
+					return where.." is unknown to ipdb"
+				end
+				if is_ipwhat then
+					dbmanager.reassociate_ids(where_entry.userentry_id, nil, what_entry.id)
+				else
+					dbmanager.reassociate_ids(where_entry.userentry_id, what_entry.id, nil)
+				end
+			end)
+			if not ok then
+				log(err)
+				db:exec("ROLLBACK")
+				return false, "Internal error"
+			end
+			local commiterr = db:exec("COMMIT")
+			if commiterr ~= sqlite.OK then
+				log(commiterr)
+				db:exec("ROLLBACK")
+				return false, "Internal error"
+			end
+			if err then
+				return true, err
+			end
+			return true, "Move successful"
+		end
+
 		if cmd == "add_name" then
 			local newname = iter()
 			if not newname then
@@ -288,7 +326,7 @@ core.register_chatcommand("ipdb", {
 
 		if cmd == "add_ip" then
 			local newip = iter()
-			if not newip or not is_ipv4(newip) then
+			if not newip or not algorithms.is_ip(newip) then
 				return false, "Usage: /ipdb add_name <IP Address>"
 			end
 			ipdb.register_new_ids(nil, newip)
@@ -358,7 +396,7 @@ core.register_chatcommand("ipdb", {
 			local ok, ret = pcall(function()
 				local ident
 				local idtype
-				if is_ipv4(arg) then
+				if algorithms.is_ip(arg) then
 					ident = dbmanager.ip_exists(arg)
 					idtype = "IP"
 				else
@@ -374,7 +412,7 @@ core.register_chatcommand("ipdb", {
 			if not ok then
 				log(ret)
 				db:exec("ROLLBACK")
-				return "Internal error"
+				return false, "Internal error"
 			end
 			err = db:exec("COMMIT")
 			if err ~= sqlite.OK then log(err); db:exec("ROLLBACK") end
@@ -412,7 +450,7 @@ core.register_chatcommand("ipdb", {
 
 		if cmd == "rm_ip" then
 			local delip = iter()
-			if not delip or not is_ipv4(delip) then
+			if not delip or not algorithms.is_ip(delip) then
 				return false, "Usage: /ipdb rm_ip <IP Address>"
 			end
 			local err = db:exec("BEGIN")
@@ -443,7 +481,7 @@ core.register_chatcommand("ipdb", {
 			if subtype ~= "name" and subtype ~= "ip" then
 				return false, "Type must be 'name' or 'ip'"
 			end
-			if subtype == "ip" and not is_ipv4(identifier) then
+			if subtype == "ip" and not algorithms.is_ip(identifier) then
 				return false, "Invalid IP address format"
 			end
 
@@ -733,7 +771,7 @@ ipdb.get_mod_storage = function(func)
 			return modstorage_getcontext(self._modname, name, dbmanager.user_exists)
 		end,
 		get_context_by_ip = function(self, ip)
-			if type(ip) ~= "string" or not is_ipv4(ip) then
+			if type(ip) ~= "string" or not algorithms.is_ip(ip) then
 				return nil, "Argument must be an IP address"
 			end
 			if type(self) ~= "table" or type(self._modname) ~= "string" then

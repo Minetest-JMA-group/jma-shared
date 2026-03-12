@@ -57,6 +57,7 @@ Requires `ban` privilege.
 | `/ipdb newentries [yes\|no]` | Show or change whether new entries are allowed. |
 | `/ipdb list <IP\|username>` | List all IPs and usernames linked with the given one. |
 | `/ipdb log_merges [yes\|no]` | Show or change whether entry merge events are logged. |
+| `/ipdb move <what> <where>` | Move the name/IP given in `what` to the entry that name/IP given in `where` belongs to. |
 
 ### Migration Commands
 Requires `dev` privilege.

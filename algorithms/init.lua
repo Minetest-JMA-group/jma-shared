@@ -142,7 +142,7 @@ local insecure_env = {
 algorithms.execute = nil
 
 if algorithms.os ~= "Linux" then
-	local dummy = function() return "[algorithms]: Function not implemented", 38 end
+	local dummy = function(...) return "[algorithms]: Function not implemented", 38 end
 	insecure_env.setxattr = dummy
 	insecure_env.getxattr = dummy
 	insecure_env.write = dummy
@@ -158,6 +158,7 @@ if algorithms.os ~= "Linux" then
 			getxattr = insecure_env.getxattr
 		}
 	end
+	algorithms.is_ipv6 = function(str) return false end
 
 	algorithms.errno = {}
 	algorithms.fcntl = {}
@@ -185,10 +186,26 @@ else
 		int open(const char *pathname, int flags, ...);
 		int close(int fd);
 		int unlink(const char *path);
+		typedef struct in6_addr {
+			unsigned char s6_addr[16];
+		} in6_addr;
+		int inet_pton(int af, const char *src, void *dst);
 	]]
 	algorithms.signal.SIG_DFL = ffi.cast("sighandler_t", 0)
 	algorithms.signal.SIG_IGN = ffi.cast("sighandler_t", 1)
 	algorithms.signal.SIG_ERR = ffi.cast("sighandler_t", -1)
+	local AF_INET6 = 10
+	local addr = ffi.new("in6_addr[1]")
+	algorithms.is_ipv6 = function(str)
+		if type(str) ~= "string" then
+			return false
+		end
+		-- Remove surrounding brackets (e.g., [::1] -> ::1)
+		local clean = str:match("^%[(.*)%]$") or str
+		-- Call inet_pton; returns 1 on success, 0 on invalid input, -1 on error
+		local result = ffi.C.inet_pton(AF_INET6, clean, addr)
+		return result == 1
+	end
 
 	-- Return: err (string or nil), errno (number or nil)
 	insecure_env.setxattr = function(path, name, value, flags)

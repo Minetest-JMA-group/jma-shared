@@ -203,13 +203,17 @@ end
 			local ban = internal.get_active_punishment_entry("name", name, "ban")
 			if ban then
 				internal.log_ban_join_attempt("name", name, "login", ban.reason)
-				return internal.format_ban_message("name", ban)
+				local msg = internal.format_ban_message("name", ban)
+				core.log("action", string.format("[simplemod] Name-banned player %s attempted to join. Reason: %s", name, ban.reason))
+				return msg
 			end
 		end
 		local ban = internal.get_ip_ban(name)
 		if ban then
 			internal.log_ban_join_attempt("ip", name, "login", ban.reason)
-			return internal.format_ban_message("ip", ban)
+			local msg = internal.format_ban_message("ip", ban)
+			core.log("action", string.format("[simplemod] IP-banned player %s attempted to join. Reason: %s", name, ban.reason))
+			return msg
 		end
 	end)
 

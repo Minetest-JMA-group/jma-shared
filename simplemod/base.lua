@@ -488,7 +488,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		return values
 	end
 
-	function get_best_ip_punishment(userentry_id, key_name)
+	local function get_best_ip_punishment(userentry_id, key_name)
 		local ok_rows, rows_or_err = pcall(dbmanager.get_from_modstorage, userentry_id, MODNAME, key_name)
 		if not ok_rows then
 			core.log("warning", "[simplemod] failed to read modstorage for key " .. tostring(key_name) .. ": " .. tostring(rows_or_err))

@@ -18,7 +18,7 @@ end
 
 -- Function to get playtime
 function playtime.get_total_playtime(name)
-	if not core.get_player_by_name(name) then
+	if not core.get_player_by_name(name) or not total[name] then
 		return playtime.load_playtime(name)
 	end
 

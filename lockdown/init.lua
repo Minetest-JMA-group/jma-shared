@@ -7,6 +7,10 @@ local modstorage = core.get_mod_storage()
 local reglock = modstorage:get_int("reglock") == 1
 local lockdown_until = modstorage:get_int("lockdown_until")
 
+local whitelist_min_playtime = tonumber(core.settings:get("whitelist_min_playtime")) or 15
+local disconnect_message = "Server Lockdown!\nWe aren't accepting new players right now.\n" ..
+	"If you want to create a new account, contact us on Discord: www.ctf.jma-sig.de or E-Mail loki@jma-sig.de"
+
 function lockdown.is_enabled()
 	if lockdown_until > 0 then
 		if os.time() >= lockdown_until then
@@ -65,20 +69,32 @@ function lockdown.list_whitelist()
 end
 
 core.register_on_prejoinplayer(function(name)
-	if lockdown.is_enabled()
-	and core.get_auth_handler().get_auth(name) == nil
-	and not lockdown.is_whitelisted(name) then
+	local auth = core.get_auth_handler().get_auth(name)
+	-- Block existing accounts with too little playtime (except whitelisted).
+	if auth ~= nil and not lockdown.is_whitelisted(name) then
+		local ptime = playtime.get_total_playtime(name) or 0
+		if ptime < whitelist_min_playtime then
+			core.log("action", "[lockdown] Blocked join attempt for low-playtime account: " .. name .. " (" .. tostring(ptime) .. "s < " .. whitelist_min_playtime .. "s)")
+			return disconnect_message
+		end
+	end
+
+	if lockdown.is_enabled() and auth == nil and not lockdown.is_whitelisted(name) then
 		core.log("action", "[lockdown] Blocked new player registration attempt: " .. name)
-		return "Server Lockdown!\nWe aren't accepting new players right now.\n" ..
-			"If you want to create a new account, contact us on Discord: www.ctf.jma-sig.de or E-Mail loki@jma-sig.de"
+		return disconnect_message
 	end
 end)
 
-core.register_on_joinplayer(function(player)
+core.register_on_leaveplayer(function(player)
 	local name = player:get_player_name()
-	if lockdown.is_whitelisted(name) then
+	if not lockdown.is_whitelisted(name) then
+		return
+	end
+
+	local ptime = playtime.get_total_playtime(name) or 0
+	if ptime >= whitelist_min_playtime then
 		lockdown.remove_whitelist(name)
-		core.log("action", "[lockdown] Player " .. name .. " joined, whitelist entry removed")
+		core.log("action", "[lockdown] Player " .. name .. " left with " .. tostring(ptime) .. "s playtime (>= " .. whitelist_min_playtime .. "s), whitelist entry removed")
 	end
 end)
 

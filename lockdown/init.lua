@@ -7,7 +7,7 @@ local modstorage = core.get_mod_storage()
 local reglock = modstorage:get_int("reglock") == 1
 local lockdown_until = modstorage:get_int("lockdown_until")
 
-local whitelist_min_playtime = tonumber(core.settings:get("whitelist_min_playtime")) or 15
+local whitelist_min_playtime = tonumber(core.settings:get("lockdown_whitelist_min_playtime")) or 10
 local disconnect_message = "Server Lockdown!\nWe aren't accepting new players right now.\n" ..
 	"If you want to create a new account, contact us on Discord: www.ctf.jma-sig.de or E-Mail loki@jma-sig.de"
 

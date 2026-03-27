@@ -69,19 +69,21 @@ function lockdown.list_whitelist()
 end
 
 core.register_on_prejoinplayer(function(name)
-	local auth = core.get_auth_handler().get_auth(name)
-	-- Block existing accounts with too little playtime (except whitelisted).
-	if auth ~= nil and not lockdown.is_whitelisted(name) then
-		local ptime = playtime.get_total_playtime(name) or 0
-		if ptime < whitelist_min_playtime then
-			core.log("action", "[lockdown] Blocked join attempt for low-playtime account: " .. name .. " (" .. tostring(ptime) .. "s < " .. whitelist_min_playtime .. "s)")
+    if lockdown.is_enabled() and not lockdown.is_whitelisted(name) then
+		local auth = core.get_auth_handler().get_auth(name)
+		if auth then
+			-- Block existing accounts with too little playtime (except whitelisted).
+			local ptime = playtime.get_total_playtime(name) or 0
+            if ptime < whitelist_min_playtime then
+                core.log("action",
+                    "[lockdown] Blocked join attempt for low-playtime account: " ..
+                    name .. " (" .. ptime .. "s < " .. whitelist_min_playtime .. "s)")
+                return disconnect_message
+            end
+        else
+			core.log("action", "[lockdown] Blocked new account registration attempt: " .. name)
 			return disconnect_message
 		end
-	end
-
-	if lockdown.is_enabled() and auth == nil and not lockdown.is_whitelisted(name) then
-		core.log("action", "[lockdown] Blocked new player registration attempt: " .. name)
-		return disconnect_message
 	end
 end)
 

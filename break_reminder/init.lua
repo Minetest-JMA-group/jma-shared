@@ -141,7 +141,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 
 		break_reminder.show_confirm_menu(player_name)
 	elseif formname == "break_reminder:confirm_menu" and fields.confirm then
-		simplemod.ban_name(player_name, (console), "You decided to take a break for "..player_data[player_name].text.."If you banned yourself by a mistake, please contact us on Discord: ctf.jma-sig.de or write an email to loki@jma-sig.de.", player_data[player_name].seconds)
+		simplemod.ban_name(player_name, "break_reminder", "You decided to take a break for "..player_data[player_name].text, player_data[player_name].seconds)
 	end
 
 end)

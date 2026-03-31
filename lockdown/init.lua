@@ -7,9 +7,16 @@ local modstorage = core.get_mod_storage()
 local reglock = modstorage:get_int("reglock") == 1
 local lockdown_until = modstorage:get_int("lockdown_until")
 
+local reg_cooldown = modstorage:contains("reg_cooldown") and modstorage:get_int("reg_cooldown") or 60
+local last_reg_timestamp = 0
 local whitelist_min_playtime = tonumber(core.settings:get("lockdown_whitelist_min_playtime")) or 10
-local disconnect_message = "Server Lockdown!\nWe aren't accepting new players right now.\n" ..
-	"If you want to create a new account, contact us on Discord: www.ctf.jma-sig.de or E-Mail loki@jma-sig.de"
+
+local contact_info = "Discord: www.ctf.jma-sig.de or E-Mail loki@jma-sig.de"
+local disconnect_message = "Server Lockdown!\nWe aren't accepting new players right now.\n\n" ..
+	"If you want to create a new account, contact us on " .. contact_info
+local disconnect_message_cooldown = "We aren't accepting new players right now.\n" ..
+	"Please wait %s before trying to create a new account.\n\n" ..
+	"If you want to create a new account right now, contact us on " .. contact_info
 
 function lockdown.is_enabled()
 	if lockdown_until > 0 then
@@ -43,6 +50,18 @@ function lockdown.set(state, duration)
 	end
 end
 
+function lockdown.get_reg_cooldown()
+	return reg_cooldown
+end
+
+function lockdown.set_reg_cooldown(seconds)
+	reg_cooldown = tonumber(seconds) or 0
+	if reg_cooldown < 0 then
+		reg_cooldown = 0
+	end
+	modstorage:set_int("reg_cooldown", reg_cooldown)
+end
+
 function lockdown.is_whitelisted(name)
 	return modstorage:get_int("wl:" .. name) == 1
 end
@@ -69,8 +88,10 @@ function lockdown.list_whitelist()
 end
 
 core.register_on_prejoinplayer(function(name)
-    if lockdown.is_enabled() and not lockdown.is_whitelisted(name) then
-		local auth = core.get_auth_handler().get_auth(name)
+    local auth = core.get_auth_handler().get_auth(name)
+    local is_whitelisted = lockdown.is_whitelisted(name)
+
+    if lockdown.is_enabled() and not is_whitelisted then
 		if auth then
 			-- Block existing accounts with too little playtime (except whitelisted).
 			local ptime = playtime.get_total_playtime(name) or 0
@@ -85,6 +106,21 @@ core.register_on_prejoinplayer(function(name)
 			return disconnect_message
 		end
 	end
+
+	if not auth and not is_whitelisted then
+		local now = os.time()
+		local cd = reg_cooldown
+		if cd > 0 and now < last_reg_timestamp + cd then
+			local wait = algorithms.time_to_string(last_reg_timestamp + cd - now)
+			core.log("action",
+			"[lockdown] Blocked new account registration due to cooldown: " .. name .. " (wait " .. wait .. "s)")
+			return disconnect_message_cooldown:format(wait)
+		end
+	end
+end)
+
+core.register_on_newplayer(function(player)
+	last_reg_timestamp = os.time()
 end)
 
 core.register_on_leaveplayer(function(player)
@@ -96,7 +132,7 @@ core.register_on_leaveplayer(function(player)
 	local ptime = playtime.get_total_playtime(name) or 0
 	if ptime >= whitelist_min_playtime then
 		lockdown.remove_whitelist(name)
-		core.log("action", "[lockdown] Player " .. name .. " left with " .. tostring(ptime) .. "s playtime (>= " .. whitelist_min_playtime .. "s), whitelist entry removed")
+		core.log("action", "[lockdown] Player " .. name .. " left with " .. ptime .. "s playtime (>= " .. whitelist_min_playtime .. "s), whitelist entry removed")
 	end
 end)
 
@@ -136,6 +172,45 @@ core.register_chatcommand("lockdown", {
 			end
 		else
 			return false, "Usage: /lockdown [yes/no/show] [time]"
+		end
+	end,
+})
+
+core.register_chatcommand("regcooldown", {
+	description = "Configure registration cooldown",
+	params = "<set/get> [time]",
+	privs = {server = true},
+	func = function(name, param)
+		local parts = param:split(" ")
+		local action = parts[1]
+
+        if action == "set" then
+            local value = parts[2]
+            if not value or value == "" then
+                return false, "Usage: /regcooldown set <time> (0 to disable)"
+            end
+
+			local time = algorithms.parse_time(value)
+			if not time or time < 0 then
+				return false, "Usage: /regcooldown set <time> (0 to disable)"
+			end
+			lockdown.set_reg_cooldown(time)
+			if time > 0 then
+				core.log("action", "[lockdown] Player " .. name .. " set reg_cooldown to " .. time .. "s")
+				return true, "Registration cooldown set to " .. time .. " seconds"
+			else
+				core.log("action", "[lockdown] Player " .. name .. " disabled reg_cooldown")
+				return true, "Registration cooldown disabled"
+			end
+		elseif action == "get" then
+			local cd = reg_cooldown
+			if cd > 0 then
+				return true, "Registration cooldown is " .. algorithms.time_to_string(cd) .. " seconds"
+			else
+				return true, "Registration cooldown is disabled"
+			end
+		else
+			return false, "Usage: /regcooldown <set/get> [time]"
 		end
 	end,
 })

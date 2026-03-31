@@ -113,7 +113,7 @@ core.register_on_prejoinplayer(function(name)
 		if cd > 0 and now < last_reg_timestamp + cd then
 			local wait = algorithms.time_to_string(last_reg_timestamp + cd - now)
 			core.log("action",
-			"[lockdown] Blocked new account registration due to cooldown: " .. name .. " (wait " .. wait .. "s)")
+			"[lockdown] Blocked new account registration due to cooldown: " .. name .. " (wait " .. wait .. ")")
 			return disconnect_message_cooldown:format(wait)
 		end
 	end

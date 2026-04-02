@@ -409,4 +409,17 @@ end
 			return true, "Opened simplemod GUI."
 		end,
 	})
+
+	core.register_chatcommand("mutereason", {
+		description = "Check the reason why moderator muted you",
+		func = function(name)
+			local scope, mute_data = internal.get_active_mute(name)
+            if not scope then
+                return false, "You are not currently muted."
+            end
+            local expiry = mute_data.expiry and " until " .. os.date("%Y-%m-%d %H:%M", mute_data.expiry) or
+            " permanently"
+			return true, "You are muted (" .. scope .. ")" .. expiry .. ". Reason: " .. (mute_data.reason or "none")
+		end
+	})
 end

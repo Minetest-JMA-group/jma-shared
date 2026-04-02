@@ -25,6 +25,11 @@ local notify_interval = 60*60 -- 1 hour
 
 local player_data = {}
 
+local bantime_state = {
+	selected_ban_time_text = nil,
+	selected_ban_time_seconds = nil
+}
+
 local bantime_index = 1 --start on 30min to avoid an error when a player gets banned
 
 local bantime_display_table = {"30min", "1h", "1d", "10d", "30d"}
@@ -55,7 +60,7 @@ function break_reminder.show_reminder(playername)
 	end
 
 	local time_str
-
+    
 	if joined[playername] then
 		time_str = beautify_time(os.time()-joined[playername])
 	else
@@ -135,9 +140,8 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		end
 
 		break_reminder.show_confirm_menu(player_name)
-    elseif formname == "break_reminder:confirm_menu" and fields.confirm then
-		core.kick_player(player_name, string.format("You have been banned for %s. Reason: You decided to take a break.\n\n\n\n\
-			Wait, it's not a real ban?", player_data[player_name].text))
+	elseif formname == "break_reminder:confirm_menu" and fields.confirm then
+		simplemod.ban_name(player_name, "break_reminder", "You decided to take a break for "..player_data[player_name].text, player_data[player_name].seconds)
 	end
 
 end)

@@ -24,9 +24,12 @@ function jma_greeter.get_base_formspec(def)
 	return "formspec_version[7]"
 	.. string.format("size[%d,%d]", size.x, size.y)
 	.. "bgcolor[#00000000;false]"
-	.. string.format("box[0,0;%d,0.7;%s]", size.x, def.bar_color or "#000000ff")
-	.. string.format("hypertext[0,0;%d,0.7;title;<global valign=middle><b>%s</b>]",
-	size.x, core.formspec_escape(title))
+	.. string.format("box[0,0;%d,0.7;%s]", size.x, def.bar_color or "#2d42fc")
+	.. string.format(
+		"hypertext[0,0;%d,0.7;title;<global align=center valign=middle><b>%s</b>]",
+		size.x,
+		core.formspec_escape(title)
+	)
 end
 
 function jma_greeter.load_file(filename)
@@ -60,9 +63,9 @@ function jma_greeter.show_editor(pname, txt, title, actions)
 	local fs = jma_greeter.get_base_formspec({
 		title  = "Editor: " .. title,
 		size = {x = 11, y = 11},
-		bar_color = "#8547e8"
+		bar_color = "#2d42fc"
 	})
-	.. "box[0,0.7;11,9.1;black]"
+	.. "box[0,0.7;11,9.1;#10101b]"
 	.. "textarea[0.1,0.8;10.8,8.9;text;;" .. core.formspec_escape(txt or "") .. "]"
 	.. "button_exit[1.25,10;4,0.8;save;Save]"
 	.. "button_exit[5.75,10;4,0.8;cancel;Cancel]"

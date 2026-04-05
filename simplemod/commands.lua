@@ -414,12 +414,43 @@ end
 		description = "Check the reason why moderator muted you",
 		func = function(name)
 			local scope, mute_data = internal.get_active_mute(name)
-            if not scope then
-                return false, "You are not currently muted."
-            end
-            local expiry = mute_data.expiry and " until " .. os.date("%Y-%m-%d %H:%M", mute_data.expiry) or
-            " permanently"
+			if not scope then
+				return false, "You are not currently muted."
+			end
+			local expiry = mute_data.expiry and " until " .. os.date("%Y-%m-%d %H:%M", mute_data.expiry) or
+			" permanently"
 			return true, "You are muted (" .. scope .. ")" .. expiry .. ". Reason: " .. (mute_data.reason or "none")
 		end
 	})
+
+	core.register_chatcommand("muteappeal", {
+		params = "<reason>",
+		description = "Send a mute appeal to the staff team. The reason have to be at least 20 characters. If the reason doesnt makes sense the appeal will be rejected.",
+		func = function(name, param)
+			local scope, mute_data = internal.get_active_mute(name)
+
+			local new_param = param:gsub("^%s*(.-)%s*$", "%1") --delete the spaces
+			local length = #new_param
+
+			if not scope then
+				return false, "You are currently not muted."
+			end
+
+			if param == "" then
+				return false, "Please enter a reason to appeal an unmute."
+			end
+
+			if length < 20 then
+				return false, "Appeal have to be at least 20 characters long."
+			elseif length > 300 then
+				return false, "Appeal is too long."
+			else
+				if core.global_exists("relays") then
+					relays.send_report("***MUTEAPPEAL*** Player ".. name.." requested a muteappeal. Reason: "..param)
+					return true, "The appeal will be reviewed by the staff team soon."
+				end
+			end
+		end
+	})
 end
+

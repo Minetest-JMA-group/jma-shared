@@ -441,12 +441,12 @@ end
 			end
 
 			if length < 20 then
-				return false, "Appeal have to be at least 20 characters long."
+				return false, "Please describe the reason for your appeal detailed."
 			elseif length > 300 then
 				return false, "Appeal is too long."
 			else
 				if core.global_exists("relays") then
-					relays.send_report("***MUTEAPPEAL*** Player ".. name.." requested a muteappeal. Reason: "..param)
+					relays.send_report("**MUTEAPPEAL**: Player **".. name.."** requested a muteappeal. Reason: "..param)
 					return true, "The appeal will be reviewed by the staff team soon."
 				end
 			end

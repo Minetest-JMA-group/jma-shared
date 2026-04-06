@@ -226,14 +226,16 @@ end
 			return
 		end
 
+		local expiry = mute_data.expiry and " until " .. os.date("%Y-%m-%d %H:%M", mute_data.expiry) or " permanently"
+		local base_message = "You are muted (" .. scope .. ")" .. expiry .. ". Reason: " .. (mute_data.reason or "none") .. ". "
+
 		local player = core.get_player_by_name(name)
 		if player and player:get_meta():get_string("mute_chat_access") == "false" then
-			core.chat_send_player(name, "You're muted. Your messages are not visible to anyone.")
+			core.chat_send_player(name, base_message .. "Your messages are not visible to anyone.")
 			return true
 		end
 
-		local expiry = mute_data.expiry and " until " .. os.date("%Y-%m-%d %H:%M", mute_data.expiry) or " permanently"
-		core.chat_send_player(name, "You are muted (" .. scope .. ")" .. expiry .. ". Reason: " .. (mute_data.reason or "none") .. ". Moderators can still see your messages.")
+		core.chat_send_player(name, base_message .. "Moderators can still see your messages.")
 
 		local muted_message = string.format("[MUTED:%s] <%s>: %s", scope, name, message)
 		chat_lib.send_message_to_privileged(muted_message, {ban = true, pmute = true}, name)
@@ -427,7 +429,7 @@ end
 		params = "<reason>",
 		description = "Send a mute appeal to the staff team. The reason have to be at least 20 characters. If the reason doesnt makes sense the appeal will be rejected.",
 		func = function(name, param)
-			local scope, mute_data = internal.get_active_mute(name)
+			local scope = internal.get_active_mute(name)
 
 			local new_param = param:gsub("^%s*(.-)%s*$", "%1") --delete the spaces
 			local length = #new_param
@@ -445,12 +447,9 @@ end
 			elseif length > 300 then
 				return false, "Appeal is too long."
 			else
-				if core.global_exists("relays") then
-					relays.send_report("**MUTEAPPEAL**: Player **".. name.."** requested a muteappeal. Reason: "..param)
-					return true, "The appeal will be reviewed by the staff team soon."
-				end
+				relays.send_report("**MUTEAPPEAL**: Player **".. name.."** requested a muteappeal. Reason: "..param)
+				return true, "The appeal will be reviewed by the staff team soon."
 			end
 		end
 	})
 end
-

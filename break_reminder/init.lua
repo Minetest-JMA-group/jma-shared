@@ -25,12 +25,7 @@ local notify_interval = 60*60 -- 1 hour
 
 local player_data = {}
 
-local bantime_state = {
-	selected_ban_time_text = nil,
-	selected_ban_time_seconds = nil
-}
-
-local bantime_index = 1 --start on 30min to avoid an error when a player gets banned
+local default_bantime_index = 1
 
 local bantime_display_table = {"30min", "1h", "1d", "10d", "30d"}
 local bantime_value_table = {
@@ -87,6 +82,9 @@ function break_reminder.show_reminder(playername)
 end
 
 function break_reminder.show_ban_menu(playername)
+	local data = player_data[playername]
+	local selected_index = data and data.index or default_bantime_index
+
 	local formspec =
 		"formspec_version[6]"..
 			"size[7,4.5]"..
@@ -94,7 +92,7 @@ function break_reminder.show_ban_menu(playername)
 				"<big>Timeout me</big>"..
 			"]"..
 			"label[2.4,1.4;3,3;Choose ban time:]"..
-			"dropdown[2,2;3,0.8;BanTime;"..table.concat(bantime_display_table, ",") ..";"..bantime_index.."]"..
+			"dropdown[2,2;3,0.8;BanTime;"..table.concat(bantime_display_table, ",") ..";"..selected_index.."]"..
 			"button_exit[4.7,3.4;2,0.8;ban;Ban me]"..
 			"button_exit[0.3,3.4;2,0.8;kick_me;Cancel]"
 
@@ -103,9 +101,13 @@ end
 
 function break_reminder.show_confirm_menu(playername)
 	local data = player_data[playername]
+	if not data then
+		core.chat_send_player(playername, "Invalid ban duration selection.")
+		break_reminder.show_ban_menu(playername)
+		return
+	end
 
-	local text = data and data.text or "0"
-	local seconds = data and data.seconds or 0
+	local text = data.text
 
 	local formspec =
 		"formspec_version[6]"..
@@ -127,33 +129,44 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	if formname == "break_reminder:reminder" and fields.kick_me then
 		core.kick_player(player_name, "You clicked 'Kick me' in the break reminder formspec.")
 	elseif formname == "break_reminder:reminder" and fields.ban_menu then
+		player_data[player_name] = nil
 		break_reminder.show_ban_menu(player_name)
 	elseif formname == "break_reminder:ban_menu" and fields.ban then
-
-		if selected_text and bantime_value_table[selected_text] then
-			player_data[player_name] = {
-				text = selected_text,
-				seconds = bantime_value_table[selected_text]
-			}
-		else
-			core.chat_send_player(player_name, "Unvalid selection!")
+		local text = selected_text
+		local index = table.indexof(bantime_display_table, text)
+		if not text or not index or not bantime_value_table[text] then
+			index = default_bantime_index
+			text = bantime_display_table[index]
 		end
-
+		player_data[player_name] = {
+			text = text,
+			seconds = bantime_value_table[text],
+			index = index
+		}
 		break_reminder.show_confirm_menu(player_name)
 	elseif formname == "break_reminder:confirm_menu" and fields.confirm then
-		simplemod.ban_name(player_name, "break_reminder", "You decided to take a break for "..player_data[player_name].text, player_data[player_name].seconds)
+		local data = player_data[player_name]
+		if not data then
+			core.chat_send_player(player_name, "No ban duration selected.")
+			break_reminder.show_ban_menu(player_name)
+			return
+		end
+		simplemod.ban_name(player_name, "break_reminder", "You decided to take a break for " .. data.text, data.seconds)
+		player_data[player_name] = nil
 	end
 
 end)
 
-core.register_on_joinplayer(function(player, last_login)
+core.register_on_joinplayer(function(player)
 	last_notified[player:get_player_name()] = os.time()
 	joined[player:get_player_name()] = os.time()
 end)
 
-core.register_on_leaveplayer(function(player, timed_out)
-	last_notified[player:get_player_name()] = nil
-	joined[player:get_player_name()] = nil
+core.register_on_leaveplayer(function(player)
+	local player_name = player:get_player_name()
+	last_notified[player_name] = nil
+	joined[player_name] = nil
+	player_data[player_name] = nil
 end)
 
 core.register_chatcommand("break_reminder", {

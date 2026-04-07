@@ -16,9 +16,7 @@ local do_restart = function()
 	for _, p in ipairs(core.get_connected_players()) do
 		core.disconnect_player(p:get_player_name(), disconnect_msg, true)
 	end
-	if not ie.os.execute(shell_command) then
-		core.chat_send_all("Restart failed!")
-	end
+	ie.os.execute(shell_command)
 end
 
 

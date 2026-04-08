@@ -17,6 +17,7 @@ local do_restart = function()
 		core.disconnect_player(p:get_player_name(), disconnect_msg, true)
 	end
 	ie.os.execute(shell_command)
+	core.after(2, core.request_shutdown, disconnect_msg, true)
 end
 
 

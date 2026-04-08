@@ -235,7 +235,7 @@ end
 			return true
 		end
 
-		core.chat_send_player(name, base_message .. "Moderators can still see your messages.")
+		core.chat_send_player(name, base_message .. "Moderators can still see your messages. Use /muteappeal to appeal your mute.")
 
 		local muted_message = string.format("[MUTED:%s] <%s>: %s", scope, name, message)
 		chat_lib.send_message_to_privileged(muted_message, {ban = true, pmute = true}, name)

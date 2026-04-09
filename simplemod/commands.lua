@@ -447,7 +447,7 @@ end
 			elseif length > 300 then
 				return false, "Appeal is too long."
 			else
-				relays.send_report("**MUTEAPPEAL**: Player **".. name.."** requested a muteappeal. Reason: "..param)
+				relays.send_feedback("**MUTEAPPEAL**: Player **".. name.."** requested a muteappeal. Reason: "..param)
 				return true, "The appeal will be reviewed by the staff team soon."
 			end
 		end

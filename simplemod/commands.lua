@@ -442,7 +442,7 @@ end
 			-- check if the cooldown is active for the player
 			if player_cooldowns[name] and player_cooldowns[name] > time then
 				local remaining = player_cooldowns[name] - time
-				return false, "<spaceholder1>"
+				return false, "<You already appealed this mute, you can only appeal an mute once.>"
 			end
 
 			if not scope then

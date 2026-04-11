@@ -442,8 +442,7 @@ end
 			-- check if the cooldown is active for the player
 			if player_cooldowns[name] and player_cooldowns[name] > time then
 				local remaining = player_cooldowns[name] - time
-				minetest.chat_send_player(name, "<spaceholder1>")
-				return false
+				return false, "<spaceholder1>"
 			end
 
 			if not scope then

@@ -425,14 +425,26 @@ end
 		end
 	})
 
+	local player_cooldowns = {}
+	local COOLDOWN_TIME = 172800
+
 	core.register_chatcommand("muteappeal", {
 		params = "<reason>",
 		description = "Send a mute appeal to the staff team. The reason have to be at least 20 characters. If the reason doesnt makes sense the appeal will be rejected.",
 		func = function(name, param)
 			local scope = internal.get_active_mute(name)
 
-			local new_param = param:gsub("^%s*(.-)%s*$", "%1") --delete the spaces
+			local new_param = param:gsub("^%s*(.-)%s*$", "%1") -- delete the spaces
 			local length = #new_param
+
+			local time = os.time()
+
+			-- check if the cooldown is active for the player
+			if player_cooldowns[name] and player_cooldowns[name] > time then
+				local remaining = player_cooldowns[name] - time
+				minetest.chat_send_player(name, "<spaceholder1>")
+				return false
+			end
 
 			if not scope then
 				return false, "You are currently not muted."
@@ -448,6 +460,8 @@ end
 				return false, "Appeal is too long."
 			else
 				relays.send_feedback("**MUTEAPPEAL**: Player **".. name.."** requested a muteappeal. Reason: "..param)
+				-- set cooldown time
+				player_cooldowns[name] = time + COOLDOWN_TIME
 				return true, "The appeal will be reviewed by the staff team soon."
 			end
 		end

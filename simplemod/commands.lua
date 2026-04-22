@@ -5,6 +5,14 @@ return function(internal)
 	local pending_cli_confirmations = {}
 	local pending_cli_confirmation_id = 0
 
+	-- Cache ipdb mod storage at load time (cannot be obtained at runtime)
+	local ipdb_storage = ipdb.get_mod_storage()
+	if not ipdb_storage then
+		internal.disabled = true
+		internal.disable_reason = "ipdb mod storage unavailable"
+		return
+	end
+
 	internal.on_player_leave = function(name)
 		pending_cli_confirmations[name] = nil
 	end
@@ -476,12 +484,7 @@ end
 				return false, "Usage: /sbinfo <player>"
 			end
 
-			-- Get ipdb storage context
-			local ipdb_storage = ipdb.get_mod_storage()
-			if not ipdb_storage then
-				return false, "ipdb storage unavailable"
-			end
-
+			-- Get ipdb storage context (cached at load time)
 			local ctx, ctx_err = ipdb_storage:get_context_by_name(target)
 			if not ctx then
 				-- Try IP if name not found

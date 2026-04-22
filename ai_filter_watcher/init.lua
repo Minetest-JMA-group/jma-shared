@@ -6,6 +6,7 @@ local modname = core.get_current_modname()
 local modpath = core.get_modpath(modname)
 local storage = core.get_mod_storage()
 local is_essentials = core.global_exists("essentials")
+local has_player_reports = core.global_exists("player_reports")
 
 -- These will be overridden from shareddb
 local WATCHER_MODE = "enabled"
@@ -393,6 +394,31 @@ local function process_batch()
 			name = { type = "string", description = "Player name to mute" },
 			duration = { type = "integer", description = "Mute duration in minutes", minimum = 1, maximum = 1440 },
 			reason = { type = "string", description = "Reason for muting" }
+		}
+	})
+
+	context:add_tool({
+		name = "report_player",
+		func = function(args)
+			if type(args) == "string" then return { error = "Invalid JSON string" } end
+			if not args or not args.reason then return {error = "Missing 'reason' parameter"} end
+			local player_name = args.name
+			if not player_name then return {error = "Missing 'name' parameter"} end
+			local reason = args.reason
+			if not has_player_reports then
+				return {error = "player_reports mod not available, cannot report player"}
+			end
+			player_reports.report(player_name, "AI Watcher", reason)
+			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
+			watcher_stats.last_action_time = os.time()
+			relays.send_action_report("**AI Watcher**: Reported player %s to moderators: %s", player_name, reason)
+			return { success = true, message = ("Player %s reported to moderators"):format(player_name) }
+		end,
+		description = "Report a player to human moderators for review (use when action already taken but offense is severe, or when unsure how to handle the situation)",
+		strict = false,
+		properties = {
+			name = { type = "string", description = "Player name to report" },
+			reason = { type = "string", description = "Detailed reason for reporting" }
 		}
 	})
 

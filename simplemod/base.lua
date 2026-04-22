@@ -74,13 +74,14 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		return reason_template_by_text[reason or ""] or "other"
 	end
 
-	local function make_punishment_entry(source, reason, duration_sec)
-		local now = os.time()
+	local function make_punishment_entry(source, reason, duration_sec, target, time)
+		local now = time or os.time()
 		return {
 			source = source,
 			reason = reason or "",
 			time = now,
 			expiry = duration_sec and duration_sec > 0 and now + duration_sec or nil,
+			target = target,
 		}
 	end
 
@@ -631,7 +632,8 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		return true
 	end
 
-	local function add_action_log(scope, action_type, target, source, reason, duration_sec)
+	local function add_action_log(scope, action_type, target, source, reason, duration_sec, time)
+		local now = time or os.time()
 		local entry = {
 			type = action_type,
 			scope = scope,
@@ -639,7 +641,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 			source = source,
 			reason = reason or "",
 			duration = duration_sec,
-			time = os.time(),
+			time = now,
 		}
 		if scope == "name" then
 			local ok, err = add_log_row(logs_entry_id, target, entry)
@@ -731,12 +733,13 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		if existing_ban and not can_overwrite_existing and not ban_extends_existing(existing_ban, duration_sec) then
 			return false, "Ban already exists; new ban must extend current ban duration"
 		end
-		local ban = make_punishment_entry(source, reason, duration_sec)
+		local now = os.time()
+		local ban = make_punishment_entry(source, reason, duration_sec, target, now)
 		local ok, err = upsert_name_entry(name_bans_entry_id, target, ban)
 		if not ok then
 			return false, err
 		end
-		add_action_log("name", "ban", target, source, reason, duration_sec)
+		add_action_log("name", "ban", target, source, reason, duration_sec, now)
 		report_action("name", "ban", target, source, reason, duration_sec)
 		local player = core.get_player_by_name(target)
 		if player then
@@ -769,12 +772,13 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 	end
 
 	function simplemod.mute_name(target, source, reason, duration_sec)
-		local mute = make_punishment_entry(source, reason, duration_sec)
+		local now = os.time()
+		local mute = make_punishment_entry(source, reason, duration_sec, target, now)
 		local ok, err = upsert_name_entry(name_mutes_entry_id, target, mute)
 		if not ok then
 			return false, err
 		end
-		add_action_log("name", "mute", target, source, reason, duration_sec)
+		add_action_log("name", "mute", target, source, reason, duration_sec, now)
 		report_action("name", "mute", target, source, reason, duration_sec)
 		return true
 	end
@@ -814,14 +818,15 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		if existing_ban and not can_overwrite_existing and not ban_extends_existing(existing_ban, duration_sec) then
 			return false, "Ban already exists; new ban must extend current ban duration"
 		end
-		local ban = make_punishment_entry(source, reason, duration_sec)
+		local now = os.time()
+		local ban = make_punishment_entry(source, reason, duration_sec, target, now)
 		local ok
 		ok, err = set_ip_data(target, "ban", core.serialize(ban), ban.expiry)
 		if not ok then
 			return false, err
 		end
 
-		add_action_log("ip", "ban", target, source, reason, duration_sec)
+		add_action_log("ip", "ban", target, source, reason, duration_sec, now)
 		report_action("IP", "ban", target, source, reason, duration_sec)
 
 		local msg = shared.format_ban_message("ip", ban)
@@ -909,13 +914,14 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		if not known_ok then
 			return false, known_err
 		end
-		local mute = make_punishment_entry(source, reason, duration_sec)
+		local now = os.time()
+		local mute = make_punishment_entry(source, reason, duration_sec, target, now)
 		local ok, err = set_ip_data(target, "mute", core.serialize(mute), mute.expiry)
 		if not ok then
 			return false, err
 		end
 
-		add_action_log("ip", "mute", target, source, reason, duration_sec)
+		add_action_log("ip", "mute", target, source, reason, duration_sec, now)
 		report_action("IP", "mute", target, source, reason, duration_sec)
 		return true
 	end
@@ -1000,6 +1006,27 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 			return at > bt
 		end)
 		return combined
+	end
+
+	function shared.query_logs_by_time(userentry_id, key, start_time, end_time, limit)
+		local logs = {}
+		if not userentry_id or not key then
+			return logs
+		end
+		local stmt = db:prepare("SELECT data FROM Modstorage WHERE userentry_id = ? AND modname = ? AND key = ? AND ancillary BETWEEN ? AND ? ORDER BY ancillary DESC, id DESC LIMIT ?")
+		if not stmt then
+			return logs
+		end
+		stmt:bind_values(userentry_id, MODNAME, key, start_time, end_time, limit or LOG_LIMIT)
+		while stmt:step() == SQLITE_ROW do
+			local data = stmt:get_value(0)
+			local entry = data and core.deserialize(data) or nil
+			if entry then
+				logs[#logs + 1] = entry
+			end
+		end
+		stmt:finalize()
+		return logs
 	end
 
 	function shared.get_active_mute(name)

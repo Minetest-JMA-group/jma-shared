@@ -5,6 +5,14 @@ return function(internal)
 	local pending_cli_confirmations = {}
 	local pending_cli_confirmation_id = 0
 
+	-- Cache ipdb mod storage at load time (cannot be obtained at runtime)
+	local ipdb_storage = ipdb.get_mod_storage()
+	if not ipdb_storage then
+		internal.disabled = true
+		internal.disable_reason = "ipdb mod storage unavailable"
+		return
+	end
+
 	internal.on_player_leave = function(name)
 		pending_cli_confirmations[name] = nil
 	end
@@ -464,5 +472,229 @@ end
 				return true, "The appeal will be reviewed by the staff team soon."
 			end
 		end
+	})
+
+	core.register_chatcommand("sbinfo", {
+		description = "Show active bans/mutes and linked accounts for a player",
+		params = "<player>",
+		privs = {ban = true},
+		func = function(name, param)
+			local target = param:match("^%s*(%S+)%s*$")
+			if not target then
+				return false, "Usage: /sbinfo <player>"
+			end
+
+			-- Get ipdb storage context (cached at load time)
+			local ctx, ctx_err = ipdb_storage:get_context_by_name(target)
+			if not ctx then
+				-- Try IP if name not found
+				if algorithms.is_ip(target) then
+					ctx, ctx_err = ipdb_storage:get_context_by_ip(target)
+				end
+				if not ctx then
+					return false, ctx_err or "Player/IP not found in ipdb"
+				end
+			end
+
+			-- Save userentry_id for log queries
+			local userentry_id = ctx._userentry_id
+
+			-- Get linked identifiers
+			local linked_ids = ctx:get_linked_ids()
+			ctx:finalize()
+
+			if not linked_ids then
+				linked_ids = { names = {}, ips = {} }
+			end
+			if not linked_ids.names then linked_ids.names = {} end
+			if not linked_ids.ips then linked_ids.ips = {} end
+
+			-- Check for active bans/mutes
+			local lines = {}
+
+			-- Check if target is IP or name
+			local is_target_ip = algorithms.is_ip(target)
+
+			if not is_target_ip then
+				-- Check name ban for player name
+				local name_ban = internal.get_active_punishment_entry("name", target, "ban")
+				if name_ban then
+					local line = string.format("[%s] ban (name): %s by %s", 
+						os.date("%Y-%m-%d %H:%M", name_ban.time or os.time()), 
+						target, name_ban.source or "unknown")
+					if name_ban.reason and name_ban.reason ~= "" then
+						line = line .. " (" .. name_ban.reason .. ")"
+					end
+					if name_ban.duration and name_ban.duration > 0 then
+						line = line .. " for " .. algorithms.time_to_string(name_ban.duration)
+					elseif name_ban.expiry then
+						local duration = name_ban.expiry - (name_ban.time or os.time())
+						if duration > 0 then
+							line = line .. " for " .. algorithms.time_to_string(duration)
+						end
+					end
+					table.insert(lines, line)
+				end
+
+				-- Check name mute for player name
+				local name_mute = internal.get_active_punishment_entry("name", target, "mute")
+				if name_mute then
+					local line = string.format("[%s] mute (name): %s by %s", 
+						os.date("%Y-%m-%d %H:%M", name_mute.time or os.time()), 
+						target, name_mute.source or "unknown")
+					if name_mute.reason and name_mute.reason ~= "" then
+						line = line .. " (" .. name_mute.reason .. ")"
+					end
+					if name_mute.duration and name_mute.duration > 0 then
+						line = line .. " for " .. algorithms.time_to_string(name_mute.duration)
+					elseif name_mute.expiry then
+						local duration = name_mute.expiry - (name_mute.time or os.time())
+						if duration > 0 then
+							line = line .. " for " .. algorithms.time_to_string(duration)
+						end
+					end
+					table.insert(lines, line)
+				end
+			end
+
+			-- Check IP ban/mute (works for both names and IPs)
+			local ip_ban = internal.get_active_punishment_entry("ip", target, "ban")
+			if ip_ban then
+				-- Determine display target: use entry.target if available (new data), otherwise query logs
+				local display_target = ip_ban.target
+				if not display_target then
+					-- Legacy data: query logs with time-range optimization
+					local ban_time = ip_ban.time or 0
+					local start_time = ban_time - 2
+					local end_time = ban_time + 2
+					
+					-- Calculate duration from active ban entry
+					local ban_duration = 0
+					if ip_ban.duration and ip_ban.duration > 0 then
+						ban_duration = ip_ban.duration
+					elseif ip_ban.expiry then
+						ban_duration = ip_ban.expiry - ban_time
+					end
+					
+					local logs = internal.query_logs_by_time(userentry_id, "log", start_time, end_time, 10)
+					local matching_entry = nil
+					
+					for _, entry in ipairs(logs) do
+						if entry.scope == "ip" and entry.type == "ban" then
+							-- Check for exact match on source, reason, and duration
+							local source_match = (entry.source or "") == (ip_ban.source or "")
+							local reason_match = (entry.reason or "") == (ip_ban.reason or "")
+							local duration_match = (entry.duration or 0) == ban_duration
+							
+							if source_match and reason_match and duration_match then
+								matching_entry = entry
+								break
+							end
+						end
+					end
+					
+					if matching_entry then
+						display_target = matching_entry.target
+					else
+						-- No exact match found - this shouldn't happen with correct data
+						display_target = target .. " (undeterminable)"
+					end
+				end
+				
+				local line = string.format("[%s] ban (ip): %s by %s", 
+					os.date("%Y-%m-%d %H:%M", ip_ban.time or os.time()), 
+					display_target, ip_ban.source or "unknown")
+				if ip_ban.reason and ip_ban.reason ~= "" then
+					line = line .. " (" .. ip_ban.reason .. ")"
+				end
+				if ip_ban.duration and ip_ban.duration > 0 then
+					line = line .. " for " .. algorithms.time_to_string(ip_ban.duration)
+				elseif ip_ban.expiry then
+					local duration = ip_ban.expiry - (ip_ban.time or os.time())
+					if duration > 0 then
+						line = line .. " for " .. algorithms.time_to_string(duration)
+					end
+				end
+				table.insert(lines, line)
+			end
+
+			local ip_mute = internal.get_active_punishment_entry("ip", target, "mute")
+			if ip_mute then
+				-- Determine display target: use entry.target if available (new data), otherwise query logs
+				local display_target = ip_mute.target
+				if not display_target then
+					-- Legacy data: query logs with time-range optimization
+					local mute_time = ip_mute.time or 0
+					local start_time = mute_time - 2
+					local end_time = mute_time + 2
+					
+					-- Calculate duration from active mute entry
+					local mute_duration = 0
+					if ip_mute.duration and ip_mute.duration > 0 then
+						mute_duration = ip_mute.duration
+					elseif ip_mute.expiry then
+						mute_duration = ip_mute.expiry - mute_time
+					end
+					
+					local logs = internal.query_logs_by_time(userentry_id, "log", start_time, end_time, 10)
+					local matching_entry = nil
+					
+					for _, entry in ipairs(logs) do
+						if entry.scope == "ip" and entry.type == "mute" then
+							-- Check for exact match on source, reason, and duration
+							local source_match = (entry.source or "") == (ip_mute.source or "")
+							local reason_match = (entry.reason or "") == (ip_mute.reason or "")
+							local duration_match = (entry.duration or 0) == mute_duration
+							
+							if source_match and reason_match and duration_match then
+								matching_entry = entry
+								break
+							end
+						end
+					end
+					
+					if matching_entry then
+						display_target = matching_entry.target
+					else
+						-- No exact match found - this shouldn't happen with correct data
+						display_target = target .. " (undeterminable)"
+					end
+				end
+				
+				local line = string.format("[%s] mute (ip): %s by %s", 
+					os.date("%Y-%m-%d %H:%M", ip_mute.time or os.time()), 
+					display_target, ip_mute.source or "unknown")
+				if ip_mute.reason and ip_mute.reason ~= "" then
+					line = line .. " (" .. ip_mute.reason .. ")"
+				end
+				if ip_mute.duration and ip_mute.duration > 0 then
+					line = line .. " for " .. algorithms.time_to_string(ip_mute.duration)
+				elseif ip_mute.expiry then
+					local duration = ip_mute.expiry - (ip_mute.time or os.time())
+					if duration > 0 then
+						line = line .. " for " .. algorithms.time_to_string(duration)
+					end
+				end
+				table.insert(lines, line)
+			end
+
+			-- Add linked accounts section
+			if #linked_ids.names > 0 or #linked_ids.ips > 0 then
+				table.insert(lines, "")
+				table.insert(lines, "Linked accounts:")
+				for _, linked_name in ipairs(linked_ids.names) do
+					table.insert(lines, "  " .. linked_name)
+				end
+				for _, linked_ip in ipairs(linked_ids.ips) do
+					table.insert(lines, "  " .. linked_ip)
+				end
+			end
+
+			if #lines == 0 then
+				return true, "No active bans/mutes found for " .. target
+			end
+
+			return true, table.concat(lines, "\n")
+		end,
 	})
 end

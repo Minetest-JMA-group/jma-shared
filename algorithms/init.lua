@@ -62,8 +62,11 @@ algorithms.require = function(libname)
 
 	local old_require = require
 	require = ie.require
-	local lib = require(libname)
+	local ok, lib = pcall(require, libname)
 	require = old_require
+	if not ok then
+		return nil
+	end
 	return lib
 end
 

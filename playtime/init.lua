@@ -141,3 +141,47 @@ core.register_chatcommand("playtime", {
 		return true, "Total playtime: " .. ptime_total_clock .. "\nCurrent playtime: " .. ptime_current_clock
 	end,
 })
+
+core.register_chatcommand("transfer_playtime", {
+    params = "<source> <destination>",
+    description = "Transfer playtime from one player to another",
+    privs = {server = true},
+    func = function(name, param)
+        local source_name, dest_name = param:match("^(%S+)%s+(%S+)$")
+        
+        if not source_name or not dest_name then
+            return false, "Usage: /transfer_playtime <source> <destination>"
+        end
+
+        if not core.player_exists(source_name) or not core.player_exists(dest_name) then
+            return false, "One or both players do not exist"
+        end
+
+        local time_to_transfer = playtime.get_total_playtime(source_name)
+        
+        if time_to_transfer <= 0 then
+            return false, "Source player has no playtime to transfer"
+        end
+
+        local dest_total = playtime.get_total_playtime(dest_name)
+        local new_total = dest_total + time_to_transfer
+
+        storage:set_int("playtime:" .. dest_name, new_total)
+        if total[dest_name] then
+            total[dest_name] = new_total
+            current[dest_name] = os.time()
+        end
+
+        storage:set_int("playtime:" .. source_name, 0)
+        if total[source_name] then
+            total[source_name] = 0
+            current[source_name] = os.time()
+        end
+
+        core.log("action", "[playtime] " .. name .. " transferred " .. time_to_transfer .. 
+            "s from " .. source_name .. " to " .. dest_name)
+
+        return true, "Transferred " .. playtime.seconds_to_clock(time_to_transfer) .. 
+            " from " .. source_name .. " to " .. dest_name .. "."
+    end,
+})

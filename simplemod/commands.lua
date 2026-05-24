@@ -477,7 +477,7 @@ end
 	core.register_chatcommand("sbinfo", {
 		description = "Show active bans/mutes and linked accounts for a player",
 		params = "<player>",
-		privs = {ban = true},
+		privs = { server_shield_manager = true },
 		func = function(name, param)
 			local target = param:match("^%s*(%S+)%s*$")
 			if not target then
@@ -519,8 +519,8 @@ end
 				-- Check name ban for player name
 				local name_ban = internal.get_active_punishment_entry("name", target, "ban")
 				if name_ban then
-					local line = string.format("[%s] ban (name): %s by %s", 
-						os.date("%Y-%m-%d %H:%M", name_ban.time or os.time()), 
+					local line = string.format("[%s] ban (name): %s by %s",
+						os.date("%Y-%m-%d %H:%M", name_ban.time or os.time()),
 						target, name_ban.source or "unknown")
 					if name_ban.reason and name_ban.reason ~= "" then
 						line = line .. " (" .. name_ban.reason .. ")"
@@ -539,8 +539,8 @@ end
 				-- Check name mute for player name
 				local name_mute = internal.get_active_punishment_entry("name", target, "mute")
 				if name_mute then
-					local line = string.format("[%s] mute (name): %s by %s", 
-						os.date("%Y-%m-%d %H:%M", name_mute.time or os.time()), 
+					local line = string.format("[%s] mute (name): %s by %s",
+						os.date("%Y-%m-%d %H:%M", name_mute.time or os.time()),
 						target, name_mute.source or "unknown")
 					if name_mute.reason and name_mute.reason ~= "" then
 						line = line .. " (" .. name_mute.reason .. ")"
@@ -567,7 +567,7 @@ end
 					local ban_time = ip_ban.time or 0
 					local start_time = ban_time - 2
 					local end_time = ban_time + 2
-					
+
 					-- Calculate duration from active ban entry
 					local ban_duration = 0
 					if ip_ban.duration and ip_ban.duration > 0 then
@@ -575,24 +575,24 @@ end
 					elseif ip_ban.expiry then
 						ban_duration = ip_ban.expiry - ban_time
 					end
-					
+
 					local logs = internal.query_logs_by_time(userentry_id, "log", start_time, end_time, 10)
 					local matching_entry = nil
-					
+
 					for _, entry in ipairs(logs) do
 						if entry.scope == "ip" and entry.type == "ban" then
 							-- Check for exact match on source, reason, and duration
 							local source_match = (entry.source or "") == (ip_ban.source or "")
 							local reason_match = (entry.reason or "") == (ip_ban.reason or "")
 							local duration_match = (entry.duration or 0) == ban_duration
-							
+
 							if source_match and reason_match and duration_match then
 								matching_entry = entry
 								break
 							end
 						end
 					end
-					
+
 					if matching_entry then
 						display_target = matching_entry.target
 					else
@@ -600,9 +600,9 @@ end
 						display_target = target .. " (undeterminable)"
 					end
 				end
-				
-				local line = string.format("[%s] ban (ip): %s by %s", 
-					os.date("%Y-%m-%d %H:%M", ip_ban.time or os.time()), 
+
+				local line = string.format("[%s] ban (ip): %s by %s",
+					os.date("%Y-%m-%d %H:%M", ip_ban.time or os.time()),
 					display_target, ip_ban.source or "unknown")
 				if ip_ban.reason and ip_ban.reason ~= "" then
 					line = line .. " (" .. ip_ban.reason .. ")"
@@ -627,7 +627,7 @@ end
 					local mute_time = ip_mute.time or 0
 					local start_time = mute_time - 2
 					local end_time = mute_time + 2
-					
+
 					-- Calculate duration from active mute entry
 					local mute_duration = 0
 					if ip_mute.duration and ip_mute.duration > 0 then
@@ -635,24 +635,24 @@ end
 					elseif ip_mute.expiry then
 						mute_duration = ip_mute.expiry - mute_time
 					end
-					
+
 					local logs = internal.query_logs_by_time(userentry_id, "log", start_time, end_time, 10)
 					local matching_entry = nil
-					
+
 					for _, entry in ipairs(logs) do
 						if entry.scope == "ip" and entry.type == "mute" then
 							-- Check for exact match on source, reason, and duration
 							local source_match = (entry.source or "") == (ip_mute.source or "")
 							local reason_match = (entry.reason or "") == (ip_mute.reason or "")
 							local duration_match = (entry.duration or 0) == mute_duration
-							
+
 							if source_match and reason_match and duration_match then
 								matching_entry = entry
 								break
 							end
 						end
 					end
-					
+
 					if matching_entry then
 						display_target = matching_entry.target
 					else
@@ -660,9 +660,9 @@ end
 						display_target = target .. " (undeterminable)"
 					end
 				end
-				
-				local line = string.format("[%s] mute (ip): %s by %s", 
-					os.date("%Y-%m-%d %H:%M", ip_mute.time or os.time()), 
+
+				local line = string.format("[%s] mute (ip): %s by %s",
+					os.date("%Y-%m-%d %H:%M", ip_mute.time or os.time()),
 					display_target, ip_mute.source or "unknown")
 				if ip_mute.reason and ip_mute.reason ~= "" then
 					line = line .. " (" .. ip_mute.reason .. ")"

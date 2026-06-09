@@ -1074,7 +1074,12 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 	end
 
 	function shared.format_active_entry(player, data)
-		local expiry = data.expiry and " until " .. os.date("%Y-%m-%d %H:%M", data.expiry) or ""
+		local expiry = ""
+		if data.expiry then
+			local expiry_date = os.date("%Y-%m-%d %H:%M", data.expiry)
+			local remaining = math.max(0, data.expiry - (data.time or os.time()))
+			expiry = " until " .. expiry_date .. " (in " .. algorithms.time_to_string(remaining) .. ")"
+		end
 		return string.format("%s: %s (by %s)%s", player, data.reason, data.source, expiry)
 	end
 

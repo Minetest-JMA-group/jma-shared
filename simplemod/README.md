@@ -35,7 +35,7 @@ All commands require `ban` privilege (for bans) or `pmute` privilege (for mutes)
 | `/sbunban <player_or_ip> <name\|ip> [reason]` | Unban by name or IP |
 | `/sbmute <player_or_ip> <name\|ip> [--new] [time] <reason>` | Mute by name or IP |
 | `/sbunmute <player_or_ip> <name\|ip> [reason]` | Unmute by name or IP |
-| `/sbbanlist` | List all active bans (name + IP) |
+| `/sbbanlist [limit] [name\|duration]` | List active bans (name + IP), with total counts |
 | `/sbmutelist` | List all active mutes (name + IP) |
 | `/sblog <player>` | Show combined log for a player |
 | `/sblogjoins <on\|off>` | Enable or disable logging of join attempts by banned players |

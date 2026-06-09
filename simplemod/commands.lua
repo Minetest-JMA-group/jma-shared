@@ -328,21 +328,80 @@ end
 
 	core.register_chatcommand("sbbanlist", {
 		description = "List all active bans (name and IP)",
+		params = "[limit] [name|duration]",
 		privs = {ban = true},
-		func = function()
+		func = function(_, param)
+			local limit = 10
+			local sort_by = "name"
+			for token in (param or ""):gmatch("%S+") do
+				local numeric_limit = tonumber(token)
+				if numeric_limit then
+					numeric_limit = math.floor(numeric_limit)
+					if numeric_limit < 0 then
+						return false, "Limit must be 0 or greater"
+					end
+					limit = numeric_limit
+				elseif token == "name" or token == "duration" then
+					sort_by = token
+				else
+					return false, "Usage: /sbbanlist [limit] [name|duration]"
+				end
+			end
+
+			local function ban_duration(data)
+				if not data.expiry then
+					return math.huge
+				end
+				if data.time then
+					return math.max(0, data.expiry - data.time)
+				end
+				return math.max(0, data.expiry - os.time())
+			end
+
+			local function sorted_entries(bans)
+				local entries = {}
+				for player, data in pairs(bans) do
+					entries[#entries + 1] = {
+						player = player,
+						data = data,
+						duration = ban_duration(data),
+					}
+				end
+				table.sort(entries, function(a, b)
+					local a_name = string.lower(tostring(a.player))
+					local b_name = string.lower(tostring(b.player))
+					if sort_by == "duration" and a.duration ~= b.duration then
+						return a.duration > b.duration
+					end
+					return a_name < b_name
+				end)
+				return entries
+			end
+
+			local function append_ban_section(lines, title, bans)
+				local entries = sorted_entries(bans)
+				table.insert(lines, ("%s (%d total, showing %d):"):format(title, #entries, math.min(limit, #entries)))
+				if #entries == 0 then
+					table.insert(lines, "  (none)")
+					return #entries
+				end
+				if limit == 0 then
+					table.insert(lines, "  (hidden by limit)")
+					return #entries
+				end
+				for i = 1, math.min(limit, #entries) do
+					local entry = entries[i]
+					table.insert(lines, "  " .. internal.format_active_entry(entry.player, entry.data))
+				end
+				return #entries
+			end
+
 			local name_bans = internal.get_active_name_bans()
 			local ip_bans = internal.get_active_ip_bans()
-			local lines = {"Name bans:"}
-			for p, d in pairs(name_bans) do
-				table.insert(lines, "  " .. internal.format_active_entry(p, d))
-			end
-			table.insert(lines, "IP bans:")
-			for p, d in pairs(ip_bans) do
-				table.insert(lines, "  " .. internal.format_active_entry(p, d))
-			end
-			if #lines == 2 then
-				table.insert(lines, "  (none)")
-			end
+			local lines = {("Active bans (limit: %d, sort: %s)"):format(limit, sort_by)}
+			local name_count = append_ban_section(lines, "Name bans", name_bans)
+			local ip_count = append_ban_section(lines, "IP bans", ip_bans)
+			table.insert(lines, 2, ("Total: %d (name: %d, IP: %d)"):format(name_count + ip_count, name_count, ip_count))
 			return true, table.concat(lines, "\n")
 		end,
 	})

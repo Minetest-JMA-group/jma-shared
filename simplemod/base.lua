@@ -282,24 +282,6 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		return current
 	end
 
-	local function report_expired(scope_text, target, ban)
-		if not ban then
-			return
-		end
-		local reason = (ban.reason and ban.reason ~= "") and ban.reason or "none"
-		local source = (ban.source and ban.source ~= "") and ban.source or "unknown"
-		local display_target = target or ban.target or "unknown"
-		local expired_at = ban.expiry and os.date("%Y-%m-%d %H:%M:%S", ban.expiry) or "unknown"
-		relays.send_action_report(
-			"simplemod auto-unban (%s): **%s** expired at `%s`; issued by **%s** reason: `%s`",
-			scope_text,
-			display_target,
-			expired_at,
-			source,
-			reason
-		)
-	end
-
 	local function collapse_ip_key_after_merge(entrydestid, key_name)
 		local ok_rows, rows_or_err = pcall(dbmanager.get_from_modstorage, entrydestid, MODNAME, key_name)
 		if not ok_rows then
@@ -462,22 +444,14 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		end
 	end
 
-	local function get_name_entry(userentry_id, player_name, action_type)
+	local function get_name_entry(userentry_id, player_name)
 		local data, aux_or_err = query_modstorage_row(userentry_id, player_name)
 		if not data then
 			return nil, aux_or_err
 		end
 		local aux = tonumber(aux_or_err)
 		if aux and aux <= os.time() then
-			-- Deserialize here only for the expiry report; active rows are deserialized below.
-			local parsed = core.deserialize(data)
-			if parsed and not parsed.expiry then
-				parsed.expiry = aux
-			end
-			local ok = delete_modstorage_key(userentry_id, player_name)
-			if ok and action_type == "ban" then
-				report_expired("name", player_name, parsed)
-			end
+			delete_modstorage_key(userentry_id, player_name)
 			return nil
 		end
 		local parsed = core.deserialize(data)
@@ -548,7 +522,6 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		end
 		if ban and ban.expiry and ban.expiry <= os.time() then
 			clear_ip_data(target, "ban")
-			report_expired("IP", ban.target or target, ban)
 			return nil
 		end
 		return ban
@@ -752,7 +725,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 	simplemod.log_message_to_discord = shared.log_message_to_discord
 
 	function simplemod.ban_name(target, source, reason, duration_sec)
-		local existing_ban, existing_err = get_name_entry(name_bans_entry_id, target, "ban")
+		local existing_ban, existing_err = get_name_entry(name_bans_entry_id, target)
 		if existing_err then
 			return false, existing_err
 		end
@@ -777,7 +750,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 	end
 
 	function simplemod.unban_name(target, source, reason)
-		local existing, existing_err = get_name_entry(name_bans_entry_id, target, "ban")
+		local existing, existing_err = get_name_entry(name_bans_entry_id, target)
 		if existing_err then
 			return false, existing_err
 		end
@@ -794,7 +767,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 	end
 
 	function simplemod.is_banned_name(target)
-		local ban = get_name_entry(name_bans_entry_id, target, "ban")
+		local ban = get_name_entry(name_bans_entry_id, target)
 		return ban ~= nil
 	end
 
@@ -925,7 +898,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 				return false, err
 			end
 		else
-			ban = get_name_entry(name_bans_entry_id, target, "ban")
+			ban = get_name_entry(name_bans_entry_id, target)
 		end
 		if not ban then
 			return false, "Not banned"
@@ -1115,7 +1088,7 @@ If you think that you got banned by mistake, please contact us on Discord: ctf.j
 		if kind == "mute" then
 			return get_name_entry(name_mutes_entry_id, target)
 		end
-		return get_name_entry(name_bans_entry_id, target, "ban")
+		return get_name_entry(name_bans_entry_id, target)
 	end
 
 	function shared.can_override_punishment(action_type, source, existing, duration_sec)

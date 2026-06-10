@@ -16,10 +16,6 @@ end
 
 function jma_greeter.show_tos(player)
 	local pname = player:get_player_name()
-	local privs = core.get_player_privs(pname)
-	if privs["server"] == true then
-		return
-	end
 	local fs = jma_greeter.get_base_formspec({
 		title_override = "JMA Terms of Service",
 		size = { x = 8, y = 8 },

@@ -32,10 +32,6 @@ end
 
 function jma_greeter.show_rules(player)
 	local pname = player:get_player_name()
-	local privs = core.get_player_privs(pname)
-	if privs["server"] == true then
-		return
-	end
 	local fs = jma_greeter.get_base_formspec({
 		title = "Server Rules",
 		size = { x = 11, y = 11 },

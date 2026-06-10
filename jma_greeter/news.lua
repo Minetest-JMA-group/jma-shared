@@ -22,10 +22,6 @@ core.register_on_mods_loaded(function()
 end)
 
 function jma_greeter.show_news(pname, force)
-	local privs = core.get_player_privs(pname)
-	if privs["server"] == true then
-		return
-	end
 	local is_news_disabled
 	if core.global_exists("ctf_settings") then
 		is_news_disabled = ctf_settings.get(core.get_player_by_name(pname), "jma_greeter:news_disable")

@@ -117,11 +117,12 @@ jma_greeter.events = {
 	new_player_rules = {
 		func = function(player)
 			local pname = player:get_player_name()
-			local msg = "——————————————————————————————————————————————————————————————\n"
-			.. "Welcome! To start playing, please familiarize yourself with the server rules.\n"
-			.. "If you don't see the rules window, enter the \"/rules\" command to the chat.\n"
-			.. "——————————————————————————————————————————————————————————————"
-			core.chat_send_player(pname, core.colorize("#2af7b6", msg))
+			if not jma_greeter.old_rules_accepted(player) then
+				local msg = "——————————————————————————————————————————————————————————————\n"
+				.. "Welcome! To start playing, please familiarize yourself with the server rules.\n"
+				.. "——————————————————————————————————————————————————————————————"
+				core.chat_send_player(pname, core.colorize("#2af7b6", msg))
+			end
 
 			if jma_greeter.rules_mode == "grant_privs" then
 				local privs = core.get_player_privs(pname)
@@ -193,12 +194,8 @@ core.register_on_joinplayer(function(player, last_login)
 			table.insert(queue, "tos")
 		end
 
-		if not jma_greeter.has_accepted_rules(pname) then
-			if last_login and core.check_player_privs(pname, {interact = true, shout = true}) then
-				player:get_meta():set_int("jma_greeter_rules_accepted", 1)
-			else
-				table.insert(queue, "new_player_rules")
-			end
+		if not jma_greeter.has_accepted_rules(player) then
+			table.insert(queue, "new_player_rules")
 		end
 
 		table.insert(queue, "news")
@@ -237,7 +234,7 @@ function jma_greeter.check_persistent_forms()
 	end
 
 	if has_unskippable_events then
-		core.after(3, jma_greeter.check_persistent_forms)
+		core.after(2, jma_greeter.check_persistent_forms)
 	else
 		jma_greeter.is_checking_persistent_forms = false
 	end

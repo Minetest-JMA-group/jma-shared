@@ -4,6 +4,10 @@ local storage = core.get_mod_storage()
 local pending_confirmations = {}
 local confirmation_timeout = 10
 
+if not storage:contains("rules_version") then
+	storage:set_int("rules_version", 1)
+end
+
 local function get_current_rules_version()
 	return storage:get_int("rules_version")
 end

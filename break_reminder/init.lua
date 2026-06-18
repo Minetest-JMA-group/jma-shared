@@ -21,7 +21,7 @@ local joined = {}
 
 local last_notified = {}
 
-local notify_interval = core.settings:get("break_reminder_interval") or 60 * 60 * 2
+local notify_interval = tonumber(core.settings:get("break_reminder_interval")) or 60 * 60 * 2
 
 local player_data = {}
 

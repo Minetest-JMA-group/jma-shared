@@ -21,7 +21,7 @@ local joined = {}
 
 local last_notified = {}
 
-local notify_interval = 60*60 -- 1 hour
+local notify_interval = core.settings:get("break_reminder_interval") or 60 * 60 * 2
 
 local player_data = {}
 
@@ -55,7 +55,7 @@ function break_reminder.show_reminder(playername)
 	end
 
 	local time_str
-    
+
 	if joined[playername] then
 		time_str = beautify_time(os.time()-joined[playername])
 	else

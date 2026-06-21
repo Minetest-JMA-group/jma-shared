@@ -560,10 +560,11 @@ end
 
 			-- Send appeal notification and persist the timestamp
 			relays.send_feedback("**MUTEAPPEAL**: Player **".. name.."** requested a muteappeal. Reason: "..param)
-			local ok = ip_ctx:set_string("muteappeal", tostring(time))
+			local err = ip_ctx:set_string("muteappeal", tostring(time))
 			ip_ctx:finalize()
-			if not ok then
-				core.log("error", "[simplemod] Failed to finalize IP context for mute appeal of player: " .. name)
+			if err then
+				core.log("error", "[simplemod] Failed to finalize IP context for mute appeal of player: "
+					.. name .. ". Error: " .. err)
 				return false, "Internal error. Please try again later."
 			end
 

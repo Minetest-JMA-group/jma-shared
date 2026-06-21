@@ -492,44 +492,82 @@ end
 		end
 	})
 
-	local player_cooldowns = {}
-	local COOLDOWN_TIME = 172800
-
+	local APEAL_COOLDOWN_TIME = 172800
+	local CAN_APPEAL_SINCE_MUTE_TIME = 1800
 	core.register_chatcommand("muteappeal", {
 		params = "<reason>",
 		description = "Send a mute appeal to the staff team. The reason have to be at least 20 characters. If the reason doesnt makes sense the appeal will be rejected.",
 		func = function(name, param)
-			local scope = internal.get_active_mute(name)
-
-			local new_param = param:gsub("^%s*(.-)%s*$", "%1") -- delete the spaces
-			local length = #new_param
-
 			local time = os.time()
 
-			-- check if the cooldown is active for the player
-			if player_cooldowns[name] and player_cooldowns[name] > time then
-				local remaining = player_cooldowns[name] - time
-				return false, "<You already appealed this mute, you can only appeal an mute once.>"
-			end
-
+			local scope, mute_data = internal.get_active_mute(name)
 			if not scope then
 				return false, "You are currently not muted."
 			end
 
+			param = param:trim()
 			if param == "" then
 				return false, "Please enter a reason to appeal an unmute."
 			end
 
+			local length = #param
 			if length < 20 then
 				return false, "Please describe the reason for your appeal detailed."
 			elseif length > 300 then
 				return false, "Appeal is too long."
-			else
-				relays.send_feedback("**MUTEAPPEAL**: Player **".. name.."** requested a muteappeal. Reason: "..param)
-				-- set cooldown time
-				player_cooldowns[name] = time + COOLDOWN_TIME
-				return true, "The appeal will be reviewed by the staff team soon."
 			end
+
+			-- Check that at least 30 minutes have passed since the mute was issued
+			local mute_time = mute_data and mute_data.time
+			if mute_time and (time - mute_time) < CAN_APPEAL_SINCE_MUTE_TIME then
+				return false, "You can only appeal a mute after " ..
+					algorithms.time_to_string(CAN_APPEAL_SINCE_MUTE_TIME) .. " from when it was issued."
+			end
+
+			-- Get player context and store appeal timestamp by IP
+			local ctx, ctx_err = ipdb_storage:get_context_by_name(name)
+			if not ctx then
+				core.log("error", "[simplemod] Failed to retrieve player context for mute appeal: " .. (ctx_err or "unknown error"))
+				return false, "Internal error. Please try again later."
+			end
+
+			-- Get IP to store appeal timestamp persistently per IP
+			local linked_ids = ctx:get_linked_ids()
+			ctx:finalize()
+			local ips = linked_ids and linked_ids.ips
+			if not ips or #ips == 0 then
+				core.log("error", "[simplemod] Failed to determine IP for mute appeal of player: " .. name)
+				return false, "Internal error. Please contact the staff team."
+			end
+			local player_ip = ips[1]
+
+			-- Get context by IP for persistent storage
+			local ip_ctx, ip_ctx_err = ipdb_storage:get_context_by_ip(player_ip)
+			if not ip_ctx then
+				core.log("error", "[simplemod] Failed to retrieve IP context for mute appeal: " .. (ip_ctx_err or "unknown error"))
+				return false, "Internal error. Please try again later."
+			end
+
+			-- Check if there's already an appeal on file for this IP
+			local last_appeal_str = ip_ctx:get_string("muteappeal")
+			local last_appeal_time = tonumber(last_appeal_str)
+			local appeal_age = last_appeal_time and (time - last_appeal_time) or nil
+			if appeal_age and appeal_age < APEAL_COOLDOWN_TIME then
+				ip_ctx:finalize()
+				return false, "You already appealed this mute, please wait "
+					.. algorithms.time_to_string(APEAL_COOLDOWN_TIME - appeal_age) .. " before appealing again."
+			end
+
+			-- Send appeal notification and persist the timestamp
+			relays.send_feedback("**MUTEAPPEAL**: Player **".. name.."** requested a muteappeal. Reason: "..param)
+			local ok = ip_ctx:set_string("muteappeal", tostring(time))
+			ip_ctx:finalize()
+			if not ok then
+				core.log("error", "[simplemod] Failed to finalize IP context for mute appeal of player: " .. name)
+				return false, "Internal error. Please try again later."
+			end
+
+			return true, "The appeal will be reviewed by the staff team soon."
 		end
 	})
 

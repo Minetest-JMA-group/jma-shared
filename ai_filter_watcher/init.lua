@@ -6,7 +6,7 @@ local modname = core.get_current_modname()
 local modpath = core.get_modpath(modname)
 local storage = core.get_mod_storage()
 local is_essentials = core.global_exists("essentials")
-local has_player_reports = core.global_exists("player_reports")
+local is_discord_available = core.global_exists("discord") and discord.enabled
 
 -- These will be overridden from shareddb
 local WATCHER_MODE = "enabled"
@@ -405,16 +405,14 @@ local function process_batch()
 			local player_name = args.name
 			if not player_name then return {error = "Missing 'name' parameter"} end
 			local reason = args.reason
-			if not has_player_reports then
-				return {error = "player_reports mod not available, cannot report player"}
-			end
-			player_reports.report(player_name, "AI Watcher", reason)
+			if not is_discord_available then return {error = "Discord relay not available. Reports won't work."} end
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
-			relays.send_action_report("**AI Watcher**: Reported player %s to moderators: %s", player_name, reason)
+			local msg = string.format("**AI Watcher**: Reported player %s to moderators: %s", player_name, reason)
+			discord.send_mention(msg, 1525628775923060958)
 			return { success = true, message = ("Player %s reported to moderators"):format(player_name) }
 		end,
-		description = "Report a player to human moderators for review (use when action already taken but offense is severe, or when unsure how to handle the situation)",
+		description = "Report a player to human moderators for review",
 		strict = false,
 		properties = {
 			name = { type = "string", description = "Player name to report" },

@@ -7,7 +7,7 @@ Available tools (use if needed):
 2. report_player(name, reason) - Report a player to human moderators for review
    Use this when:
 a) the offense is so severe
-      that you strongly believe human moderators should review it for harsher punishment
+      that you strongly believe human moderators should review it
    b) You encounter a message that seems very suspicious and requires action,
       but you cannot determine on your own what the appropriate response is
       and need a human to review it

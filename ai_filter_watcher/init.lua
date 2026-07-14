@@ -338,66 +338,6 @@ local function process_batch()
 	})
 
 	context:add_tool({
-		name = "warn_player",
-		func = function(args)
-			if type(args) == "string" then return { error = "Invalid JSON string" } end
-			if not args or not args.reason then return {error = "Missing 'reason' parameter"} end
-			local player_name = args.name
-			if not player_name then return {error = "Missing 'name' parameter"} end
-			local reason = args.reason
-			if WATCHER_MODE == ai_filter_watcher.MODES.ENABLED then
-				if not is_essentials then return {error = "Essentials mod not available"} end
-				essentials.show_warn_formspec(player_name, reason, "AI Watcher")
-				add_to_player_history(player_name, "warn", nil, reason)
-			else -- permissive
-				local msg = ("[PERMISSIVE] Would have warned player '%s' for: %s"):format(player_name, reason)
-				core.log("action", "[ai_filter_watcher] " .. msg)
-				relays.send_action_report("**AI Watcher**: %s", msg)
-			end
-			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
-			watcher_stats.last_action_time = os.time()
-			return { success = true }
-		end,
-		description = "Warn player for rule violation",
-		strict = false,
-		properties = {
-			name = { type = "string", description = "Player name to warn" },
-			reason = { type = "string", description = "Reason for warning" }
-		}
-	})
-
-	context:add_tool({
-		name = "mute_player",
-		func = function(args)
-			if type(args) == "string" then return { error = "Invalid JSON string" } end
-			if not args or not args.reason then return {error = "Missing 'reason' parameter"} end
-			local player_name = args.name
-			if not player_name then return {error = "Missing 'name' parameter"} end
-			local duration = math.min(math.max(tonumber(args.duration) or 10, 1), 1440)
-			local reason = args.reason
-			if WATCHER_MODE == ai_filter_watcher.MODES.ENABLED then
-				local success, err = simplemod.mute_name(player_name, "AI Watcher", reason, duration * 60)
-				if not success then return {error = err} end
-				add_to_player_history(player_name, "mute", duration, reason)
-			else
-				local msg = ("[PERMISSIVE] Would have muted player '%s' for %d minutes: %s"):format(player_name, duration, reason)
-				core.log("action", "[ai_filter_watcher] " .. msg)
-				relays.send_action_report("**AI Watcher**: %s", msg)
-			end
-			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
-			watcher_stats.last_action_time = os.time()
-			return { success = true }
-		end,
-		description = "Mute player for specified duration",
-		strict = false,
-		properties = {
-			name = { type = "string", description = "Player name to mute" },
-			duration = { type = "integer", description = "Mute duration in minutes", minimum = 1, maximum = 1440 },
-			reason = { type = "string", description = "Reason for muting" }
-		}
-	})
-
-	context:add_tool({
 		name = "report_player",
 		func = function(args)
 			if type(args) == "string" then return { error = "Invalid JSON string" } end

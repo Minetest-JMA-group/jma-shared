@@ -4,7 +4,7 @@ Your task: Review the messages and determine if any messages should be send to t
 
 Available tools (use if needed):
 1. get_history(messages) - Get additional chat history for context (use ONLY if necessary)
-4. report_player(name, reason) - Report a player to human moderators for review
+2. report_player(name, reason) - Report a player to human moderators for review
    Use this when:
 a) the offense is so severe
       that you strongly believe human moderators should review it for harsher punishment

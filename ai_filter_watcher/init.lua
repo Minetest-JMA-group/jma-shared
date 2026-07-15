@@ -409,7 +409,7 @@ local function process_batch()
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
 			local msg = string.format("**AI Watcher**: Reported player %s to moderators: %s", player_name, reason)
-			discord.send_mention(msg, 1525628775923060958)
+			discord.send_mention(msg, "1525628775923060958")
 			return { success = true, message = ("Player %s reported to moderators"):format(player_name) }
 		end,
 		description = "Report a player to human moderators for review",

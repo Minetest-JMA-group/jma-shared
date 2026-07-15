@@ -13,10 +13,10 @@ function jma_greeter.show_faq(pname)
 	local fs = jma_greeter.get_base_formspec({
 		title  = "Frequently Asked Questions",
 		size = {x = 11, y = 11},
-		bar_color = "#e08804",
+		bar_color = "#2d42fc",
 	})
-	.. "box[0,0.7;11,9.1;#00000055]"
-	.. "hypertext[0.1,0.8;10.8,8.9;faq;" .. core.formspec_escape(faq_text) .. "]"
+	.. "box[0,0.7;11,8.8;#00000055]"
+	.. "hypertext[0.1,0.8;10.8,8.5;faq;" .. core.formspec_escape(faq_text) .. "]"
 	.. "button_exit[3.5,10;4,0.8;ok;Okay]"
 
 	core.show_formspec(pname, "jma_greeter:faq", fs)

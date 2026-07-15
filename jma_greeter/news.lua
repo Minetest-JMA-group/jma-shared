@@ -24,8 +24,7 @@ end)
 function jma_greeter.show_news(pname, force)
 	local is_news_disabled
 	if core.global_exists("ctf_settings") then
-		is_news_disabled = ctf_settings.get(core.get_player_by_name(pname),
-			"jma_greeter:news_disable")
+		is_news_disabled = ctf_settings.get(core.get_player_by_name(pname), "jma_greeter:news_disable")
 	else
 		is_news_disabled = tostring(storage:get_int(pname .. ":news_disable") == 1)
 	end
@@ -38,13 +37,7 @@ function jma_greeter.show_news(pname, force)
 		title = "Server News",
 		size = { x = 11, y = 11 },
 		bar_color = "#2d42fc",
-	}) ..
-	"box[0,0.7;11,8.8;#00000055]" ..
-	"hypertext[0.1,0.8;10.8,8.5;rules;" ..
-	core.formspec_escape(news_text) ..
-	"]" ..
-	"checkbox[0.4,10.4;disable_news;Don't show me this again;" ..
-	is_news_disabled .. "]" .. "button_exit[3.75,10;3.5,0.8;;Okay]"
+	}) .. "box[0,0.7;11,8.8;#00000055]" .. "hypertext[0.1,0.8;10.8,8.5;rules;" .. core.formspec_escape(news_text) .. "]" .. "checkbox[0.4,10.4;disable_news;Don't show me this again;" .. is_news_disabled .. "]" .. "button_exit[3.75,10;3.5,0.8;;Okay]"
 	core.show_formspec(pname, "jma_greeter:news", fs)
 end
 
@@ -59,8 +52,7 @@ core.register_on_player_receive_fields(function(player, form, fields)
 		if core.global_exists("ctf_settings") then
 			ctf_settings.set(player, "jma_greeter:news_disable", fields.disable_news)
 		else
-			storage:set_int(pname .. ":news_disable",
-				fields.disable_news == "true" and 1 or 0)
+			storage:set_int(pname .. ":news_disable", fields.disable_news == "true" and 1 or 0)
 		end
 		if fields.disable_news == "true" then
 			core.chat_send_player(
@@ -82,9 +74,16 @@ core.register_chatcommand("news", {
 	end,
 })
 
+--- @type { [string]: boolean }
+local news_editor_privs = { server = true }
+
+if core.registered_privileges["dev"] then
+	news_editor_privs["dev"] = true
+end
+
 core.register_chatcommand("news_editor", {
 	description = "Server rules editor",
-	privs = { server = true },
+	privs = news_editor_privs,
 	func = function(pname)
 		local actions = {
 			on_save = function(fields)
@@ -100,8 +99,7 @@ core.register_chatcommand("news_editor", {
 				jma_greeter.editor_context[pname] = nil
 			end,
 		}
-		jma_greeter.show_editor(pname, jma_greeter.load_file(filename) or "", "News",
-			actions)
+		jma_greeter.show_editor(pname, jma_greeter.load_file(filename) or "", "News", actions)
 		return true, "News editor shown"
 	end,
 })

@@ -1,6 +1,6 @@
 local tos_url = "https://codeberg.org/Minetest-JMA-group/information"
 local kick_message =
-"You must accept the Terms of Service to play on this server.\nSince you have declined, you cannot join at this time.\nIf you change your mind, please reconnect and accept the TOS. Send an e-mail to loki@jma-sig.de including all your usernames to request a deletion of your data."
+	"You must accept the Terms of Service to play on this server.\nSince you have declined, you cannot join at this time.\nIf you change your mind, please reconnect and accept the TOS. Send an e-mail to loki@jma-sig.de including all your usernames to request a deletion of your data."
 local storage = core.get_mod_storage()
 local pending_confirmations = {}
 local confirmation_timeout = 10
@@ -22,7 +22,7 @@ function jma_greeter.show_tos(player)
 	local pname = player:get_player_name()
 	local fs = jma_greeter.get_base_formspec({
 		title_override = "JMA Terms of Service",
-		size = { x = 8, y = 5 },
+		size = { x = 8, y = 8 },
 		bar_color = "#2d42fc",
 	})
 
@@ -46,12 +46,12 @@ function jma_greeter.show_tos(player)
 			hypertext = "hypertext[0.1,0.9;7.8,2.4;tos_text;"
 				.. core.formspec_escape(
 					"<style color=orange><big>The Terms of Service have been updated. Please accept the new terms to continue playing.</big></style>\n"
-					.. tos_text
+						.. tos_text
 				)
 				.. "]"
 		else
 			hypertext =
-			"hypertext[0.1,0.9;7.8,2.4;tos_text;<style color=red><big>Please read our Terms of Service before proceeding.</big></style>]"
+				"hypertext[0.1,0.9;7.8,2.4;tos_text;<style color=red><big>Please read our Terms of Service before proceeding.</big></style>]"
 		end
 
 		fs = fs
@@ -125,8 +125,8 @@ core.register_chatcommand("update_tos", {
 			core.chat_send_player(
 				pname,
 				"Please repeat the /update_tos command within "
-				.. confirmation_timeout
-				.. " seconds to confirm the action."
+					.. confirmation_timeout
+					.. " seconds to confirm the action."
 			)
 			return true, "Confirmation required."
 		end

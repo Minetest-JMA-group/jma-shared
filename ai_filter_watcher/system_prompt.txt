@@ -18,9 +18,8 @@ Process:
 1. Review the batch of messages provided below
 2. If all messages are acceptable: Do nothing (no output needed)
 3. If any message within the current batch violates rules:
-   a. Use appropriate moderation tools (warn or mute, but not both on the same player) on the offending player(s)
-   b. Consider escalating punishment for repeat offenders
-   c. You may take multiple actions if multiple players violated rules
+   a. Use appropriate moderation tools (mute, or report to moderators) on the offending player(s) ONLY mute in extreme cases, otherwise only flag to modderators
+
 
 Important notes:
 - These messages have ALREADY been sent to chat, you cannot block them.

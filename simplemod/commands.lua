@@ -559,7 +559,7 @@ end
 			end
 
 			-- Send appeal notification and persist the timestamp
-			relays.send_feedback("**MUTEAPPEAL**: Player **".. name.."** requested a muteappeal. Reason: "..param)
+			relays.send_feedback("**MUTEAPPEAL**: Player **%s** requested a muteappeal. Reason: %s", name, param)
 			local err = ip_ctx:set_string("muteappeal", tostring(time))
 			ip_ctx:finalize()
 			if err then

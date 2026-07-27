@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ipdb — Schema Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:      #080b12;
+  --surface: #0d1120;
+  --card:    #0f1622;
+  --border:  #1c2840;
+  --text:    #b8cce0;
+  --muted:   #364d68;
+  --dim:     #131d2e;
+
+  --green:  #3ddc84;
+  --pink:   #f06292;
+  --blue:   #5ba3f5;
+  --yellow: #f5c518;
+  --orange: #ff8c42;
+  --purple: #b388ff;
+  --teal:   #4dd0e1;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--bg);
+  color: var(--text);
+  overflow-x: auto;
+}
+
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image:
+    linear-gradient(rgba(28,40,64,.25) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(28,40,64,.25) 1px, transparent 1px);
+  background-size: 44px 44px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.wrapper {
+  position: relative;
+  z-index: 1;
+  padding: 32px 30px 52px;
+  min-width: 1080px;
+}
+
+/* ── Header ── */
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 38px;
+}
+header h1 {
+  font-family: 'Syne', sans-serif;
+  font-size: 24px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+header h1 em { color: var(--blue); font-style: normal; }
+.h-sep { width: 1px; height: 20px; background: var(--border); }
+.h-sub {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+}
+.h-hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+  display: flex; align-items: center; gap: 7px;
+  animation: blink 2.8s ease-in-out infinite;
+}
+@keyframes blink { 0%,100%{opacity:.4} 55%{opacity:1} }
+.h-hint::before {
+  content:'';
+  width:7px; height:7px; border-radius:50%;
+  background: var(--blue);
+  box-shadow: 0 0 8px var(--blue);
+}
+
+/* ── Section labels ── */
+.slabel {
+  font-family: 'Syne', sans-serif;
+  font-size: 8.5px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 10px;
+  display: flex; align-items: center; gap: 10px;
+}
+.slabel::after { content:''; flex:1; height:1px; background:var(--dim); }
+
+/* ── Main grid ── */
+.main-grid {
+  display: grid;
+  grid-template-columns: 166px 160px 198px 1fr;
+  gap: 18px;
+  margin-bottom: 30px;
+  align-items: start;
+}
+.col { display: flex; flex-direction: column; gap: 12px; }
+
+/* ── Card ── */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color .2s, box-shadow .2s;
+  position: relative;
+}
+.card.dashed { border-style: dashed; }
+.card.active-card { box-shadow: 0 0 0 1px currentColor, 0 0 22px -4px currentColor; }
+
+.card-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px 6px;
+  border-bottom: 1px solid var(--border);
+  font-family: 'Syne', sans-serif;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #fff;
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink:0; }
+.badge {
+  margin-left: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px; font-weight: 600;
+  padding: 1px 5px; border-radius: 3px;
+  background: #f59e0b18; color: #f59e0b;
+  border: 1px solid #f59e0b33;
+}
+
+/* ── Table ── */
+table { width: 100%; border-collapse: collapse; }
+th {
+  padding: 3px 11px;
+  font-size: 8.5px;
+  color: var(--muted);
+  text-align: left;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  border-bottom: 1px solid var(--dim);
+  white-space: nowrap;
+}
+td {
+  padding: 4px 11px;
+  font-size: 10.5px;
+  border-bottom: 1px solid rgba(20,32,52,.6);
+  white-space: nowrap;
+  transition: background .12s;
+  position: relative;
+}
+tr:last-child td { border-bottom: none; }
+
+.ci { color: var(--muted); }
+.cv { color: var(--text); }
+.ck { color: var(--yellow); font-weight: 500; }
+.cn { color: #1e2d40; font-style: italic; }
+.ca { color: var(--orange); font-weight: 500; cursor: help; }
+.cs { color: #6678a0; }
+.cm { color: var(--muted); font-size: 9.5px; }
+
+/* ── Data row states ── */
+.dr {
+  cursor: default;
+  transition: opacity .15s, background .12s;
+}
+.dr:hover td { background: rgba(91,163,245,.04); }
+.dr.hl td    { background: rgba(91,163,245,.07); }
+.dr.fd       { opacity: .12; }
+
+/* multimap bar */
+.dr[data-mm] { border-left: 2px solid rgba(245,197,24,.3); }
+
+/* ── Accent colors per card ── */
+.t-names { --ac: var(--green); }  .t-names .card-head { background: linear-gradient(90deg,#0a2218,transparent); }
+.t-names .dot { background: var(--green); }
+.t-names.active-card { color: var(--green); border-color: var(--green); }
+
+.t-ips { --ac: var(--pink); }  .t-ips .card-head { background: linear-gradient(90deg,#280a18,transparent); }
+.t-ips .dot { background: var(--pink); }
+.t-ips.active-card { color: var(--pink); border-color: var(--pink); }
+
+.t-ng { --ac: var(--green); }  .t-ng .card-head { background: linear-gradient(90deg,#0a2218,transparent); }
+.t-ng .dot { background: var(--green); box-shadow: 0 0 0 2px rgba(61,220,132,.25); }
+.t-ng.active-card { color: var(--green); border-color: var(--green); }
+
+.t-ig { --ac: var(--pink); }  .t-ig .card-head { background: linear-gradient(90deg,#280a18,transparent); }
+.t-ig .dot { background: var(--pink); box-shadow: 0 0 0 2px rgba(240,98,146,.25); }
+.t-ig.active-card { color: var(--pink); border-color: var(--pink); }
+
+.t-ue { --ac: var(--blue); }  .t-ue .card-head { background: linear-gradient(90deg,#0b1d3a,transparent); }
+.t-ue .dot { background: var(--blue); }
+.t-ue.active-card { color: var(--blue); border-color: var(--blue); }
+
+.t-ms { --ac: var(--yellow); }  .t-ms .card-head { background: linear-gradient(90deg,#231e06,transparent); }
+.t-ms .dot { background: var(--yellow); }
+.t-ms.active-card { color: var(--yellow); border-color: var(--yellow); }
+
+.t-me { --ac: var(--purple); }  .t-me .card-head { background: linear-gradient(90deg,#180c2a,transparent); }
+.t-me .dot { background: var(--purple); }
+.t-me.active-card { color: var(--purple); border-color: var(--purple); }
+
+.t-log { --ac: var(--orange); }  .t-log .card-head { background: linear-gradient(90deg,#231404,transparent); }
+.t-log .dot { background: var(--orange); }
+.t-log.active-card { color: var(--orange); border-color: var(--orange); }
+
+/* ── SVG layer ── */
+#svg-layer {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.ap { fill:none; stroke-width:1.5; opacity:.3; transition: opacity .2s, stroke-width .2s; }
+.ap.lit { opacity:.8; stroke-width:2.2; }
+.adot { opacity:.3; transition: opacity .2s; }
+.adot.lit { opacity:.9; }
+
+/* ── Log section ── */
+.log-grid {
+  display: grid;
+  grid-template-columns: 305px 1fr 1fr;
+  gap: 18px;
+}
+.log-col { display: flex; flex-direction: column; gap: 12px; }
+
+/* ── Callout boxes ── */
+.callout {
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 10px;
+  line-height: 1.8;
+}
+.callout strong { font-weight: 600; }
+.c-merge { background:#120a20; border:1px solid #5a30aa44; color:#9060cc; }
+.c-merge strong { color: var(--purple); }
+.c-snap  { background:#1a0e04; border:1px solid #aa5a2244; color:#a06030; }
+.c-snap strong  { color: var(--orange); }
+
+/* ── Tooltip ── */
+#tip {
+  position: fixed;
+  background: #0c1626;
+  border: 1px solid #2a4060;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 10.5px;
+  color: var(--text);
+  max-width: 290px;
+  line-height: 1.7;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .15s, transform .15s;
+  box-shadow: 0 12px 36px #000c;
+}
+#tip.on { opacity: 1; transform: translateY(0); }
+#tip .tl { font-size: 8.5px; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 5px; }
+#tip strong { color: #fff; font-weight: 500; }
+#tip code { color: var(--yellow); }
+
+/* ── aux tooltip inline ── */
+.ax { position: relative; cursor: help; display: inline-block; }
+.ax::after {
+  content: attr(data-ax);
+  position: absolute;
+  bottom: calc(100% + 7px);
+  right: 0;
+  background: #1a1004;
+  border: 1px solid var(--orange);
+  border-radius: 5px;
+  padding: 5px 9px;
+  font-size: 9px;
+  color: var(--orange);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s;
+  z-index: 200;
+  line-height: 1.6;
+}
+.ax:hover::after { opacity: 1; }
+
+/* ── Legend ── */
+.legend {
+  margin-top: 26px;
+  display: flex; flex-wrap: wrap; gap: 16px;
+  align-items: center;
+}
+.li { display: flex; align-items: center; gap: 7px; font-size: 10px; color: var(--muted); }
+.ll { width: 22px; height: 1.5px; display: inline-block; }
+.ld { width: 8px; height: 8px; border-radius: 50%; }
+</style>
+</head>
+<body>
+<div class="wrapper" id="wrapper">
+<svg id="svg-layer"></svg>
+
+<!-- Header -->
+<header>
+  <h1><em>ip</em>db</h1>
+  <div class="h-sep"></div>
+  <div class="h-sub">schema explorer</div>
+  <div class="h-hint">hover any row to trace its relationships</div>
+</header>
+
+<!-- ═════════════ MAIN GRID ═════════════ -->
+<div class="slabel">Identities &nbsp;·&nbsp; Grouping (N ↔ N) &nbsp;·&nbsp; Core &nbsp;·&nbsp; Module Storage</div>
+<div class="main-grid" id="mg">
+
+  <!-- Identities -->
+  <div class="col">
+    <div class="card t-names" id="cnames">
+      <div class="card-head"><div class="dot"></div>Usernames</div>
+      <table><thead><tr><th>id</th><th>name</th><th>…meta</th></tr></thead><tbody>
+        <tr class="dr" data-t="n1"><td class="ci">1</td><td class="cv">Alice</td><td class="cm">…</td></tr>
+        <tr class="dr" data-t="n2"><td class="ci">2</td><td class="cv">Bob</td><td class="cm">…</td></tr>
+        <tr class="dr" data-t="n3"><td class="ci">3</td><td class="cv">Charlie</td><td class="cm">…</td></tr>
+      </tbody></table>
+    </div>
+    <div class="card t-ips" id="cips">
+      <div class="card-head"><div class="dot"></div>IPs</div>
+      <table><thead><tr><th>id</th><th>ip</th><th>…meta</th></tr></thead><tbody>
+        <tr class="dr" data-t="i1"><td class="ci">1</td><td class="cv">1.2.3.4</td><td class="cm">…</td></tr>
+        <tr class="dr" data-t="i2"><td class="ci">2</td><td class="cv">5.6.7.8</td><td class="cm">…</td></tr>
+        <tr class="dr" data-t="i3"><td class="ci">3</td><td class="cv">9.10.11.12</td><td class="cm">…</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+
+  <!-- Junction -->
+  <div class="col">
+    <div class="card t-ng dashed" id="cng">
+      <div class="card-head"><div class="dot"></div>NameGroup <span class="badge">NEW</span></div>
+      <table><thead><tr><th>entry_id</th><th>name_id</th></tr></thead><tbody>
+        <tr class="dr" data-t="ng11"><td class="cv">1</td><td class="cv">1</td></tr>
+        <tr class="dr" data-t="ng12"><td class="cv">1</td><td class="cv">2</td></tr>
+        <tr class="dr" data-t="ng31"><td class="cv">3</td><td class="cv">1</td></tr>
+        <tr class="dr" data-t="ng33"><td class="cv">3</td><td class="cv">3</td></tr>
+      </tbody></table>
+    </div>
+    <div class="card t-ig dashed" id="cig">
+      <div class="card-head"><div class="dot"></div>IPGroup <span class="badge">NEW</span></div>
+      <table><thead><tr><th>entry_id</th><th>ip_id</th></tr></thead><tbody>
+        <tr class="dr" data-t="ig11"><td class="cv">1</td><td class="cv">1</td></tr>
+        <tr class="dr" data-t="ig12"><td class="cv">1</td><td class="cv">2</td></tr>
+        <tr class="dr" data-t="ig23"><td class="cv">2</td><td class="cv">3</td></tr>
+        <tr class="dr" data-t="ig31"><td class="cv">3</td><td class="cv">1</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+
+  <!-- UserEntry -->
+  <div class="col">
+    <div class="card t-ue" id="cue">
+      <div class="card-head"><div class="dot"></div>UserEntry <span class="badge">+key</span></div>
+      <table><thead><tr><th>id</th><th>key</th><th>…meta</th></tr></thead><tbody>
+        <tr class="dr" data-t="ue1"><td class="ci">1</td><td class="cv" style="color:var(--blue)">ipdb</td><td class="cm">…</td></tr>
+        <tr class="dr" data-t="ue2"><td class="ci">2</td><td class="cv" style="color:var(--blue)">ipdb</td><td class="cm">…</td></tr>
+        <tr class="dr" data-t="ue3"><td class="ci">3</td><td class="cv" style="color:var(--teal);font-size:9.5px">alice@mail.com</td><td class="cm">…</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+
+  <!-- Modstorage -->
+  <div class="col">
+    <div class="card t-ms" id="cms">
+      <div class="card-head"><div class="dot"></div>Modstorage</div>
+      <table><thead><tr><th>entry_id</th><th>modname</th><th>key</th><th>data</th><th>ancillary</th></tr></thead><tbody>
+        <!-- flat -->
+        <tr class="dr" data-t="ms0">
+          <td class="cv">1</td><td class="cm">auth</td>
+          <td class="cv">is_banned</td><td class="cv">false</td>
+          <td class="cn">NULL</td>
+        </tr>
+        <!-- multimap + aux -->
+        <tr class="dr" data-t="ms1" data-mm="1">
+          <td class="cv">1</td><td class="cm">simplemod</td>
+          <td class="ck">log</td><td class="cv">"banned 2d"</td>
+          <td class="ca"><span class="ax" data-ax="Unix timestamp → ORDER BY ancillary&#10;for chronological sorting without&#10;parsing the data field">1710000000</span></td>
+        </tr>
+        <tr class="dr" data-t="ms2" data-mm="1">
+          <td class="cv">1</td><td class="cm">simplemod</td>
+          <td class="ck">log</td><td class="cv">"ban lifted"</td>
+          <td class="ca"><span class="ax" data-ax="Later timestamp → sorts after &#10;the ban entry above">1710086400</span></td>
+        </tr>
+        <!-- mail multimap -->
+        <tr class="dr" data-t="ms3" data-mm="2">
+          <td class="cv" style="color:var(--teal)">3</td><td class="cm">mail</td>
+          <td class="ck">bob@x.com</td><td class="cv">"Hey Alice!"</td>
+          <td class="cn">NULL</td>
+        </tr>
+        <tr class="dr" data-t="ms4" data-mm="2">
+          <td class="cv" style="color:var(--teal)">3</td><td class="cm">mail</td>
+          <td class="ck">bob@x.com</td><td class="cv">"Follow up?"</td>
+          <td class="cn">NULL</td>
+        </tr>
+      </tbody></table>
+    </div>
+  </div>
+
+</div><!-- main-grid -->
+
+<!-- ═════════════ LOG SECTION ═════════════ -->
+<div class="slabel">Merge History &amp; Audit Log</div>
+<div class="log-grid" id="lg">
+
+  <div class="log-col">
+    <div class="card t-me" id="cme">
+      <div class="card-head"><div class="dot"></div>MergeEvent</div>
+      <table><thead><tr><th>id</th><th>src →</th><th>dst →</th><th>timestamp</th><th>triggered by</th></tr></thead><tbody>
+        <tr class="dr" data-t="me1">
+          <td class="ci">1</td>
+          <td class="cv" style="color:#e07070">2</td>
+          <td class="cv" style="color:#70a0e0">1</td>
+          <td class="cm">1710010000</td>
+          <td class="cm">Alice / 1.2.3.4</td>
+        </tr>
+      </tbody></table>
+    </div>
+    <div class="callout c-merge">
+      <strong>What triggers a merge?</strong><br>
+      Alice logs in from Charlie's IP — entries 1 &amp; 2 were separate. ipdb detects the shared IP and merges them into one. Before merging, all data from both entries is snapshotted into the three log tables.
+    </div>
+  </div>
+
+  <div class="log-col">
+    <div class="card t-log" id="cnlog">
+      <div class="card-head"><div class="dot"></div>Usernames_log</div>
+      <table><thead><tr><th>merge_id →</th><th>name (snapshot)</th><th>was entry</th></tr></thead><tbody>
+        <tr class="dr" data-t="ln1">
+          <td class="cv">1</td><td class="cs">Bob</td><td class="ci">2</td>
+        </tr>
+      </tbody></table>
+    </div>
+    <div class="card t-log" id="cilog">
+      <div class="card-head"><div class="dot"></div>IPs_log</div>
+      <table><thead><tr><th>merge_id →</th><th>ip (snapshot)</th><th>was entry</th></tr></thead><tbody>
+        <tr class="dr" data-t="li1">
+          <td class="cv">1</td><td class="cs">9.10.11.12</td><td class="ci">2</td>
+        </tr>
+      </tbody></table>
+    </div>
+  </div>
+
+  <div class="log-col">
+    <div class="card t-log" id="cmslog">
+      <div class="card-head"><div class="dot"></div>Modstorage_log</div>
+      <table><thead><tr><th>merge_id →</th><th>mod</th><th>key</th><th>data (snapshot)</th><th>was entry</th></tr></thead><tbody>
+        <tr class="dr" data-t="lm1">
+          <td class="cv">1</td><td class="cm">auth</td><td class="cs">is_banned</td><td class="cs">false</td><td class="ci">2</td>
+        </tr>
+        <tr class="dr" data-t="lm2">
+          <td class="cv">1</td><td class="cm">simplemod</td><td class="cs">log</td><td class="cs">"banned 2d"</td><td class="ci">1</td>
+        </tr>
+      </tbody></table>
+    </div>
+    <div class="callout c-snap">
+      <strong>Snapshots, not live references.</strong><br>
+      Log rows copy data as it was before the merge. Pruning a MergeEvent cascade-deletes all its log rows. You can always reconstruct "what did entry #2 look like before being absorbed?"
+    </div>
+  </div>
+
+</div><!-- log-grid -->
+
+<!-- Legend -->
+<div class="legend">
+  <div class="li"><div class="ll" style="background:var(--green)"></div>name links (N↔N)</div>
+  <div class="li"><div class="ll" style="background:var(--pink)"></div>IP links (N↔N)</div>
+  <div class="li"><div class="ll" style="background:var(--yellow)"></div>modstorage → entry</div>
+  <div class="li"><div class="ll" style="background:var(--purple)"></div>merge → entry</div>
+  <div class="li"><div class="ll" style="background:var(--orange)"></div>log → MergeEvent</div>
+  <div class="li" style="margin-left:10px"><div class="ld" style="background:var(--yellow)"></div><span><strong style="color:var(--yellow)">yellow key</strong> = multimap (same key, multiple rows)</span></div>
+  <div class="li"><div class="ld" style="background:var(--orange)"></div><span><strong style="color:var(--orange)">ancillary</strong> = sortable aux (hover for detail)</span></div>
+</div>
+
+</div><!-- wrapper -->
+
+<div id="tip"></div>
+
+<script>
+// ── Tooltip content ──────────────────────────────────────────────────
+const TIPS = {
+  n1: `<div class="tl">Username</div><strong>Alice</strong> — belongs to entries #1 (ipdb group) <em>and</em> #3 (mailgroup). With NameGroup, the same name can be in multiple UserEntries simultaneously.`,
+  n2: `<div class="tl">Username</div><strong>Bob</strong> — in entry #1 only. Grouped with Alice because they share IP 1.2.3.4.`,
+  n3: `<div class="tl">Username</div><strong>Charlie</strong> — in entry #3 only (the mailgroup).`,
+  i1: `<div class="tl">IP Address</div><strong>1.2.3.4</strong> — linked to both entry #1 (ipdb) and entry #3 (mailgroup). Same IP, two different purposes.`,
+  i2: `<div class="tl">IP Address</div><strong>5.6.7.8</strong> — belongs only to entry #1.`,
+  i3: `<div class="tl">IP Address</div><strong>9.10.11.12</strong> — belonged to entry #2. Alice logging in from this IP caused entries #1 and #2 to be merged.`,
+  ng11: `<div class="tl">NameGroup junction</div>Entry <strong>#1</strong> contains name <strong>#1</strong> (Alice).`,
+  ng12: `<div class="tl">NameGroup junction</div>Entry <strong>#1</strong> contains name <strong>#2</strong> (Bob).`,
+  ng31: `<div class="tl">NameGroup junction</div>Entry <strong>#3</strong> contains name <strong>#1</strong> (Alice) — the same Alice as in entry #1. This is the N↔N benefit.`,
+  ng33: `<div class="tl">NameGroup junction</div>Entry <strong>#3</strong> contains name <strong>#3</strong> (Charlie).`,
+  ig11: `<div class="tl">IPGroup junction</div>Entry <strong>#1</strong> owns IP <strong>#1</strong> (1.2.3.4).`,
+  ig12: `<div class="tl">IPGroup junction</div>Entry <strong>#1</strong> owns IP <strong>#2</strong> (5.6.7.8).`,
+  ig23: `<div class="tl">IPGroup junction</div>Entry <strong>#2</strong> owns IP <strong>#3</strong> (9.10.11.12). This is the connection that triggered the merge with entry #1.`,
+  ig31: `<div class="tl">IPGroup junction</div>Entry <strong>#3</strong> (mailgroup) also owns IP <strong>#1</strong> — different purpose, same IP.`,
+  ue1: `<div class="tl">UserEntry</div><strong>key = "ipdb"</strong> — a standard IP-linked identity group. Contains Alice + Bob. Linked by shared IPs.`,
+  ue2: `<div class="tl">UserEntry</div><strong>key = "ipdb"</strong> — originally a separate group. Merged into #1 when a shared IP was detected.`,
+  ue3: `<div class="tl">UserEntry</div><strong>key = "alice@mail.com"</strong> — a mailgroup entry. The <code>key</code> column is the mail address itself, showing UserEntry can represent any named grouping.`,
+  ms0: `<div class="tl">Modstorage — simple</div>The simplest usage: <strong>one key → one value</strong>, ancillary is NULL. The <code>auth</code> mod just stores a ban flag.`,
+  ms1: `<div class="tl">Modstorage — multimap + ancillary</div>Key <strong>"log"</strong> appears twice for the same entry + mod → <strong>multimap</strong>. The <code>ancillary</code> column holds a unix timestamp so you can <code>ORDER BY ancillary</code> for sorted logs.`,
+  ms2: `<div class="tl">Modstorage — multimap + ancillary</div>Second row under key <strong>"log"</strong>. Later timestamp → sorts after the ban entry. No need to parse the data field to sort.`,
+  ms3: `<div class="tl">Modstorage — mail multimap</div>Entry #3 is a mailgroup. The sender's address is the <code>key</code>; data is the message body. Multiple messages from same sender → multimap handles it.`,
+  ms4: `<div class="tl">Modstorage — mail multimap</div>Second message from <strong>bob@x.com</strong>. Same entry, mod, and key — multimap means both coexist without collision.`,
+  me1: `<div class="tl">MergeEvent</div>Entry <strong>#2</strong> (src) was merged into entry <strong>#1</strong> (dst). Triggered by Alice logging in from an IP that was linked to entry #2. Timestamp + who triggered it are recorded for audit.`,
+  ln1: `<div class="tl">Usernames_log snapshot</div><strong>Bob</strong> belonged to entry #2 before the merge. This is a frozen copy — even after Bob is reassigned to entry #1, this row preserves the pre-merge state.`,
+  li1: `<div class="tl">IPs_log snapshot</div><strong>9.10.11.12</strong> belonged to entry #2. Snapshotted so you can always audit which IP was in which group before the merge.`,
+  lm1: `<div class="tl">Modstorage_log snapshot</div>Entry #2 had its own <code>is_banned</code> flag. Captured before merging — lets you reconstruct each entry's independent data.`,
+  lm2: `<div class="tl">Modstorage_log snapshot</div>A ban log row from entry #1, also captured. Both entries' modstorage is fully snapshotted.`,
+};
+
+// ── Relation map: data-t → list of data-t keys that light up ─────────
+const REL = {
+  n1:   ['ng11','ng31','ue1','ue3'],
+  n2:   ['ng12','ue1'],
+  n3:   ['ng33','ue3'],
+  i1:   ['ig11','ig31','ue1','ue3'],
+  i2:   ['ig12','ue1'],
+  i3:   ['ig23','ue2'],
+  ng11: ['n1','ue1'],
+  ng12: ['n2','ue1'],
+  ng31: ['n1','ue3'],
+  ng33: ['n3','ue3'],
+  ig11: ['i1','ue1'],
+  ig12: ['i2','ue1'],
+  ig23: ['i3','ue2'],
+  ig31: ['i1','ue3'],
+  ue1:  ['ng11','ng12','ig11','ig12','ms0','ms1','ms2'],
+  ue2:  ['ig23'],
+  ue3:  ['ng31','ng33','ig31','ms3','ms4'],
+  ms0:  ['ue1'],
+  ms1:  ['ms2','ue1'],
+  ms2:  ['ms1','ue1'],
+  ms3:  ['ms4','ue3'],
+  ms4:  ['ms3','ue3'],
+  me1:  ['ln1','li1','lm1','lm2','ue1','ue2'],
+  ln1:  ['me1','li1','lm1','lm2'],
+  li1:  ['me1','ln1','lm1','lm2'],
+  lm1:  ['me1','ln1','li1','lm2'],
+  lm2:  ['me1','ln1','li1','lm1'],
+};
+
+const allRows = [...document.querySelectorAll('.dr')];
+const byT = {};
+allRows.forEach(r => { byT[r.dataset.t] = r; });
+
+const tip = document.getElementById('tip');
+let tipOn = false;
+
+document.addEventListener('mousemove', e => {
+  if (!tipOn) return;
+  let x = e.clientX + 16, y = e.clientY + 14;
+  if (x + tip.offsetWidth  > window.innerWidth  - 8) x = e.clientX - tip.offsetWidth  - 10;
+  if (y + tip.offsetHeight > window.innerHeight - 8) y = e.clientY - tip.offsetHeight - 10;
+  tip.style.left = x + 'px';
+  tip.style.top  = y + 'px';
+});
+
+allRows.forEach(row => {
+  row.addEventListener('mouseenter', () => {
+    const t = row.dataset.t;
+    const rels = new Set(REL[t] || []);
+    rels.add(t);
+    allRows.forEach(r => {
+      r.classList.toggle('hl', rels.has(r.dataset.t));
+      r.classList.toggle('fd', !rels.has(r.dataset.t));
+    });
+    if (TIPS[t]) {
+      tip.innerHTML = TIPS[t];
+      tip.classList.add('on');
+      tipOn = true;
+    }
+  });
+  row.addEventListener('mouseleave', () => {
+    allRows.forEach(r => { r.classList.remove('hl','fd'); });
+    tip.classList.remove('on');
+    tipOn = false;
+  });
+});
+
+// ── Arrows ──────────────────────────────────────────────────────────
+function rb(id) {
+  const wr = document.getElementById('wrapper').getBoundingClientRect();
+  const r  = document.getElementById(id).getBoundingClientRect();
+  return { l:r.left-wr.left, r:r.right-wr.left, t:r.top-wr.top, b:r.bottom-wr.top,
+           cx:(r.left+r.right)/2-wr.left, cy:(r.top+r.bottom)/2-wr.top };
+}
+
+function arc(svg, x1,y1,x2,y2,col,dash) {
+  const mx=(x1+x2)/2;
+  const p=document.createElementNS('http://www.w3.org/2000/svg','path');
+  p.setAttribute('d',`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
+  p.setAttribute('stroke',col);
+  p.setAttribute('class','ap');
+  if(dash) p.setAttribute('stroke-dasharray','6,4');
+  svg.appendChild(p);
+  const d=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  d.setAttribute('cx',x2); d.setAttribute('cy',y2); d.setAttribute('r','3');
+  d.setAttribute('fill',col); d.setAttribute('class','adot');
+  svg.appendChild(d);
+}
+
+function draw() {
+  const svg = document.getElementById('svg-layer');
+  svg.innerHTML = '';
+  const G='#3ddc84', P='#f06292', B='#5ba3f5', Y='#f5c518', O='#ff8c42', V='#b388ff';
+  const N=rb('cnames'),I=rb('cips');
+  const NG=rb('cng'),IG=rb('cig');
+  const UE=rb('cue'),MS=rb('cms');
+  const ME=rb('cme'),NL=rb('cnlog'),IL=rb('cilog'),MSL=rb('cmslog');
+  arc(svg, N.r,  N.cy,    NG.l, NG.cy,     G, true);
+  arc(svg, NG.r, NG.cy,   UE.l, UE.cy-18,  G, true);
+  arc(svg, I.r,  I.cy,    IG.l, IG.cy,     P, true);
+  arc(svg, IG.r, IG.cy,   UE.l, UE.cy+18,  P, true);
+  arc(svg, MS.l, MS.cy,   UE.r, UE.cy,     Y, false);
+  arc(svg, ME.cx,ME.t,    UE.cx,UE.b,      V, false);
+  arc(svg, NL.l, NL.cy,   ME.r, ME.cy-10,  O, false);
+  arc(svg, IL.l, IL.cy,   ME.r, ME.cy+10,  O, false);
+  arc(svg, MSL.cx,MSL.t,  ME.r, ME.cy,     O, false);
+}
+window.addEventListener('load', draw);
+window.addEventListener('resize', draw);
+</script>
+</body>
+</html>

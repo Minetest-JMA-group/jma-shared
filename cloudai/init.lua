@@ -9,6 +9,11 @@ if not http_api then
 end
 
 local is_xmpp = core.global_exists("xmpp_relay")
+local shareddb_storage
+local has_shareddb = core.global_exists("shareddb")
+if has_shareddb then
+	shareddb_storage = shareddb.get_mod_storage()
+end
 local url = core.settings:get("cloudai.url") or "https://api.deepseek.com/chat/completions"
 local model = core.settings:get("cloudai.model") or "deepseek-chat"
 local timeout = core.settings:get("cloudai.timeout") or 10
@@ -19,6 +24,42 @@ if not api_key then
 	working = false
 else
 	auth_header = "Authorization: Bearer "..api_key
+end
+if has_shareddb then
+	local ctx = shareddb_storage:get_context()
+	if ctx then
+		local val = ctx:get_string("url")
+		if val then url = val end
+		val = ctx:get_string("model")
+		if val then model = val end
+		val = ctx:get_string("timeout")
+		if val then timeout = tonumber(val) end
+		ctx:finalize()
+	end
+	shareddb.register_listener(function(key)
+		if key == "url" then
+			local ctx = shareddb_storage:get_context()
+			if ctx then
+				local val = ctx:get_string("url")
+				if val then url = val end
+				ctx:finalize()
+			end
+		elseif key == "model" then
+			local ctx = shareddb_storage:get_context()
+			if ctx then
+				local val = ctx:get_string("model")
+				if val then model = val end
+				ctx:finalize()
+			end
+		elseif key == "timeout" then
+			local ctx = shareddb_storage:get_context()
+			if ctx then
+				local val = ctx:get_string("timeout")
+				if val then timeout = tonumber(val) end
+				ctx:finalize()
+			end
+		end
+	end)
 end
 cloudai = {}
 
@@ -352,6 +393,13 @@ core.register_chatcommand("cloudai", {
 				return false, "New timeout must be a whole number greater than zero"
 			end
 			timeout = new_timeout
+			if shareddb_storage then
+				local ctx = shareddb_storage:get_context()
+				if ctx then
+					ctx:set_string("timeout", tostring(new_timeout))
+					ctx:finalize()
+				end
+			end
 			return true, "New timeout: "..tostring(timeout)
 		end
 		if cmd == "model" then
@@ -364,6 +412,13 @@ core.register_chatcommand("cloudai", {
 				return false, "Model must be a non-empty string"
 			end
 			model = new_value
+			if shareddb_storage then
+				local ctx = shareddb_storage:get_context()
+				if ctx then
+					ctx:set_string("model", new_value)
+					ctx:finalize()
+				end
+			end
 			return true, "New model: "..tostring(model)
 		end
 		if cmd == "url" then
@@ -376,6 +431,13 @@ core.register_chatcommand("cloudai", {
 				return false, "URL must be a non-empty string"
 			end
 			url = new_value
+			if shareddb_storage then
+				local ctx = shareddb_storage:get_context()
+				if ctx then
+					ctx:set_string("url", new_value)
+					ctx:finalize()
+				end
+			end
 			return true, "New URL: "..tostring(url)
 		end
 		return false, "Invalid usage. Check /cloudai help"

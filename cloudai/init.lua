@@ -14,11 +14,16 @@ local has_shareddb = core.global_exists("shareddb")
 if has_shareddb then
 	shareddb_storage = shareddb.get_mod_storage()
 end
-local url = core.settings:get("cloudai.url") or "https://api.deepseek.com/chat/completions"
-local model = core.settings:get("cloudai.model") or "deepseek-chat"
+local base_url = core.settings:get("cloudai.url") or "https://api.deepseek.com"
+base_url = base_url:gsub("/$", "")
+local default_model = "deepseek-v4-flash"
+local model = core.settings:get("cloudai.model") or default_model
 local timeout = core.settings:get("cloudai.timeout") or 10
 local api_key = core.settings:get("cloudai.api_key")
 local auth_header
+local balance = "unknown"
+local model_fetch_lock = 0
+local balance_fetch_lock = 0
 if not api_key then
 	core.log("cloudai mod requires api_key. Add cloudai.api_key")
 	working = false
@@ -29,7 +34,7 @@ if has_shareddb then
 	local ctx = shareddb_storage:get_context()
 	if ctx then
 		local val = ctx:get_string("url")
-		if val then url = val end
+		if val then base_url = val:gsub("/$", "") end
 		val = ctx:get_string("model")
 		if val then model = val end
 		val = ctx:get_string("timeout")
@@ -41,7 +46,7 @@ if has_shareddb then
 			local ctx = shareddb_storage:get_context()
 			if ctx then
 				local val = ctx:get_string("url")
-				if val then url = val end
+				if val then base_url = val:gsub("/$", "") end
 				ctx:finalize()
 			end
 		elseif key == "model" then
@@ -62,6 +67,74 @@ if has_shareddb then
 	end)
 end
 cloudai = {}
+local models = {}
+
+local function parse_response(response)
+	if not response.succeeded then
+		if response.timeout then
+			return false, "Timeout"
+		end
+		return false, "Unknown error"
+	end
+	if response.code ~= 200 then
+		if #response.data == 0 then
+			return false, "Empty response"
+		end
+		-- Attempt to parse as JSON
+		local parsed, _ = core.parse_json(response.data, nil, true)
+		if parsed and parsed.error and type(parsed.error.message) == "string" then
+			return false, parsed.error.message
+		end
+		return false, response.data
+	end
+	local parsed, err = core.parse_json(response.data, nil, true)
+	if not parsed then
+		return false, err
+	end
+	return true, parsed
+end
+
+local function refresh_models()
+	local callback = function(response)
+		model_fetch_lock = model_fetch_lock - 1
+		local ok, parsed = parse_response(response)
+		if not ok then
+			core.log("[cloudai]: Failed to refresh the model list: "..parsed)
+			return
+		end
+		if type(parsed.data) ~= "table" or #parsed.data == 0 then
+			core.log("[cloudai]: Failed to refresh the model list: Invalid response form")
+			return
+		end
+		local new_models = {}
+		for _, value in ipairs(parsed.data) do
+			if type(value) ~= "table" or type(value.id) ~= "string" then
+				core.log("[cloudai]: Failed to refresh the model list: Invalid response form")
+				return
+			end
+			new_models[value.id] = true
+		end
+		models = new_models
+		if not models[model] then
+			if models[default_model] then
+				core.log("[cloudai]: Configured model "..model.." doesn't exist. Falling back to "..default_model)
+				model = default_model
+				return
+			end
+			model = nil
+			core.log("[cloudai]: We cannot select the model. Waiting for configuration.")
+		end
+	end
+	local request = {
+		url = base_url.."/models",
+		method = "GET",
+		timeout = timeout,
+		extra_headers = { "Content-Type: application/json", auth_header }
+	}
+	model_fetch_lock = model_fetch_lock + 1
+	http_api.fetch(request, callback)
+end
+refresh_models()
 
 local function send_debug(context, label, data)
 	if not context._debug or not is_xmpp then return end
@@ -92,39 +165,9 @@ local function handle_response(context, auto_call)
 	if context._destroyed then
 		return false, "Context destroyed, not triggering callback"
 	end
-	if not response.succeeded then
-		local err = "Unknown error"
-		if response.timeout then
-			err = "Timeout"
-		end
-		context._callback(context._history, nil, err)
-		context._callback = nil
-		context._current_debug_id = nil
-		return true
-	end
-	if response.code ~= 200 then
-		if #response.data == 0 then
-			context._callback(context._history, nil, nil)
-			context._callback = nil
-			context._current_debug_id = nil
-			return true
-		end
-		-- Attempt to parse as JSON
-		local parsed, _ = core.parse_json(response.data, nil, true)
-		if parsed and parsed.error and parsed.error.message
-		   and type(parsed.error.message) == "string" then
-			parsed = parsed.error.message
-		else
-			parsed = response.data
-		end
+	local ok, parsed = parse_response(response)
+	if not ok then
 		context._callback(context._history, nil, parsed)
-		context._callback = nil
-		context._current_debug_id = nil
-		return true
-	end
-	local parsed, err = core.parse_json(response.data, nil, true)
-	if not parsed then
-		context._callback(context._history, nil, err)
 		context._callback = nil
 		context._current_debug_id = nil
 		return true
@@ -207,6 +250,9 @@ cloudai.get_context = function()
 	if not working then
 		return nil, "cloudai is not properly configured to work. Check minetest.conf"
 	end
+	if not model then
+		return nil, "cloudai is waiting for model configuration"
+	end
 	return {
 		input_tokens = 0,
 		output_tokens = 0,
@@ -225,12 +271,21 @@ cloudai.get_context = function()
 		_presence_penalty = nil,
 		_debug = false,
 		_current_debug_id = nil,
+		_model = model,
+		_thinking = "disabled",
+		_reasoning_effort = nil,
 		_make_request = function(self)	-- After everything was made ready, this is called to form and send the request
 			local payload = {
-				model = model,
-				messages = self._history
+				model = self._model,
+				messages = self._history,
+				thinking = {
+					type = self._thinking
+				}
 			}
 			-- Add optional parameters if set
+			if self._reasoning_effort ~= nil then
+				payload.reasoning_effort = self._reasoning_effort
+			end
 			if self._temperature ~= nil then
 				payload.temperature = self._temperature
 			end
@@ -249,7 +304,7 @@ cloudai.get_context = function()
 				return false, err
 			end
 			self._handle = http_api.fetch_async({
-				url = url,
+				url = base_url.."/chat/completions",
 				method = "POST",
 				timeout = timeout,
 				data = data,
@@ -321,6 +376,30 @@ cloudai.get_context = function()
 			self._system_prompt = prompt
 			return true
 		end,
+		set_model = function(self, id)
+			if type(id) ~= "string" then
+				return false, "Model name must be a string"
+			end
+			if not models[id] then
+				return false, "Model "..id.." doesn't exist"
+			end
+			self._model = id
+			return true
+		end,
+		set_reasoning_effort = function(self, effort)
+			if effort ~= "high" and effort ~= "max" then
+				return false, string.format("Valid values are: high, max (got %s)", tostring(effort))
+			end
+			self._reasoning_effort = effort
+			return true
+		end,
+		set_thinking = function(self, thinking)
+			if thinking ~= "enabled" and thinking ~= "disabled" then
+				return false, string.format("Valid values are: enabled, disabled (got %s)", tostring(thinking))
+			end
+			self._thinking = thinking
+			return true
+		end,
 		set_max_steps = function(self, new_max_steps)
 			if type(new_max_steps) ~= "number" then
 				return false, "Max steps must be a number"
@@ -368,7 +447,7 @@ end
 core.register_privilege("cloudai", "Modify cloudai parameters")
 core.register_chatcommand("cloudai", {
 	description = "Set parameters for cloudai API",
-	params = "<subcommand> <argument>",
+	params = "<subcommand> arguments",
 	privs = { cloudai = true },
 	func = function(name, params)
 		local iter = params:gmatch("%S+")
@@ -380,8 +459,12 @@ core.register_chatcommand("cloudai", {
 			return true, [[Usage:
 /cloudai help: Print this help message
 /cloudai timeout <new_value>: If the second argument is present, set timeout to <new_value> seconds, otherwise print the current value
-/cloudai model <new_value>: If the second argument is present, set model to <new_value>, otherwise print the current value
-/cloudai url <new_value>: If the second argument is present, set URL to <new_value>, otherwise print the current value]]
+/cloudai url <new_value>: If the second argument is present, set the base URL to <new_value>, otherwise print the current value
+/cloudai balance: Print the current balance (in CNY and EUR)
+/cloudai models list: List all models we got from the provider
+                refresh: Refresh the list of models offered by the provider
+                set <model>: Set the new default model
+                get: Print the current default model]]
 		end
 		if cmd == "timeout" then
 			local new_value = iter()
@@ -402,35 +485,96 @@ core.register_chatcommand("cloudai", {
 			end
 			return true, "New timeout: "..tostring(timeout)
 		end
-		if cmd == "model" then
-			local new_value = iter()
-			if not new_value then
-				return true, "Current model: "..tostring(model)
+		if cmd == "balance" then
+			local callback = function(response)
+				balance_fetch_lock = balance_fetch_lock - 1
+				local ok, parsed = parse_response(response)
+				if not ok then
+					balance = string.format("(Failed to fetch: %s)", parsed)
+					return
+				end
+				if type(parsed.is_available) ~= "boolean" or type(parsed.balance_infos) ~= "table" or #parsed.balance_infos == 0 then
+					balance = "(Failed to fetch: Invalid response form)"
+					return
+				end
+				balance = parsed.is_available and "(Sufficient" or "(Insufficient"
+				local amount = ""
+				for _, info in ipairs(parsed.balance_infos) do
+					local value = tonumber(info.total_balance)
+					if type(info.currency) ~= "string" or not value then
+						balance = balance.."; Failed to fetch amount: Invalid response form)"
+						return
+					end
+					if value > 0 then
+						amount = string.format("%s; %.2f %s", amount, value, info.currency)
+					end
+				end
+				if amount == "" then
+					amount = "; 0.00 USD"
+				end
+				balance = balance..amount..")"
 			end
-
-			if type(new_value) ~= "string" or #new_value == 0 then
-				return false, "Model must be a non-empty string"
+			local request = {
+				url = base_url.."/user/balance",
+				method = "GET",
+				timeout = timeout,
+				extra_headers = { "Content-Type: application/json", auth_header }
+			}
+			if balance_fetch_lock == 0 then
+				balance_fetch_lock = balance_fetch_lock + 1
+				http_api.fetch(request, callback)
 			end
-			model = new_value
-			if shareddb_storage then
-				local ctx = shareddb_storage:get_context()
-				if ctx then
-					ctx:set_string("model", new_value)
-					ctx:finalize()
+			return true, "The previously fetched balance was: "..balance.."\nThe current is being read now."
+		end
+		if cmd == "models" then
+			local subcommand = iter()
+			if subcommand == "list" then
+				local res = ""
+				for model, _ in pairs(models) do
+					res = res..model.."\n"
+				end
+				return true, res
+			end
+			if subcommand == "get" then
+				return true, "Current default model: "..tostring(model)
+			end
+			if subcommand == "set" then
+				local new_value = iter()
+				if new_value then
+					if not models[new_value] then
+						return true, "Model "..new_value.." doesn't exist"
+					end
+					model = new_value
+					if shareddb_storage then
+						local ctx = shareddb_storage:get_context()
+						if ctx then
+							ctx:set_string("model", new_value)
+							ctx:finalize()
+						end
+					end
+					return true, "New model: "..model
 				end
 			end
-			return true, "New model: "..tostring(model)
+			if subcommand == "refresh" then
+				if model_fetch_lock > 0 then
+					return true, "A model list refresh is already in progress"
+				end
+				refresh_models()
+				return true, "Model list is being refreshed"
+			end
+			return false, "Usage: /cloudai models list|refresh|set <model>|get"
 		end
 		if cmd == "url" then
 			local new_value = iter()
 			if not new_value then
-				return true, "Current URL: "..tostring(url)
+				return true, "Current base URL: "..base_url
 			end
 
-			if type(new_value) ~= "string" or #new_value == 0 then
-				return false, "URL must be a non-empty string"
+			local pattern = "^https?://[%w-_%.~!$&'()*+,;=:@/?%%]+$"
+			if string.match(new_value, pattern) == nil then
+				return false, "Invalid URL: "..new_value
 			end
-			url = new_value
+			base_url = new_value:gsub("/$", "")
 			if shareddb_storage then
 				local ctx = shareddb_storage:get_context()
 				if ctx then
@@ -438,7 +582,7 @@ core.register_chatcommand("cloudai", {
 					ctx:finalize()
 				end
 			end
-			return true, "New URL: "..tostring(url)
+			return true, "New base URL: "..tostring(base_url)
 		end
 		return false, "Invalid usage. Check /cloudai help"
 	end

@@ -537,7 +537,7 @@ algorithms.parse_time = function(t)
 		return 0
 	end
 	local secs = 0
-	for num, unit in t:gmatch("(%d+)([smhDWMY]?)") do
+	for num, unit in t:gmatch("(%d+)([smhdDwWMYy]?)") do
 		secs = secs + (tonumber(num) * (unit_to_secs[unit] or 1))
 	end
 	return secs

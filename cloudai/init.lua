@@ -524,7 +524,11 @@ core.register_chatcommand("cloudai", {
 						return
 					end
 					if value > 0 then
-						amount = string.format("%s; %.2f %s", amount, value, info.currency)
+						if info.currency == "CNY" then
+							amount = string.format("%s; %.2f %s[≈%.2f EUR]", amount, value, info.currency, value/7.7613)
+						else
+							amount = string.format("%s; %.2f %s", amount, value, info.currency)
+						end
 					end
 				end
 				if amount == "" then

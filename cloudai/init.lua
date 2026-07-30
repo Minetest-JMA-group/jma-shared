@@ -150,6 +150,11 @@ local function send_debug(context, label, data)
 	xmpp_relay.send(msg, "debuglog@conference.jmaminetest.mooo.com")
 end
 
+-- Poll the HTTP request and process it when complete.
+-- Returns are meaningful only when called from call() (auto_call = false):
+--   true        → request finished, callback invoked, context free
+--   false, err  → context still busy (response pending or tool recursion ongoing)
+-- When called via core.after (auto_call = true), returns are discarded.
 -- Callback should add response to history, but we add tool calls
 local function handle_response(context, auto_call)
 	local response = http_api.fetch_async_get(context._handle)
@@ -184,11 +189,18 @@ local function handle_response(context, auto_call)
 		context._callback(context._history, nil, "Malformed response")
 		context._callback = nil
 		context._current_debug_id = nil
+		return true
 	else
 		if parsed.choices[1].finish_reason == "tool_calls" then
 			local msg = parsed.choices[1].message
 			table.insert(context._history, msg)
 			send_debug(context, "tool_call", msg)
+			if type(msg.tool_calls) ~= "table" or #msg.tool_calls == 0 then
+				context._callback(context._history, nil, "Malformed response")
+				context._callback = nil
+				context._current_debug_id = nil
+				return true
+			end
 			for _, tool_call in ipairs(msg.tool_calls) do
 				if context._max_steps_now then
 					context._max_steps_now = context._max_steps_now - 1
@@ -200,6 +212,12 @@ local function handle_response(context, auto_call)
 					end
 				end
 				local name = tool_call["function"].name
+				if not context._tools[name] then
+					context._callback(context._history, nil, "Tool "..tostring(name).." doesn't exist")
+					context._callback = nil
+					context._current_debug_id = nil
+					return true
+				end
 				local args = tool_call["function"].arguments
 				local json_args, err = core.parse_json(args, nil, true)
 				if json_args then

@@ -39,7 +39,7 @@ local function open_database()
 end
 local function run_migration(db, current_version)
 	local file_list = core.get_dir_list(modpath, false)
-	local migrations = { [0] = {num = 1, file = modpath.."/schema.sqlite"} }
+	local migrations = { {num = 1, file = "schema.sql"} }
 	for _, filename in ipairs(file_list) do
 		local num = filename:match("^migration_(%d+)%.sql$")
 		if num then

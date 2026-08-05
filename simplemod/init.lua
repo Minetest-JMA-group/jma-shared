@@ -2,6 +2,7 @@
 -- Copyright (c) 2026 Marko Petrović
 
 local modpath = core.get_modpath(core.get_current_modname())
+core.register_privilege("pmute", "Players with this privilege can mute players")
 
 simplemod = {}
 local internal = {}

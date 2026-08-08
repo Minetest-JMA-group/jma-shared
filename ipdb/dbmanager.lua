@@ -430,6 +430,21 @@ dbmanager.remove_name = function(nameid)
 	if ret ~= sqlite.DONE then error(ret) end
 end
 
+local remove_all_ips
+---@param entryid integer
+dbmanager.remove_all_ips = function(entryid)
+	if not remove_all_ips then
+		remove_all_ips = ipdb:prepare("DELETE FROM IPs WHERE userentry_id = ?")
+		if not remove_all_ips then error(ipdb:errmsg()) end
+	else
+		remove_all_ips:reset()
+	end
+	local ret = remove_all_ips:bind(1, entryid)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = remove_all_ips:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
 local reassociate_ip
 local reassociate_name
 -- Change the userentry_id of an IP row and/or a Username row to the given new entry ID

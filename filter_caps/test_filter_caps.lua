@@ -17,12 +17,15 @@ local online = { ["Bob"] = true, ["č"] = true, ["Ana-Marija"] = true }
 local storage = {}
 local listener
 local chatcmd
+local db_error = false
+local log_lines = {}
 
 core = {
 	registered_privileges = {},
 	register_privilege = function() end,
 	register_chatcommand = function(name, def) chatcmd = def end,
 	register_on_chat_message = function() end,
+	log = function(level, msg) table.insert(log_lines, { level = level, msg = msg }) end,
 	deserialize = function(s) return s end,
 	serialize = function(t) return t end,
 	get_player_by_name = function(name)
@@ -41,7 +44,10 @@ shareddb = {
 		return {
 			get_context = function()
 				return {
-					get_string = function(_, key) return storage[key] end,
+					get_string = function(_, key)
+						if db_error then return nil, "simulated DB error" end
+						return storage[key]
+					end,
 					set_string = function(_, key, value) storage[key] = value end,
 					finalize = function() end,
 				}
@@ -122,6 +128,27 @@ test("capsWrap 3 survives restart", filter_caps.parse("t", "@@@bob") == "@@@bob"
 chatcmd.func("t", "capsWrap 0")
 listener("capsWrap")
 test("capsWrap 0 disables stripping", filter_caps.parse("t", "@bob!") == "@bob!", "")
+
+-- --- DB errors must not be mistaken for missing values ---
+chatcmd.func("t", "capsMax 2")   -- pin caps_max so "@BOB!" discriminates the wrap bound
+listener("capsMax")
+db_error = true
+listener("capsWrap")
+test("DB error: current value kept, not reset to default",
+	filter_caps.parse("t", "@BOB!") == "@BOb!", filter_caps.parse("t", "@BOB!"))
+local has_err = false
+for _, l in ipairs(log_lines) do
+	if l.msg:match("shareddb error") then has_err = true end
+end
+test("DB error: logged", has_err, "")
+
+-- --- boot with DB error: settings stay at code defaults ---
+storage["capsMax"] = "5"
+db_error = true
+dofile(modpath)
+db_error = false
+test("boot DB error: capsMax stays code default 2, not the stored 5",
+	filter_caps.parse("t", "BOBBY") == "BObby", filter_caps.parse("t", "BOBBY"))
 
 print(("\n%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)

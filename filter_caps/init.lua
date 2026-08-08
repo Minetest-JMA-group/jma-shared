@@ -17,23 +17,44 @@ local function load_settings(key)
 	if not ctx then
 		return
 	end
+	local errmsg = "[filter_caps] shareddb error, cannot update settings"
 	if not key or key == "capsSpace" then
-		local space_str = ctx:get_string("capsSpace")
+		local space_str, err = ctx:get_string("capsSpace")
+		if err then
+			ctx:finalize()
+			core.log("error", errmsg)
+			return
+		end
 		caps_space = space_str and tonumber(space_str) or 2
 	end
 
 	if not key or key == "capsMax" then
-		local max_str = ctx:get_string("capsMax")
+		local max_str, err = ctx:get_string("capsMax")
+		if err then
+			ctx:finalize()
+			core.log("error", errmsg)
+			return
+		end
 		caps_max = max_str and tonumber(max_str) or 2
 	end
 
 	if not key or key == "capsWrap" then
-		local wrap_str = ctx:get_string("capsWrap")
+		local wrap_str, err = ctx:get_string("capsWrap")
+		if err then
+			ctx:finalize()
+			core.log("error", errmsg)
+			return
+		end
 		caps_wrap = wrap_str and tonumber(wrap_str) or 2
 	end
 
 	if not key or key == "whitelist" then
-		local wl_str = ctx:get_string("whitelist")
+		local wl_str, err = ctx:get_string("whitelist")
+		if err then
+			ctx:finalize()
+			core.log("error", errmsg)
+			return
+		end
 		whitelist = wl_str and core.deserialize(wl_str) or {}
 	end
 

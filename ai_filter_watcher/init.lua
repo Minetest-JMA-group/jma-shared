@@ -18,6 +18,7 @@ local TEMPERATURE = nil		-- use API default
 local FREQUENCY_PENALTY = nil
 local PRESENCE_PENALTY = nil
 local DEBUG_ENABLED = false
+local ACTION_RATE_LIMIT = nil		-- nil = unlimited
 
 local PROMPT_READY = false
 local message_buffer = {}
@@ -38,6 +39,27 @@ ai_filter_watcher = {
 }
 
 local modstorage = shareddb.get_mod_storage()
+
+-- Parse "<count>/<unit>" (e.g. "10/1m", "5/60", "2/1h30m") into
+-- { count, seconds, raw }. Returns nil on invalid input. Values are
+-- validated here, at the chat command, so the database only ever
+-- holds values this function accepts.
+local function parse_action_rate_limit(value)
+	local count_str, unit_str = tostring(value):match("^(%d+)/(%S+)$")
+	if not count_str or not unit_str then
+		return nil
+	end
+	-- unit must consist solely of parse_time tokens, e.g. "1m", "60", "1h30m"
+	if unit_str:gsub("%d+[smhdDwWMYy]?", "") ~= "" then
+		return nil
+	end
+	local count = tonumber(count_str)
+	local seconds = algorithms.parse_time(unit_str)
+	if not count or count < 1 or seconds < 1 then
+		return nil
+	end
+	return { count = count, seconds = seconds, raw = value }
+end
 
 local function set_local_setting(key, value_str)
 	if key == "mode" then
@@ -67,6 +89,8 @@ local function set_local_setting(key, value_str)
 		if not n or (n >= -2 and n <= 2) then PRESENCE_PENALTY = n end
 	elseif key == "debug_enabled" then
 		DEBUG_ENABLED = (value_str == "true")
+	elseif key == "action_rate_limit" then
+		ACTION_RATE_LIMIT = parse_action_rate_limit(value_str)
 	end
 end
 
@@ -90,7 +114,7 @@ local function update_setting_from_db(key)
 		local keys = {
 			"mode", "scan_interval", "min_batch_size", "history_size",
 			"history_tracking_time", "temperature", "frequency_penalty",
-			"presence_penalty", "debug_enabled"
+			"presence_penalty", "debug_enabled", "action_rate_limit"
 		}
 		for _, k in ipairs(keys) do
 			local v, err = ctx:get_string(k)
@@ -108,6 +132,32 @@ local function update_setting_from_db(key)
 end
 
 shareddb.register_listener(update_setting_from_db)
+
+local rate_count = 0
+local rate_window_start = 0
+
+-- Rate-limited wrapper for relays.send_action_report: at most
+-- ACTION_RATE_LIMIT.count reports per ACTION_RATE_LIMIT.seconds window.
+-- Overflowing reports are dropped to the server log instead of the
+-- action channel.
+local function send_action_report(fmt, ...)
+	local final_msg = string.format(fmt, ...)
+	local limit = ACTION_RATE_LIMIT
+	if limit then
+		local now = os.time()
+		if now - rate_window_start >= limit.seconds then
+			rate_window_start = now
+			rate_count = 0
+		end
+		rate_count = rate_count + 1
+		if rate_count > limit.count then
+			core.log("action", ("[ai_filter_watcher] Action report rate limit exceeded (%d per %ds), dropping: %s"):format(
+				limit.count, limit.seconds, final_msg))
+			return
+		end
+	end
+	relays.send_action_report("%s", final_msg)
+end
 
 local function load_system_prompt()
 	local file = io.open(system_prompt_file, "r")
@@ -352,7 +402,7 @@ local function process_batch()
 			else -- permissive
 				local msg = ("[PERMISSIVE] Would have warned player '%s' for: %s"):format(player_name, reason)
 				core.log("action", "[ai_filter_watcher] " .. msg)
-				relays.send_action_report("**AI Watcher**: %s", msg)
+				send_action_report("**AI Watcher**: %s", msg)
 			end
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
@@ -382,7 +432,7 @@ local function process_batch()
 			else
 				local msg = ("[PERMISSIVE] Would have muted player '%s' for %d minutes: %s"):format(player_name, duration, reason)
 				core.log("action", "[ai_filter_watcher] " .. msg)
-				relays.send_action_report("**AI Watcher**: %s", msg)
+				send_action_report("**AI Watcher**: %s", msg)
 			end
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
@@ -441,13 +491,13 @@ local function process_batch()
 		is_processing = false
 		if error then
 			core.log("warning", ("[ai_filter_watcher] AI error for batch call %d: %s"):format(call_id, tostring(error)))
-			relays.send_action_report("**AI Watcher**: Batch %d error: %s", call_id, tostring(error))
+			send_action_report("**AI Watcher**: Batch %d error: %s", call_id, tostring(error))
 		end
 	end)
 
 	if not ok then
 		core.log("warning", ("[ai_filter_watcher] Failed to call AI for batch %d: %s"):format(call_id, tostring(err)))
-		relays.send_action_report("**AI Watcher**: Failed to call AI for batch %d: %s", call_id, tostring(err))
+		send_action_report("**AI Watcher**: Failed to call AI for batch %d: %s", call_id, tostring(err))
 		active_context = nil
 		is_processing = false
 	end
@@ -572,7 +622,7 @@ AI Watcher Status:
 				core.log("warning", "[ai_filter_watcher] shareddb unavailable, mode change not persisted")
 			end
 			WATCHER_MODE = mode
-			relays.send_action_report("**AI Watcher**: Mode changed to %s by %s", mode, name)
+			send_action_report("**AI Watcher**: Mode changed to %s by %s", mode, name)
 			return true, "Watcher mode set to: " .. mode
 
 		elseif cmd == "interval" then
@@ -728,8 +778,34 @@ AI Watcher Status:
 			if new < old then
 				cleanup_player_history()
 			end
-			relays.send_action_report("**AI Watcher**: History tracking time changed to %d seconds by %s", new, name)
+			send_action_report("**AI Watcher**: History tracking time changed to %d seconds by %s", new, name)
 			return true, ("History tracking time set to: %d seconds (%.1f hours)"):format(new, new/3600)
+
+		elseif cmd == "action_rate_limit" then
+			local v = param:match("%s+(%S+)")
+			if not v then
+				if ACTION_RATE_LIMIT then
+					return true, ("Current action report rate limit: %s (max %d messages per %d seconds)"):format(
+						ACTION_RATE_LIMIT.raw, ACTION_RATE_LIMIT.count, ACTION_RATE_LIMIT.seconds)
+				end
+				return true, "No action report rate limit set (unlimited)"
+			end
+			local limit = parse_action_rate_limit(v)
+			if not limit then
+				return false, "Invalid rate limit. Usage: /ai_watcher action_rate_limit <count>/<unit>, e.g. 10/1m or 5/60"
+			end
+			local ctx = modstorage:get_context()
+			if ctx then
+				local err = ctx:set_string("action_rate_limit", v)
+				err = err or ctx:finalize()
+				if err then
+					core.log("error", "[ai_filter_watcher] Failed to write action rate limit to shareddb: " .. tostring(err))
+				end
+			else
+				core.log("warning", "[ai_filter_watcher] shareddb unavailable, action rate limit change not persisted")
+			end
+			ACTION_RATE_LIMIT = limit
+			return true, ("Action report rate limit set to: %s (max %d messages per %d seconds)"):format(v, limit.count, limit.seconds)
 
 		elseif cmd == "process" then
 			local force = param:match("%s+force")
@@ -754,7 +830,7 @@ AI Watcher Status:
 		elseif cmd == "abort" then
 			if is_processing then
 				abort_current_processing("Manually aborted by " .. name)
-				relays.send_action_report("**AI Watcher**: Current processing aborted by %s", name)
+				send_action_report("**AI Watcher**: Current processing aborted by %s", name)
 				return true, "Ongoing AI processing aborted"
 			else
 				return false, "No processing to abort"
@@ -765,22 +841,22 @@ AI Watcher Status:
 			if what == "buffer" then
 				local cnt = #message_buffer
 				message_buffer = {}
-				relays.send_action_report("**AI Watcher**: Cleared %d messages from buffer by %s", cnt, name)
+				send_action_report("**AI Watcher**: Cleared %d messages from buffer by %s", cnt, name)
 				return true, ("Cleared %d messages from buffer"):format(cnt)
 			elseif what == "stats" then
 				watcher_stats = { scans_performed = 0, messages_processed = 0, actions_taken = 0, last_scan_time = 0, last_action_time = 0 }
-				relays.send_action_report("**AI Watcher**: Statistics cleared by %s", name)
+				send_action_report("**AI Watcher**: Statistics cleared by %s", name)
 				return true, "Statistics cleared"
 			elseif what == "history" then
 				chat_history = {}
 				history_index = 1
 				history_count = 0
-				relays.send_action_report("**AI Watcher**: Chat history cleared by %s", name)
+				send_action_report("**AI Watcher**: Chat history cleared by %s", name)
 				return true, "Chat history cleared"
 			elseif what == "player_history" then
 				player_history = {}
 				save_player_history()
-				relays.send_action_report("**AI Watcher**: Player moderation history cleared by %s", name)
+				send_action_report("**AI Watcher**: Player moderation history cleared by %s", name)
 				return true, "Player moderation history cleared"
 			else
 				return false, "Usage: /ai_watcher clear <buffer|stats|history|player_history>"
@@ -803,7 +879,7 @@ AI Watcher Status:
 				suffix = " from an updated git repository"
 			end
 			if load_system_prompt() then
-				relays.send_action_report("**AI Watcher**: System prompt reloaded by %s", name)
+				send_action_report("**AI Watcher**: System prompt reloaded by %s", name)
 				return true, "System prompt reloaded successfully"..suffix
 			else
 				return false, "Failed to reload system prompt"
@@ -820,6 +896,7 @@ AI Watcher Status:
   presence_penalty [value]  - Get/set presence penalty (-2 to 2)
   debug [on|off]        - Get/set debug logging
   history_time [time]   - Get/set history retention (seconds or e.g. '10h')
+  action_rate_limit [value] - Get/set action report rate limit (e.g. '10/1m', unlimited if unset)
   process [force]       - Process current batch immediately
   dump                  - Show messages in buffer
   abort                 - Abort ongoing processing
@@ -842,6 +919,6 @@ core.after(0, function()
 	cleanup_player_history()
 	core.log("action", ("[ai_filter_watcher] Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s)"):format(
 		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE, DEBUG_ENABLED and "enabled" or "disabled"))
-	relays.send_action_report("**AI Watcher**: Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s)",
+	send_action_report("**AI Watcher**: Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s)",
 		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE, DEBUG_ENABLED and "enabled" or "disabled")
 end)

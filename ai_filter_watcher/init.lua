@@ -61,38 +61,80 @@ local function parse_action_rate_limit(value)
 	return { count = count, seconds = seconds, raw = value }
 end
 
-local function set_local_setting(key, value_str)
-	if key == "mode" then
-		if value_str == "enabled" or value_str == "permissive" or value_str == "disabled" then
-			WATCHER_MODE = value_str
-		end
-	elseif key == "scan_interval" then
-		local n = tonumber(value_str)
-		if n and n >= 1 and n <= 3600 then SCAN_INTERVAL = n end
-	elseif key == "min_batch_size" then
-		local n = tonumber(value_str)
-		if n and n >= 1 and n <= 100 then MIN_BATCH_SIZE = n end
-	elseif key == "history_size" then
-		local n = tonumber(value_str)
-		if n and n >= 10 and n <= 1000 then HISTORY_SIZE = n end
-	elseif key == "history_tracking_time" then
-		local n = tonumber(value_str)
-		if n and n >= 60 and n <= 2592000 then HISTORY_TRACKING_TIME = n end
-	elseif key == "temperature" then
-		local n = tonumber(value_str)
-		if not n or (n >= 0 and n <= 2) then TEMPERATURE = n end   -- allow nil
-	elseif key == "frequency_penalty" then
-		local n = tonumber(value_str)
-		if not n or (n >= -2 and n <= 2) then FREQUENCY_PENALTY = n end
-	elseif key == "presence_penalty" then
-		local n = tonumber(value_str)
-		if not n or (n >= -2 and n <= 2) then PRESENCE_PENALTY = n end
-	elseif key == "debug_enabled" then
-		DEBUG_ENABLED = (value_str == "true")
-	elseif key == "action_rate_limit" then
-		ACTION_RATE_LIMIT = parse_action_rate_limit(value_str)
-	end
-end
+-- Single source of truth for settings: key -> { default, apply }.
+-- update_setting_from_db iterates this table with a per-key guard like
+-- filter_caps, so a new setting can't be applied live but forgotten at
+-- boot (which would silently revert it on restart). Missing values
+-- fall back to the setting's default.
+local settings_appliers = {
+	mode = {
+		default = "enabled",
+		apply = function(v)
+			if v == "enabled" or v == "permissive" or v == "disabled" then WATCHER_MODE = v end
+		end,
+	},
+	scan_interval = {
+		default = "60",
+		apply = function(v)
+			local n = tonumber(v)
+			if n and n >= 1 and n <= 3600 then SCAN_INTERVAL = n end
+		end,
+	},
+	min_batch_size = {
+		default = "5",
+		apply = function(v)
+			local n = tonumber(v)
+			if n and n >= 1 and n <= 100 then MIN_BATCH_SIZE = n end
+		end,
+	},
+	history_size = {
+		default = "100",
+		apply = function(v)
+			local n = tonumber(v)
+			if n and n >= 10 and n <= 1000 then HISTORY_SIZE = n end
+		end,
+	},
+	history_tracking_time = {
+		default = "86400",
+		apply = function(v)
+			local n = tonumber(v)
+			if n and n >= 60 and n <= 2592000 then HISTORY_TRACKING_TIME = n end
+		end,
+	},
+	temperature = {
+		default = nil,
+		apply = function(v)
+			local n = tonumber(v)
+			if not n or (n >= 0 and n <= 2) then TEMPERATURE = n end   -- allow nil
+		end,
+	},
+	frequency_penalty = {
+		default = nil,
+		apply = function(v)
+			local n = tonumber(v)
+			if not n or (n >= -2 and n <= 2) then FREQUENCY_PENALTY = n end
+		end,
+	},
+	presence_penalty = {
+		default = nil,
+		apply = function(v)
+			local n = tonumber(v)
+			if not n or (n >= -2 and n <= 2) then PRESENCE_PENALTY = n end
+		end,
+	},
+	debug_enabled = {
+		default = "false",
+		apply = function(v)
+			DEBUG_ENABLED = (v == "true")
+		end,
+	},
+	action_rate_limit = {
+		default = nil,
+		apply = function(v)
+			ACTION_RATE_LIMIT = parse_action_rate_limit(v)
+		end,
+	},
+}
 
 local function update_setting_from_db(key)
 	local errmsg = "[ai_filter_watcher] shareddb database error, cannot update settings"
@@ -102,30 +144,18 @@ local function update_setting_from_db(key)
 		return
 	end
 
-	if key then
-		local val, err = ctx:get_string(key)
-		if err then
-			ctx:finalize()
-			core.log("error", errmsg)
-			return
-		end
-		set_local_setting(key, val)
-	else
-		local keys = {
-			"mode", "scan_interval", "min_batch_size", "history_size",
-			"history_tracking_time", "temperature", "frequency_penalty",
-			"presence_penalty", "debug_enabled", "action_rate_limit"
-		}
-		for _, k in ipairs(keys) do
+	-- Like filter_caps: nil (boot) loads every setting, a specific key
+	-- (shareddb listener) loads just that one, unknown keys load nothing.
+	-- Missing values fall back to the setting's default.
+	for k, entry in pairs(settings_appliers) do
+		if not key or key == k then
 			local v, err = ctx:get_string(k)
 			if err then
 				ctx:finalize()
 				core.log("error", errmsg)
 				return
 			end
-			if v ~= nil then
-				set_local_setting(k, v)
-			end
+			entry.apply(v ~= nil and v or entry.default)
 		end
 	end
 	ctx:finalize()

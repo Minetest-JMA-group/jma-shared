@@ -50,7 +50,9 @@ end
 -- [function] Get player rank
 function ranks.get_rank(name)
 	if type(name) ~= "string" then
-		name = core.get_player_by_name(name)
+		-- Accept a player ObjectRef, like ranks.set_rank / remove_rank do.
+		-- (get_player_by_name would raise an engine error on an ObjectRef.)
+		name = name:get_player_name()
 	end
 
 	local rank = storage:get_string(name)

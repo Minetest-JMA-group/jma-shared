@@ -43,14 +43,11 @@ function jma_greeter.load_file(filename)
 end
 
 function jma_greeter.write_file(filename, content)
-	local file = io.open(worldpath .. "/" .. filename, "w")
-	if file then
-		file:write(content)
-		file:close()
+	local ok = core.safe_file_write(worldpath .. "/" .. filename, content)
+	if ok then
 		core.log("action", "[jma_greeter]: written " .. filename)
-		return true
 	end
-	return false
+	return ok
 end
 
 function jma_greeter.show_editor(pname, txt, title, actions)

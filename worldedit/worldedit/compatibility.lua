@@ -16,11 +16,8 @@ worldedit.deserialize_old = worldedit.deserialize
 
 function worldedit.metasave(pos1, pos2, filename)
 	deprecated("save")
-	local file, err = io.open(filename, "wb")
-	if err then return 0 end
 	local data, count = worldedit.serialize(pos1, pos2)
-	file:write(data)
-	file:close()
+	if not core.safe_file_write(filename, data) then return 0 end
 	return count
 end
 
@@ -28,7 +25,7 @@ function worldedit.metaload(originpos, file_name)
 	deprecated("load")
 	local file_path = core.get_worldpath() ..
 		"/schems/" .. file_name .. ".wem"
-	local file, err = io.open(file_path, "wb")
+	local file, err = io.open(file_path, "rb")
 	if err then
 		return 0
 	end

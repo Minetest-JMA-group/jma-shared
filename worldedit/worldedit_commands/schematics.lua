@@ -88,13 +88,9 @@ worldedit.register_command("save", {
 		core.mkdir(path)
 
 		local filename = path .. "/" .. param .. ".we"
-		local file, err = io.open(filename, "wb")
-		if err ~= nil then
+		if not core.safe_file_write(filename, result) then
 			return false, S("Could not save file to \"@1\"", filename)
 		end
-		file:write(result)
-		file:flush()
-		file:close()
 
 		return true, S("@1 nodes saved", count)
 	end,

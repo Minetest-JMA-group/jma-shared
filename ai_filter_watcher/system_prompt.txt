@@ -32,7 +32,6 @@ Important notes:
   • BABEL PM to <player> — private message sent through the translation mod
   • TEAM — CTF team channel, visible only to the sender's team
   • GLOBAL — CTF global channel (same as public chat)
-  • EMOTE — roleplay-style emote to everyone
   • XMPP-DM — message the player sent to the XMPP bridge
   • DISCORD / XMPP — message from a Discord/XMPP user relayed into the game
   Harassment, grooming and other serious violations most often happen in private channels (PM, MAIL), where nobody else can see them, so treat them with extra care.

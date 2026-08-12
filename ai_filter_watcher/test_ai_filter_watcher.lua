@@ -189,7 +189,7 @@ check(buffer_count(envA) == n_empty, "A: empty param not recorded")
 cmdA.t.func("bob", "  go left  ")
 contains(dump_buffer(envA), "<bob> [TEAM]: go left", "A: /t content mode with trimming")
 cmdA.me.func("carol", "waves at everyone")
-contains(dump_buffer(envA), "<carol> [EMOTE]: waves at everyone", "A: /me")
+contains(dump_buffer(envA), "<carol>: * carol waves at everyone", "A: /me rendered as regular message")
 cmdA.xmsg.func("dave", "hi all")
 contains(dump_buffer(envA), "<dave> [XMPP-DM]: hi all", "A: /xmsg")
 

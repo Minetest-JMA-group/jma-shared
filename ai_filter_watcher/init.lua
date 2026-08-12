@@ -358,7 +358,11 @@ local comm_commands = {
 	msg  = { tag = "PM to %s",       mode = "recv+content" },
 	t    = { tag = "TEAM",           mode = "content" },
 	g    = { tag = "GLOBAL",         mode = "content" },
-	me   = { tag = "EMOTE",          mode = "content" },
+	-- /me broadcasts "* name <message>"; the rendered line is recorded as a
+	-- regular message, no tag needed — the form is self-describing
+	me   = { mode = "content", render = function(name, content)
+		return "* " .. name .. " " .. content
+	end },
 	mail = { tag = "MAIL to %s",     mode = "recv+content" },
 	bmsg = { tag = "BABEL PM to %s", mode = "recv+content" },
 	xmsg = { tag = "XMPP-DM",        mode = "content" },
@@ -391,6 +395,7 @@ local function wrap_comm_command(command_name, def)
 		if content then
 			local tag = cfg.tag
 			if recipient then tag = tag:format(recipient) end
+			if cfg.render then content = cfg.render(name, content) end
 			record_message(name, content, tag)
 		end
 		return func(name, param)

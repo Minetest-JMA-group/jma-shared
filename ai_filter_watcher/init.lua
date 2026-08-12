@@ -366,6 +366,7 @@ local comm_commands = {
 	mail = { tag = "MAIL to %s",     mode = "recv+content" },
 	bmsg = { tag = "BABEL PM to %s", mode = "recv+content" },
 	xmsg = { tag = "XMPP-DM",        mode = "content" },
+	xdm = { tag = "XMPP-DM to %s",   mode = "recv+content" },
 }
 
 local wrapped_funcs = {}

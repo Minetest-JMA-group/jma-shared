@@ -122,6 +122,7 @@ local function make_env(globals, shareddb_values)
 	core.register_chatcommand("g", { func = function() return true end })
 	core.register_chatcommand("me", { func = function() return true end })
 	core.register_chatcommand("xmsg", { func = function() return true end })
+	core.register_chatcommand("xdm", { func = function() return true end })
 	core.register_chatcommand("tell", { alias = "msg" }) -- engine alias, no func
 	core.register_chatcommand("mail", { func = function() return true end })
 	env.orig_mail = env.core.registered_chatcommands.mail.func
@@ -192,6 +193,8 @@ cmdA.me.func("carol", "waves at everyone")
 contains(dump_buffer(envA), "<carol>: * carol waves at everyone", "A: /me rendered as regular message")
 cmdA.xmsg.func("dave", "hi all")
 contains(dump_buffer(envA), "<dave> [XMPP-DM]: hi all", "A: /xmsg")
+cmdA.xdm.func("dave", "bob hi all")
+contains(dump_buffer(envA), "<dave> [XMPP-DM to bob]: hi all", "A: /xdm")
 
 -- command registered AFTER load gets wrapped via register_chatcommand
 envA.core.register_chatcommand("bmsg", { func = function() return true end })

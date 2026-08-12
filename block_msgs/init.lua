@@ -49,6 +49,7 @@ local directed_chatcomms = {
 	["bmsg"] = true,
 	["mail"] = true,
 	["donate"] = true,
+	["xdm"] = true,
 }
 
 local function make_checker(old_func)

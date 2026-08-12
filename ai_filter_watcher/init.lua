@@ -295,9 +295,9 @@ local function format_player_history(hist)
 	return "Recent moderation history:\n" .. table.concat(lines, "\n")
 end
 
-local function add_to_history(name, msg)
+local function add_to_history(name, msg, tag)
 	if WATCHER_MODE == ai_filter_watcher.MODES.DISABLED then return end
-	chat_history[history_index] = { name = name, message = msg, time = os.time() }
+	chat_history[history_index] = { name = name, message = msg, time = os.time(), tag = tag }
 	history_index = history_index % HISTORY_SIZE + 1
 	if history_count < HISTORY_SIZE then
 		history_count = history_count + 1
@@ -331,9 +331,95 @@ end
 local function format_history(msgs)
 	local lines = {}
 	for _, m in ipairs(msgs) do
-		table.insert(lines, ("[%s] <%s>: %s"):format(os.date("%H:%M", m.time), m.name, m.message))
+		if m.tag then
+			table.insert(lines, ("[%s] <%s> [%s]: %s"):format(os.date("%H:%M", m.time), m.name, m.tag, m.message))
+		else
+			table.insert(lines, ("[%s] <%s>: %s"):format(os.date("%H:%M", m.time), m.name, m.message))
+		end
 	end
 	return table.concat(lines, "\n")
+end
+
+-- Single entry point for all captured communication: public chat, chat
+-- command content, inbound relay messages and other mods' API calls.
+local function record_message(name, message, tag)
+	if not message then return end
+	add_to_history(name, message, tag)
+	if WATCHER_MODE ~= ai_filter_watcher.MODES.DISABLED then
+		table.insert(message_buffer, { name = name, message = message, time = os.time(), tag = tag })
+	end
+end
+
+-- Channels whose content lives in the chat command's arguments. A command is
+-- wrapped only if it exists on this server, so this stays game-agnostic.
+-- recv+content: param is "<recipient> <message>", the tag receives the recipient
+-- content: the whole param is the message
+local comm_commands = {
+	msg  = { tag = "PM to %s",       mode = "recv+content" },
+	t    = { tag = "TEAM",           mode = "content" },
+	g    = { tag = "GLOBAL",         mode = "content" },
+	me   = { tag = "EMOTE",          mode = "content" },
+	mail = { tag = "MAIL to %s",     mode = "recv+content" },
+	bmsg = { tag = "BABEL PM to %s", mode = "recv+content" },
+	xmsg = { tag = "XMPP-DM",        mode = "content" },
+}
+
+local wrapped_funcs = {}
+
+local function wrap_comm_command(command_name, def)
+	local cfg = comm_commands[command_name]
+	local func = def and def.func
+	if not cfg or not func or wrapped_funcs[func] then
+		return
+	end
+	-- Only CTF's email mod has a chat-argument /mail; the mt-mods mail command
+	-- (Mineclone2/Creative) just opens a compose GUI, its content arrives via
+	-- ai_filter_watcher.add_message instead. Checked at wrap time, after all
+	-- mods have loaded.
+	if command_name == "mail" and not core.global_exists("email") then
+		return
+	end
+	wrapped_funcs[func] = true
+	def.func = function(name, param)
+		local recipient, content
+		if cfg.mode == "recv+content" then
+			recipient, content = tostring(param or ""):match("^%s*(%S+)%s+(.+)$")
+		else
+			content = tostring(param or ""):match("^%s*(.-)%s*$")
+			if content == "" then content = nil end
+		end
+		if content then
+			local tag = cfg.tag
+			if recipient then tag = tag:format(recipient) end
+			record_message(name, content, tag)
+		end
+		return func(name, param)
+	end
+end
+
+-- Wrap communication commands registered after this mod loads
+local original_register_chatcommand = core.register_chatcommand
+core.register_chatcommand = function(name, def)
+	wrap_comm_command(name, def)
+	return original_register_chatcommand(name, def)
+end
+
+local original_override_chatcommand = core.override_chatcommand
+core.override_chatcommand = function(name, redef)
+	wrap_comm_command(name, redef)
+	return original_override_chatcommand(name, redef)
+end
+
+-- Wrap communication commands registered before this mod loaded (engine
+-- builtins and mods that load earlier than us)
+for name, def in pairs(core.registered_chatcommands) do
+	wrap_comm_command(name, def)
+end
+
+-- Universal API for other communication mods (e.g. GUI-composed mail) to feed
+-- a message into the watcher's batch and history stream.
+function ai_filter_watcher.add_message(name, message, tag)
+	record_message(name, message, tag)
 end
 
 local function process_batch()
@@ -534,11 +620,31 @@ local function process_batch()
 end
 
 chat_lib.register_on_chat_message(4, function(name, msg)
-	add_to_history(name, msg)
-	if WATCHER_MODE ~= ai_filter_watcher.MODES.DISABLED then
-		table.insert(message_buffer, { name = name, message = msg, time = os.time() })
-	end
+	record_message(name, msg)
 	return false
+end)
+
+-- Inbound relay messages (Discord/XMPP -> game) never pass through the chat
+-- message hook, so catch them here. Only these two sources are inbound
+-- traffic; player chat arrives with a different source, so no double capture.
+-- xmpp_relay's bot skips its own sends (relay.py muc_messages), so /xmsg
+-- content never comes back through this hook.
+chat_lib.register_on_chat_send_all(function(msg, source)
+	if source ~= "discordmt" and source ~= "xmpp_relay" then return end
+	local tag = source == "discordmt" and "DISCORD" or "XMPP"
+	local plain = core.strip_colors(msg)
+	local author, content = plain:match("^%s*<([^>]+)@Discord>%s*(.-)%s*$")
+	if not author then
+		author, content = plain:match("^%s*(.-)@XMPP:%s*(.-)%s*$")
+	end
+	if not author then
+		-- Odd format: attribute the whole line to the source
+		author, content = source, plain
+	end
+	author = author:gsub("[<>]", ""):gsub("%s+", " ")
+	if content and content ~= "" then
+		record_message(author, content, tag)
+	end
 end)
 
 local time_acc, cleanup_acc = 0, 0
@@ -852,7 +958,8 @@ AI Watcher Status:
 				out = out .. "(empty)"
 			else
 				for i, m in ipairs(message_buffer) do
-					out = out .. ("%d. [%s] <%s>: %s\n"):format(i, os.date("%H:%M", m.time), m.name, m.message)
+					out = out .. ("%d. [%s] <%s>%s: %s\n"):format(i, os.date("%H:%M", m.time), m.name,
+						m.tag and (" [" .. m.tag .. "]") or "", m.message)
 				end
 			end
 			return true, out

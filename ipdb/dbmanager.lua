@@ -104,16 +104,48 @@ dbmanager.init_ipdb = function(sqlite_param)
 			version = tonumber(err_or_try_meta)
 		end
 	end
+	-- The version read is done, release the transaction: PRAGMA foreign_keys can
+	-- only be toggled outside of a transaction, and the migration batch needs it
+	-- off (migration 5 recreates UserEntry; dropping the old table would otherwise
+	-- cascade into Usernames, IPs and Modstorage)
+	ret = db:exec("COMMIT")
+	if ret ~= sqlite.OK then
+		core.log("error", "[ipdb]: Failed to commit initial transaction. Error: "..tostring(ret))
+		db:exec("ROLLBACK")
+		db:close()
+		return nil
+	end
+	ret = db:exec("PRAGMA foreign_keys = OFF")
+	if ret ~= sqlite.OK then
+		core.log("error", "[ipdb]: Failed to disable foreign keys for the migration. Error: "..tostring(ret))
+		db:close()
+		return nil
+	end
+	ret = db:exec("BEGIN")
+	if ret ~= sqlite.OK then
+		core.log("error", "[ipdb]: Cannot start a transaction. Error: "..tostring(ret))
+		db:exec("PRAGMA foreign_keys = ON")
+		db:close()
+		return nil
+	end
 	local ok, new_version = run_migration(db, version)
 	if not ok then
 		db:exec("ROLLBACK")
+		db:exec("PRAGMA foreign_keys = ON")
 		db:close()
 		return nil
 	end
 	ret = db:exec("COMMIT")
 	if ret ~= sqlite.OK then
-		core.log("error", "[ipdb]: Failed to commit initial transaction. Error: "..tostring(ret))
+		core.log("error", "[ipdb]: Failed to commit migration transaction. Error: "..tostring(ret))
 		db:exec("ROLLBACK")
+		db:exec("PRAGMA foreign_keys = ON")
+		db:close()
+		return nil
+	end
+	ret = db:exec("PRAGMA foreign_keys = ON")
+	if ret ~= sqlite.OK then
+		core.log("error", "[ipdb]: Failed to re-enable foreign keys. Error: "..tostring(ret))
 		db:close()
 		return nil
 	end
@@ -855,6 +887,631 @@ dbmanager.prune_merge_events = function(max_age)
 	if ret ~= sqlite.OK then error(ret) end
 	ret = prune_merge:step()
 	if ret ~= sqlite.DONE then error(ret) end
+end
+
+-- ═══════════════ Merge history and rollback ═══════════════
+
+---@class MergeEventRow
+---@field id integer
+---@field entry_src integer
+---@field entry_dst integer
+---@field name string
+---@field ip string
+---@field timestamp integer
+---@field reverted_at integer?
+
+local entry_by_id
+-- Get a user entry row by its id
+---@param entryid integer
+---@return UserEntryEntity?
+dbmanager.get_userentry = function(entryid)
+	if not entry_by_id then
+		entry_by_id = ipdb:prepare("SELECT * FROM UserEntry WHERE id = ?")
+		if not entry_by_id then error(ipdb:errmsg()) end
+	else
+		entry_by_id:reset()
+	end
+	local ret = entry_by_id:bind(1, entryid)
+	if ret ~= sqlite.OK then error(ret) end
+	for result in entry_by_id:nrows() do
+		return result
+	end
+end
+
+local merge_events_list
+-- List the given number of most recent merge events, with the size of the
+-- snapshots taken for each of them
+---@param limit integer
+---@return MergeEventRow[]
+dbmanager.get_merge_events = function(limit)
+	if not merge_events_list then
+		merge_events_list = ipdb:prepare("SELECT m.id, m.entry_src, m.entry_dst, m.name, m.ip, "..
+		                                 "m.timestamp, m.reverted_at, "..
+		                                 "(SELECT COUNT(*) FROM Usernames_log l WHERE l.merge_id = m.id) AS name_count, "..
+		                                 "(SELECT COUNT(*) FROM IPs_log l WHERE l.merge_id = m.id) AS ip_count "..
+		                                 "FROM MergeEvent m ORDER BY m.timestamp DESC LIMIT ?")
+		if not merge_events_list then error(ipdb:errmsg()) end
+	else
+		merge_events_list:reset()
+	end
+	local ret = merge_events_list:bind(1, limit)
+	if ret ~= sqlite.OK then error(ret) end
+	local results = {}
+	for result in merge_events_list:nrows() do
+		table.insert(results, result)
+	end
+	return results
+end
+
+local merge_event_by_id
+---@param merge_id integer
+---@return MergeEventRow?
+dbmanager.get_merge_event = function(merge_id)
+	if not merge_event_by_id then
+		merge_event_by_id = ipdb:prepare("SELECT * FROM MergeEvent WHERE id = ?")
+		if not merge_event_by_id then error(ipdb:errmsg()) end
+	else
+		merge_event_by_id:reset()
+	end
+	local ret = merge_event_by_id:bind(1, merge_id)
+	if ret ~= sqlite.OK then error(ret) end
+	for result in merge_event_by_id:nrows() do
+		return result
+	end
+end
+
+local log_names_stmt
+local log_ips_stmt
+local log_modstorage_stmt
+-- Get all logged rows of a merge event: the pre-merge state of the absorbed
+-- entry's identifiers and of both entries' modstorage
+---@param merge_id integer
+---@return { names: table[], ips: table[], modstorage: table[] }
+dbmanager.get_merge_log = function(merge_id)
+	if not log_names_stmt then
+		log_names_stmt = ipdb:prepare("SELECT * FROM Usernames_log WHERE merge_id = ?")
+		log_ips_stmt = ipdb:prepare("SELECT * FROM IPs_log WHERE merge_id = ?")
+		log_modstorage_stmt = ipdb:prepare("SELECT * FROM Modstorage_log WHERE merge_id = ?")
+		if not log_names_stmt or not log_ips_stmt or not log_modstorage_stmt then error(ipdb:errmsg()) end
+	else
+		log_names_stmt:reset()
+		log_ips_stmt:reset()
+		log_modstorage_stmt:reset()
+	end
+	local ret = log_names_stmt:bind(1, merge_id)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = log_ips_stmt:bind(1, merge_id)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = log_modstorage_stmt:bind(1, merge_id)
+	if ret ~= sqlite.OK then error(ret) end
+	local res = { names = {}, ips = {}, modstorage = {} }
+	for result in log_names_stmt:nrows() do
+		table.insert(res.names, result)
+	end
+	for result in log_ips_stmt:nrows() do
+		table.insert(res.ips, result)
+	end
+	for result in log_modstorage_stmt:nrows() do
+		table.insert(res.modstorage, result)
+	end
+	return res
+end
+
+local idents_at_names
+local idents_at_names_all
+local idents_at_ips
+local idents_at_ips_all
+-- Identifiers of an entry together with their timestamps. If max_timestamp is
+-- given, only those that already existed at that time are returned
+---@param entryid integer
+---@param max_timestamp string?
+---@return { names: { { name: string, created_at: string, last_seen: string } }[], ips: { { ip: string, created_at: string, last_seen: string } }[] }
+dbmanager.get_identifiers_at = function(entryid, max_timestamp)
+	local mystmt
+	local ret
+	if max_timestamp then
+		if not idents_at_names then
+			idents_at_names = ipdb:prepare("SELECT name, created_at, last_seen FROM Usernames "..
+			                               "WHERE userentry_id = ? AND created_at <= ?")
+			idents_at_ips = ipdb:prepare("SELECT ip, created_at, last_seen FROM IPs "..
+			                             "WHERE userentry_id = ? AND created_at <= ?")
+			if not idents_at_names or not idents_at_ips then error(ipdb:errmsg()) end
+		else
+			idents_at_names:reset()
+			idents_at_ips:reset()
+		end
+		ret = idents_at_names:bind_values(entryid, max_timestamp)
+		if ret ~= sqlite.OK then error(ret) end
+		ret = idents_at_ips:bind_values(entryid, max_timestamp)
+		if ret ~= sqlite.OK then error(ret) end
+		mystmt = { n = idents_at_names, i = idents_at_ips }
+	else
+		if not idents_at_names_all then
+			idents_at_names_all = ipdb:prepare("SELECT name, created_at, last_seen FROM Usernames WHERE userentry_id = ?")
+			idents_at_ips_all = ipdb:prepare("SELECT ip, created_at, last_seen FROM IPs WHERE userentry_id = ?")
+			if not idents_at_names_all or not idents_at_ips_all then error(ipdb:errmsg()) end
+		else
+			idents_at_names_all:reset()
+			idents_at_ips_all:reset()
+		end
+		ret = idents_at_names_all:bind(1, entryid)
+		if ret ~= sqlite.OK then error(ret) end
+		ret = idents_at_ips_all:bind(1, entryid)
+		if ret ~= sqlite.OK then error(ret) end
+		mystmt = { n = idents_at_names_all, i = idents_at_ips_all }
+	end
+	local res = { names = {}, ips = {} }
+	for result in mystmt.n:nrows() do
+		table.insert(res.names, result)
+	end
+	for result in mystmt.i:nrows() do
+		table.insert(res.ips, result)
+	end
+	return res
+end
+
+local latest_dst_merge
+local latest_dst_merge_before
+-- The most recent merge that produced the given entry, if any
+---@param entryid integer
+---@return MergeEventRow?
+dbmanager.get_latest_merge = function(entryid)
+	if not latest_dst_merge then
+		latest_dst_merge = ipdb:prepare("SELECT * FROM MergeEvent WHERE entry_dst = ? AND reverted_at IS NULL "..
+		                                "ORDER BY timestamp DESC LIMIT 1")
+		if not latest_dst_merge then error(ipdb:errmsg()) end
+	else
+		latest_dst_merge:reset()
+	end
+	local ret = latest_dst_merge:bind(1, entryid)
+	if ret ~= sqlite.OK then error(ret) end
+	for result in latest_dst_merge:nrows() do
+		return result
+	end
+end
+
+-- The most recent merge that produced the given entry at a time before max_ts
+---@param entryid integer
+---@param max_ts integer  -- merges at or after this time are not part of the entry's past
+---@return MergeEventRow?
+dbmanager.get_latest_merge_before = function(entryid, max_ts)
+	if not latest_dst_merge_before then
+		latest_dst_merge_before = ipdb:prepare("SELECT * FROM MergeEvent WHERE entry_dst = ? "..
+		                                       "AND reverted_at IS NULL AND timestamp < ? "..
+		                                       "ORDER BY timestamp DESC LIMIT 1")
+		if not latest_dst_merge_before then error(ipdb:errmsg()) end
+	else
+		latest_dst_merge_before:reset()
+	end
+	local ret = latest_dst_merge_before:bind_values(entryid, max_ts)
+	if ret ~= sqlite.OK then error(ret) end
+	for result in latest_dst_merge_before:nrows() do
+		return result
+	end
+end
+
+local older_merges
+-- Count the merges that are older than the given entry itself; they belong to
+-- a previous entry that had the same id (id reuse)
+---@param entryid integer
+---@param created_at string
+---@return integer
+dbmanager.count_older_merges = function(entryid, created_at)
+	if not older_merges then
+		older_merges = ipdb:prepare("SELECT COUNT(*) FROM MergeEvent WHERE entry_dst = ? "..
+		                            "AND reverted_at IS NULL AND timestamp < strftime('%s', ?)")
+		if not older_merges then error(ipdb:errmsg()) end
+	else
+		older_merges:reset()
+	end
+	local ret = older_merges:bind_values(entryid, created_at)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = older_merges:step()
+	if ret ~= sqlite.ROW then error(ret) end
+	local count = older_merges:get_value(0)
+	ret = older_merges:step()
+	if ret ~= sqlite.DONE then error(ret) end
+	return count
+end
+
+-- Shared analysis for rollback: verifies that the merge can be rolled back and
+-- collects everything the rollback needs - where the logged identifiers live
+-- now, which of the destination entry's identifiers were created after the
+-- merge, and whether the old source entry id is still free
+---@param merge_id integer
+---@return MergeEventRow?, table?, integer?, table[]?, string?
+local function analyze_merge(merge_id)
+	local me = dbmanager.get_merge_event(merge_id)
+	if not me then
+		return nil, nil, nil, nil, "No such merge event"
+	end
+	if me.reverted_at then
+		return nil, nil, nil, nil, "This merge has already been rolled back"
+	end
+	local log = dbmanager.get_merge_log(merge_id)
+	-- The logged identifiers were moved to the destination at merge time; find
+	-- the single entry they currently belong to
+	local dst_id
+	for _, row in ipairs(log.names) do
+		local live = dbmanager.user_exists(row.name)
+		if live then
+			if dst_id and live.userentry_id ~= dst_id then
+				return nil, nil, nil, nil, "Identifiers of this merge now belong to multiple entries; roll back the later merges first"
+			end
+			dst_id = live.userentry_id
+		end
+	end
+	for _, row in ipairs(log.ips) do
+		local live = dbmanager.ip_exists(row.ip)
+		if live then
+			if dst_id and live.userentry_id ~= dst_id then
+				return nil, nil, nil, nil, "Identifiers of this merge now belong to multiple entries; roll back the later merges first"
+			end
+			dst_id = live.userentry_id
+		end
+	end
+	if not dst_id then
+		return nil, nil, nil, nil, "None of the identifiers of this merge remain in the database; there is nothing to roll back to"
+	end
+	if dst_id ~= me.entry_dst then
+		return nil, nil, nil, nil, "The destination entry no longer exists under its original id (its identifiers now belong to entry #"..
+		                           tostring(dst_id).."); roll back the later merges first"
+	end
+	-- The source entry was deleted at merge time; any entry with its id now is
+	-- an unrelated entry that reused it, and the id cannot be restored
+	if dbmanager.get_userentry(me.entry_src) then
+		return nil, nil, nil, nil, "Entry id #"..tostring(me.entry_src)..
+		                           " was reused by another entry after this merge; remove that entry first to roll this back"
+	end
+	-- Identifiers of the destination entry that were created after the merge
+	-- did not exist in the pre-merge state, so their ownership is ambiguous
+	local merge_ts_text = os.date("!%Y-%m-%d %H:%M:%S", me.timestamp)
+	local logged = { names = {}, ips = {} }
+	for _, row in ipairs(log.names) do logged.names[row.name] = true end
+	for _, row in ipairs(log.ips) do logged.ips[row.ip] = true end
+	local additions = {}
+	local allids = dbmanager.get_identifiers_at(dst_id, nil)
+	for _, row in ipairs(allids.names) do
+		if not logged.names[row.name] and row.created_at > merge_ts_text then
+			table.insert(additions, { type = "name", value = row.name, created_at = row.created_at })
+		end
+	end
+	for _, row in ipairs(allids.ips) do
+		if not logged.ips[row.ip] and row.created_at > merge_ts_text then
+			table.insert(additions, { type = "ip", value = row.ip, created_at = row.created_at })
+		end
+	end
+	table.sort(additions, function(a, b) return a.created_at < b.created_at end)
+	return me, log, dst_id, additions
+end
+
+---@param merge_id integer
+---@return { merge: MergeEventRow, log: table, dst_id: integer, additions: table[] }?
+---@overload fun(merge_id: integer): nil, string
+dbmanager.get_merge_rollback_info = function(merge_id)
+	local me, log, dst_id, additions, err = analyze_merge(merge_id)
+	if err then return nil, err end
+	return { merge = me, log = log, dst_id = dst_id, additions = additions }
+end
+
+local restore_entry_stmt
+-- Recreate a user entry with an explicit id and timestamps
+---@param entryid integer
+---@param created_at string
+---@param last_seen string
+dbmanager.restore_entry = function(entryid, created_at, last_seen)
+	if not restore_entry_stmt then
+		restore_entry_stmt = ipdb:prepare("INSERT INTO UserEntry (id, created_at, last_seen) VALUES (?, ?, ?)")
+		if not restore_entry_stmt then error(ipdb:errmsg()) end
+	else
+		restore_entry_stmt:reset()
+	end
+	local ret = restore_entry_stmt:bind_values(entryid, created_at, last_seen)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = restore_entry_stmt:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+local restore_name_stmt
+local restore_ip_stmt
+-- Move an identifier back to the recreated entry, restoring its pre-merge
+-- timestamps from the log
+---@param name string
+---@param entryid integer
+---@param created_at string
+---@param last_seen string
+dbmanager.restore_name = function(name, entryid, created_at, last_seen)
+	if not restore_name_stmt then
+		restore_name_stmt = ipdb:prepare("UPDATE Usernames SET userentry_id = ?, created_at = ?, last_seen = ? WHERE name = ?")
+		if not restore_name_stmt then error(ipdb:errmsg()) end
+	else
+		restore_name_stmt:reset()
+	end
+	local ret = restore_name_stmt:bind_values(entryid, created_at, last_seen, name)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = restore_name_stmt:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+-- Move an IP back to the recreated entry, restoring its pre-merge timestamps
+-- from the log
+---@param ip string
+---@param entryid integer
+---@param created_at string
+---@param last_seen string
+dbmanager.restore_ip = function(ip, entryid, created_at, last_seen)
+	if not restore_ip_stmt then
+		restore_ip_stmt = ipdb:prepare("UPDATE IPs SET userentry_id = ?, created_at = ?, last_seen = ? WHERE ip = ?")
+		if not restore_ip_stmt then error(ipdb:errmsg()) end
+	else
+		restore_ip_stmt:reset()
+	end
+	local ret = restore_ip_stmt:bind_values(entryid, created_at, last_seen, ip)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = restore_ip_stmt:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+local insert_restored_name_stmt
+local insert_restored_ip_stmt
+-- Re-add an identifier that was removed since the merge, using its logged
+-- pre-merge timestamps
+---@param entryid integer
+---@param name string
+---@param created_at string
+---@param last_seen string
+dbmanager.insert_restored_name = function(entryid, name, created_at, last_seen)
+	if not insert_restored_name_stmt then
+		insert_restored_name_stmt = ipdb:prepare("INSERT INTO Usernames (userentry_id, name, created_at, last_seen) VALUES (?, ?, ?, ?)")
+		if not insert_restored_name_stmt then error(ipdb:errmsg()) end
+	else
+		insert_restored_name_stmt:reset()
+	end
+	local ret = insert_restored_name_stmt:bind_values(entryid, name, created_at, last_seen)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = insert_restored_name_stmt:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+-- Re-add an IP that was removed since the merge, using its logged pre-merge
+-- timestamps
+---@param entryid integer
+---@param ip string
+---@param created_at string
+---@param last_seen string
+dbmanager.insert_restored_ip = function(entryid, ip, created_at, last_seen)
+	if not insert_restored_ip_stmt then
+		insert_restored_ip_stmt = ipdb:prepare("INSERT INTO IPs (userentry_id, ip, created_at, last_seen) VALUES (?, ?, ?, ?)")
+		if not insert_restored_ip_stmt then error(ipdb:errmsg()) end
+	else
+		insert_restored_ip_stmt:reset()
+	end
+	local ret = insert_restored_ip_stmt:bind_values(entryid, ip, created_at, last_seen)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = insert_restored_ip_stmt:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+local mark_reverted
+---@param merge_id integer
+dbmanager.mark_merge_reverted = function(merge_id)
+	if not mark_reverted then
+		mark_reverted = ipdb:prepare("UPDATE MergeEvent SET reverted_at = unixepoch('now') WHERE id = ?")
+		if not mark_reverted then error(ipdb:errmsg()) end
+	else
+		mark_reverted:reset()
+	end
+	local ret = mark_reverted:bind(1, merge_id)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = mark_reverted:step()
+	if ret ~= sqlite.DONE then error(ret) end
+end
+
+-- Roll back a merge event: recreate the absorbed entry with its original id
+-- and the logged pre-merge state, and remove the merge's traces from the
+-- destination entry. Identifiers of the destination created after the merge
+-- are handled according to the plan: "keep" leaves them where they are,
+-- "delete" removes them, "move" reassigns them to the recreated entry.
+---@param merge_id integer
+---@param plan table<string, string>?
+---@return table?  -- report
+---@overload fun(merge_id: integer, plan?: table): nil, string  -- refusal reason
+dbmanager.rollback_merge = function(merge_id, plan)
+	local me, log, dst_id, additions, err = analyze_merge(merge_id)
+	if err then return nil, err end
+	plan = plan or {}
+	-- Recreate the source entry with its original id so that the merge log's
+	-- references to it become live again and the history stays coherent
+	local merge_ts_text = os.date("!%Y-%m-%d %H:%M:%S", me.timestamp)
+	dbmanager.restore_entry(me.entry_src, merge_ts_text, merge_ts_text)
+	-- Move the logged identifiers back to the recreated entry, restoring their
+	-- pre-merge timestamps; identifiers removed since the merge are re-added
+	local moved_names, moved_ips = 0, 0
+	local restored_names, restored_ips = 0, 0
+	for _, row in ipairs(log.names) do
+		local live = dbmanager.user_exists(row.name)
+		if live then
+			dbmanager.restore_name(row.name, me.entry_src, row.created_at, row.last_seen)
+			moved_names = moved_names + 1
+		else
+			dbmanager.insert_restored_name(me.entry_src, row.name, row.created_at, row.last_seen)
+			restored_names = restored_names + 1
+		end
+	end
+	for _, row in ipairs(log.ips) do
+		local live = dbmanager.ip_exists(row.ip)
+		if live then
+			dbmanager.restore_ip(row.ip, me.entry_src, row.created_at, row.last_seen)
+			moved_ips = moved_ips + 1
+		else
+			dbmanager.insert_restored_ip(me.entry_src, row.ip, row.created_at, row.last_seen)
+			restored_ips = restored_ips + 1
+		end
+	end
+	-- Deal with identifiers created after the merge according to the plan
+	local del_count, move_count, keep_count = 0, 0, 0
+	for _, a in ipairs(additions) do
+		local action = plan[a.value]
+		local live
+		if action == "delete" or action == "move" then
+			live = a.type == "name" and dbmanager.user_exists(a.value) or dbmanager.ip_exists(a.value)
+		end
+		if action == "delete" and live then
+			if a.type == "name" then dbmanager.remove_name(live.id) else dbmanager.remove_ip(live.id) end
+			del_count = del_count + 1
+		elseif action == "move" and live then
+			if a.type == "name" then dbmanager.reassociate_ids(me.entry_src, live.id) else dbmanager.reassociate_ids(me.entry_src, nil, live.id) end
+			move_count = move_count + 1
+		else
+			keep_count = keep_count + 1
+		end
+	end
+	-- The destination entry may have been emptied (and deleted by the cleanup
+	-- triggers) while its identifiers were moved away
+	local dst_alive = dbmanager.get_userentry(dst_id) ~= nil
+	-- Replace the destination's modstorage of the merged mods with the logged
+	-- pre-merge snapshot; the recreated entry gets its own rows back
+	local modnames = {}
+	local modstorage_restored = 0
+	local modstorage_dst_skipped = 0
+	for _, row in ipairs(log.modstorage) do
+		modnames[row.modname] = true
+	end
+	if dst_alive then
+		for modname in pairs(modnames) do
+			dbmanager.delete_modstorage(dst_id, modname)
+		end
+	end
+	for _, row in ipairs(log.modstorage) do
+		local target
+		if row.userentry_id == me.entry_src then
+			target = me.entry_src
+		else
+			if not dst_alive then
+				modstorage_dst_skipped = modstorage_dst_skipped + 1
+				goto continue
+			end
+			target = dst_id
+		end
+		dbmanager.insert_into_modstorage(target, row.modname, row.key, row.data, row.ancillary)
+		modstorage_restored = modstorage_restored + 1
+		::continue::
+	end
+	dbmanager.mark_merge_reverted(merge_id)
+	return {
+		src_id = me.entry_src,
+		dst_id = dst_id,
+		moved_names = moved_names,
+		moved_ips = moved_ips,
+		restored_names = restored_names,
+		restored_ips = restored_ips,
+		additions_total = #additions,
+		additions_deleted = del_count,
+		additions_moved = move_count,
+		additions_kept = keep_count,
+		modstorage_restored = modstorage_restored,
+		modstorage_dst_skipped = modstorage_dst_skipped,
+		dst_deleted = not dst_alive,
+	}
+end
+
+---@class MergeTreeNode
+---@field entry_id integer
+---@field live boolean
+---@field kind string  -- "root", "src" or "cont"
+---@field merge MergeEventRow?  -- the merge that produced this node (nil for the root)
+---@field names string[]
+---@field ips string[]
+---@field children MergeTreeNode[]?
+
+-- Build a node of the merge history tree for an entry: the node is the entry
+-- at a point in time, its children are the absorbed entry and the entry
+-- itself as it was just before the merge
+---@param entryid integer
+---@param min_ts_text string  -- created_at of the entry; merges older than this belong to a previous entry that had this id
+---@param max_ts integer?  -- merges at or after this time are not part of the entry's past
+---@param live boolean
+---@param kind string
+---@param edge_merge MergeEventRow?
+---@param edge_log table?
+---@param depth integer
+---@param max_depth integer
+---@return MergeTreeNode
+local function build_tree_node(entryid, min_ts_text, max_ts, live, kind, edge_merge, edge_log, depth, max_depth)
+	local node = {
+		entry_id = entryid,
+		live = live,
+		kind = kind,
+		merge = edge_merge,
+		names = {},
+		ips = {},
+	}
+	if kind == "root" then
+		local ids = dbmanager.get_all_identifiers(entryid)
+		node.names = ids.names
+		node.ips = ids.ips
+	elseif kind == "src" then
+		for _, row in ipairs(edge_log.names) do table.insert(node.names, row.name) end
+		for _, row in ipairs(edge_log.ips) do table.insert(node.ips, row.ip) end
+	elseif live and edge_merge then
+		local ids = dbmanager.get_identifiers_at(entryid, os.date("!%Y-%m-%d %H:%M:%S", edge_merge.timestamp))
+		for _, row in ipairs(ids.names) do table.insert(node.names, row.name) end
+		for _, row in ipairs(ids.ips) do table.insert(node.ips, row.ip) end
+	end
+	if depth >= max_depth then
+		return node
+	end
+	local m
+	if max_ts then
+		m = dbmanager.get_latest_merge_before(entryid, max_ts)
+	else
+		m = dbmanager.get_latest_merge(entryid)
+	end
+	if m and live and os.date("!%Y-%m-%d %H:%M:%S", m.timestamp) < min_ts_text then
+		-- The merge predates the entry itself: it belongs to a previous entry
+		-- that had this id, and the entry has no history of its own
+		m = nil
+	end
+	if not m then
+		return node
+	end
+	local log = dbmanager.get_merge_log(m.id)
+	local src_node = build_tree_node(m.entry_src, nil, m.timestamp, false, "src", m, log, depth + 1, max_depth)
+	local cont_node = build_tree_node(entryid, min_ts_text, m.timestamp, live, "cont", m, log, depth + 1, max_depth)
+	node.children = { src_node, cont_node }
+	return node
+end
+
+-- Build the binary merge history tree for the given entry, root first
+---@param entryid integer
+---@param max_depth integer
+---@return { root: MergeTreeNode, notes: { reused: { id: integer, created_at: string }[], older_merges: table<integer, integer> } }?
+---@overload fun(entryid: integer, max_depth: integer): nil, string
+dbmanager.get_merge_tree = function(entryid, max_depth)
+	local entry = dbmanager.get_userentry(entryid)
+	if not entry then return nil, "No such entry" end
+	local root = build_tree_node(entryid, entry.created_at, nil, true, "root", nil, nil, 0, max_depth)
+	local notes = { reused = {}, older_merges = {} }
+	-- Any unreverted merge older than the entry itself belongs to a previous
+	-- entry that had this id (id reuse); they are hidden from the tree
+	local older = dbmanager.count_older_merges(entryid, entry.created_at)
+	if older > 0 then notes.older_merges[entryid] = older end
+	-- The same for absorbed entries along the way: collect them while walking
+	local walk = { root }
+	while #walk > 0 do
+		local n = table.remove(walk)
+		if n.kind == "src" then
+			local h = dbmanager.get_userentry(n.entry_id)
+			if h then
+				table.insert(notes.reused, { id = n.entry_id, created_at = h.created_at })
+			end
+		end
+		if n.children then
+			table.insert(walk, n.children[1])
+			table.insert(walk, n.children[2])
+		end
+	end
+	return { root = root, notes = notes }
 end
 
 return dbmanager

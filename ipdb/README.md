@@ -10,6 +10,7 @@ ipdb is a mod providing a database and identity management system bundled into o
 - Per-mod persistent data storage attached to each user entry.
 - Custom merge function support for mods to resolve data conflicts during entry merges.
 - Chat commands for manual management and inspection.
+- Merge history browsing (per-entry binary tree in chat and in a GUI) and rollback of merge events.
 - Migration tools for xban and EUBan databases.
 - Support for ancillary data and for multiple stored values under one key (multimap).
 - Synthetic entries can be created to provide regular modstorage outside identity management system.
@@ -58,6 +59,29 @@ Requires `ban` privilege.
 | `/ipdb list <IP\|username>` | List all IPs and usernames linked with the given one. |
 | `/ipdb log_merges [yes\|no]` | Show or change whether entry merge events are logged. |
 | `/ipdb move <what> <where>` | Move the name/IP given in `what` to the entry that name/IP given in `where` belongs to. |
+| `/ipdb merges [N]` | List the last N merge events (default 15). |
+| `/ipdb merge <id>` | Show the details of a merge event and whether it can be rolled back. |
+| `/ipdb tree <name\|IP\|entryid> [depth]` | Show the merge history of an entry as a binary tree (default depth 4, max 8). |
+| `/ipdb unmerge <id> [keep\|forget]` | Roll back a merge event. Identifiers created after the merge are kept unless `forget` is given. |
+| `/ipdb merge_gui` | Open the merge history GUI (tree view, detail view, rollback with per-identifier decisions). |
+
+### Merge history and rollback
+Every merge event is logged together with snapshots of the absorbed entry's
+identifiers and of both entries' modstorage. The history of an entry can be
+viewed as a binary tree: each node is the entry at a point in time, its
+children are the absorbed entry and the entry as it was just before the merge.
+
+Rolling a merge back (`unmerge` or the GUI) recreates the absorbed entry
+**with its original id** and its logged pre-merge state, removes the merge's
+traces from the destination entry, and marks the merge event as reverted
+(`reverted_at`). A merge can only be rolled back if its logged identifiers
+still belong to the original destination entry; otherwise the rollback is
+refused and the later merges must be rolled back first. Identifiers that were
+created after the merge did not exist in the pre-merge state, so their
+ownership is ambiguous - the GUI offers a decision per identifier (keep,
+delete, or move to the recreated entry), the chat command takes a single
+`keep`/`forget` flag. The destination's modstorage of the merged mods is
+replaced by the logged pre-merge snapshot; post-merge writes to it are lost.
 
 ### Migration Commands
 Requires `dev` privilege.
@@ -145,9 +169,12 @@ The database (`worldpath/ipdb.sqlite`) contains tables:
 - `Modstorage` – per‑mod per-player-entry key‑value(s) data.
 - `Metadata` – settings like `no_new_entries`, database version.
 - `Modstorage_log` - Logs the state of modstorage at the time of merge
-- `MergeEvent` - Records merge events themselves.
+- `MergeEvent` - Records merge events themselves (with `reverted_at` set when a merge is rolled back).
 - `Usernames_log` - Records usernames from the entry that's about to be destroyed in the merge process
 - `IPs_log` - Records IPs from the entry that's about to be destroyed in the merge process
+
+Entry ids are `AUTOINCREMENT` and are never reused, so historical references
+to them (merge events and log rows) remain unambiguous.
 
 Foreign keys and triggers ensure orphaned entries are cleaned up automatically.
 All ipdb data is contained within its database file. It does not use engine-provided modstorage.

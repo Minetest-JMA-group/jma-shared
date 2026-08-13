@@ -247,6 +247,68 @@ ipdb.register_new_ids = function(name, ip)
 end
 
 local is_in_transaction = false
+local merge_gui
+---@param arg string
+---@return integer?
+local function resolve_entry(arg)
+	if algorithms.is_ip(arg) then
+		local ipent = dbmanager.ip_exists(arg)
+		return ipent and ipent.userentry_id
+	end
+	local user = dbmanager.user_exists(arg)
+	if user then
+		return user.userentry_id
+	end
+	local id = tonumber(arg)
+	if id then
+		local entry = dbmanager.get_userentry(id)
+		return entry and entry.id
+	end
+	return nil
+end
+
+-- Join a list of identifiers for display, capping the visible amount
+---@param items string[]
+---@param limit integer?
+---@return string
+local function format_list(items, limit)
+	limit = limit or 5
+	local out = {}
+	for i = 1, math.min(limit, #items) do
+		table.insert(out, items[i])
+	end
+	local s = table.concat(out, ", ")
+	if #items > limit then
+		s = s .. " … and " .. (#items - limit) .. " more"
+	end
+	return s
+end
+
+-- Label of a tree node for the CLI output
+---@param node MergeTreeNode
+---@param is_root boolean
+---@return string
+local function tree_label(node, is_root)
+	local names = {}
+	for i = 1, math.min(2, #node.names) do
+		local n = node.names[i]
+		if #n > 12 then n = n:sub(1, 12) .. "…" end
+		table.insert(names, n)
+	end
+	local label = "#" .. node.entry_id
+	if #names > 0 then label = label .. " · " .. table.concat(names, ", ") end
+	if is_root then
+		return label .. " (current)"
+	end
+	local m = node.merge
+	if not m then return label end
+	local date = os.date("!%Y-%m-%d %H:%M", m.timestamp)
+	if node.kind == "src" then
+		return label .. " — absorbed by #" .. m.id .. " · " .. date
+	end
+	return label .. " — before #" .. m.id
+end
+
 local help_string = [[
   • ipdb console:
 help: Print this text
@@ -259,6 +321,11 @@ newentries [yes|no]: If the argument is given, change whether new user entries a
 list <IP|username>: List all IPs and usernames linked with the given one
 log_merges [yes|no]: If the argument is given, change whether entry merge events are logged. Otherwise print the current value.
 move <what> <where>: Move the name/IP given in `what` to the entry that name/IP given in `where` belongs to
+merges [N]: List the last N merge events
+merge <id>: Show the details of a merge event
+tree <name|IP|id> [depth]: Show the merge history of an entry as a binary tree
+unmerge <id> [keep|forget]: Roll back a merge event; identifiers created after the merge are kept unless `forget` is given
+merge_gui: Open the merge history GUI
 ]]
 core.register_chatcommand("ipdb", {
 	description = "Interface to the IP-based player entry database",
@@ -519,6 +586,199 @@ core.register_chatcommand("ipdb", {
 				return true, "Isolated entry created"
 			end
 		end
+		if cmd == "merges" then
+			local count = tonumber(iter() or "15") or 15
+			if count < 1 or count > 100 then
+				return false, "Usage: /ipdb merges [count]"
+			end
+			local ok, ret = pcall(function()
+				local events = dbmanager.get_merge_events(count)
+				if #events == 0 then
+					return "No merge events have been recorded."
+				end
+				local lines = {}
+				for _, ev in ipairs(events) do
+					local state = ev.reverted_at and " [reverted]" or ""
+					table.insert(lines, string.format("%6d  %s  #%d→#%d  %s / %s  (%d names, %d ips)%s",
+						ev.id, os.date("!%Y-%m-%d %H:%M", ev.timestamp), ev.entry_src, ev.entry_dst,
+						ev.name, ev.ip, ev.name_count, ev.ip_count, state))
+				end
+				return table.concat(lines, "\n")
+			end)
+			if not ok then
+				log(ret)
+				return false, "Internal error"
+			end
+			return true, ret
+		end
+
+		if cmd == "merge" then
+			local mid = tonumber(iter() or "")
+			if not mid then
+				return false, "Usage: /ipdb merge <id>"
+			end
+			local ok, ret = pcall(function()
+				local ev = dbmanager.get_merge_event(mid)
+				if not ev then return "No such merge event" end
+				local logt = dbmanager.get_merge_log(mid)
+				local info, reason = dbmanager.get_merge_rollback_info(mid)
+				local lines = {}
+				table.insert(lines, string.format("Merge #%d · %s · triggered by %s / %s",
+					ev.id, os.date("!%Y-%m-%d %H:%M:%S", ev.timestamp), ev.name, ev.ip))
+				table.insert(lines, string.format("  entry #%d was absorbed into entry #%d", ev.entry_src, ev.entry_dst))
+				local names = {}
+				local ips = {}
+				for _, row in ipairs(logt.names) do table.insert(names, row.name) end
+				for _, row in ipairs(logt.ips) do table.insert(ips, row.ip) end
+				table.insert(lines, "  snapshot: "..#names.." name(s) ("..format_list(names)..")")
+				table.insert(lines, "  snapshot: "..#ips.." IP(s) ("..format_list(ips)..")")
+				local mods = {}
+				for _, row in ipairs(logt.modstorage) do mods[row.modname] = (mods[row.modname] or 0) + 1 end
+				local modlines = {}
+				for modname, n in pairs(mods) do table.insert(modlines, modname.." ("..n..")") end
+				table.sort(modlines)
+				table.insert(lines, "  modstorage: "..(#modlines > 0 and table.concat(modlines, ", ") or "none"))
+				local dst = dbmanager.get_userentry(ev.entry_dst)
+				if dst then
+					local ids = dbmanager.get_all_identifiers(ev.entry_dst)
+					table.insert(lines, string.format("  destination #%d is live: %s / %s",
+						ev.entry_dst, format_list(ids.names), format_list(ids.ips)))
+				else
+					table.insert(lines, "  destination #"..ev.entry_dst.." no longer exists")
+				end
+				if ev.reverted_at then
+					table.insert(lines, "  state: rolled back on "..os.date("!%Y-%m-%d %H:%M", ev.reverted_at))
+				elseif info then
+					if #info.additions > 0 then
+						local adds = {}
+						for _, a in ipairs(info.additions) do table.insert(adds, a.type.." '"..a.value.."'") end
+						table.insert(lines, "  rollback possible; "..#info.additions..
+							" identifier(s) created after the merge: "..table.concat(adds, ", "))
+					else
+						table.insert(lines, "  rollback possible")
+					end
+				else
+					table.insert(lines, "  rollback unavailable: "..reason)
+				end
+				return table.concat(lines, "\n")
+			end)
+			if not ok then
+				log(ret)
+				return false, "Internal error"
+			end
+			return true, ret
+		end
+
+		if cmd == "tree" then
+			local arg = iter()
+			if not arg then
+				return false, "Usage: /ipdb tree <name|IP|entryid> [depth]"
+			end
+			local depth = tonumber(iter() or "4") or 4
+			if depth < 1 or depth > 8 then
+				return false, "Depth must be between 1 and 8"
+			end
+			local ok, ret = pcall(function()
+				local entryid = resolve_entry(arg)
+				if not entryid then
+					return "The given identifier is unknown to ipdb"
+				end
+				local tree = dbmanager.get_merge_tree(entryid, depth)
+				local lines = {}
+				local function render(node, prefix, is_root, is_last)
+					table.insert(lines, prefix .. (is_root and "" or (is_last and "└─ " or "├─ ")) .. tree_label(node, is_root))
+					if node.children then
+						local child_prefix = prefix .. (is_root and "" or (is_last and "   " or "│  "))
+						render(node.children[1], child_prefix, false, false)
+						render(node.children[2], child_prefix, false, true)
+					end
+				end
+				render(tree.root, "", true, false)
+				for _, r in ipairs(tree.notes.reused) do
+					table.insert(lines, "note: entry id #"..r.id.." is currently held by a different entry (created "..r.created_at..")")
+				end
+				for entryid, n in pairs(tree.notes.older_merges) do
+					table.insert(lines, "note: "..n.." merge event(s) belong to a previous entry that had id #"..entryid)
+				end
+				return table.concat(lines, "\n")
+			end)
+			if not ok then
+				log(ret)
+				return false, "Internal error"
+			end
+			return true, ret
+		end
+
+		if cmd == "unmerge" then
+			local mid = tonumber(iter() or "")
+			if not mid then
+				return false, "Usage: /ipdb unmerge <id> [keep|forget]"
+			end
+			local flag = iter()
+			if flag and flag ~= "keep" and flag ~= "forget" then
+				return false, "Usage: /ipdb unmerge <id> [keep|forget]"
+			end
+			local ok, info, reason = pcall(dbmanager.get_merge_rollback_info, mid)
+			if not ok then
+				log(reason)
+				return false, "Internal error"
+			end
+			if not info then
+				return false, reason
+			end
+			if #info.additions > 0 and not flag then
+				local adds = {}
+				for _, a in ipairs(info.additions) do table.insert(adds, a.type.." '"..a.value.."'") end
+				return false, #info.additions.." identifier(s) were created after this merge: "..
+					table.concat(adds, ", ")..". Pass `keep` to leave them at the merged entry or `forget` to delete them."
+			end
+			local plan = {}
+			if flag then
+				for _, a in ipairs(info.additions) do plan[a.value] = flag end
+			end
+			local err = db:exec("BEGIN")
+			if err ~= sqlite.OK then log(err); return false, "Internal error" end
+			local ok2, report, reason2 = pcall(dbmanager.rollback_merge, mid, plan)
+			if not ok2 then
+				log(reason2)
+				db:exec("ROLLBACK")
+				return false, "Internal error"
+			end
+			if not report then
+				db:exec("ROLLBACK")
+				return false, reason2
+			end
+			local commiterr = db:exec("COMMIT")
+			if commiterr ~= sqlite.OK then
+				log(commiterr)
+				db:exec("ROLLBACK")
+				return false, "Internal error"
+			end
+			local lines = {}
+			table.insert(lines, string.format("Merge #%d rolled back: entry #%d recreated as it was at the merge",
+				mid, report.src_id))
+			table.insert(lines, string.format("  %d name(s) and %d IP(s) moved back, %d name(s) and %d IP(s) re-added",
+				report.moved_names, report.moved_ips, report.restored_names, report.restored_ips))
+			table.insert(lines, string.format("  %d modstorage row(s) restored", report.modstorage_restored))
+			if report.dst_deleted then
+				table.insert(lines, "  destination entry #"..report.dst_id.." was emptied and has been removed")
+			end
+			if report.modstorage_dst_skipped > 0 then
+				table.insert(lines, "  "..report.modstorage_dst_skipped..
+					" modstorage row(s) of the destination were not restored (its entry is gone)")
+			end
+			if report.additions_total > 0 then
+				table.insert(lines, string.format("  %d post-merge identifier(s): %d deleted, %d moved, %d kept",
+					report.additions_total, report.additions_deleted, report.additions_moved, report.additions_kept))
+			end
+			return true, table.concat(lines, "\n")
+		end
+
+		if cmd == "merge_gui" then
+			merge_gui.show(name)
+			return true, "Merge history GUI opened."
+		end
+
 		return false, "Usage: /ipdb <subcommand> args"
 	end
 })
@@ -781,3 +1041,5 @@ ipdb.get_mod_storage = function(func)
 		end,
 	}
 end
+
+merge_gui = dofile(modpath .. "/mergegui.lua")(dbmanager, db, sqlite, log, resolve_entry)

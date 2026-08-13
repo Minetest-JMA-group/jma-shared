@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IPDB — Visual guide for moderators</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
+:root{
+	--bg:#0a0e14;--panel:#111822;--panel2:#17212d;--line:#293644;--text:#f3f7fa;--muted:#9ba9b7;
+	--cyan:#59d0e9;--cyan2:#163e49;--amber:#f3ba5d;--amber2:#4d371d;--red:#ff7c72;--red2:#482421;
+	--green:#71d79b;--green2:#18382a;--purple:#ab9aff;--purple2:#2b2450;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:radial-gradient(circle at 50% -12%,#1a2635 0,#0a0e14 46%);color:var(--text);font-family:'DM Sans',sans-serif;line-height:1.45}
+button{font:inherit}
+svg{display:block;max-width:100%}
+.container{width:min(1120px,calc(100% - 28px));margin:auto}
+.hero{padding:78px 0 54px;text-align:center}
+.eyebrow{color:var(--cyan);font:700 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;margin-bottom:18px}
+h1{font-size:clamp(38px,6vw,66px);line-height:.98;letter-spacing:-.045em;max-width:900px;margin:0 auto 18px}
+.hero p{color:var(--muted);font-size:17px;max-width:700px;margin:0 auto}
+.rail{display:flex;justify-content:center;align-items:center;gap:9px;flex-wrap:wrap;margin:32px auto 0}.rail b{font-size:12px;padding:9px 13px;border:1px solid var(--line);border-radius:999px;background:#111822;color:#d9e2ea}.rail i{font-style:normal;color:#596b7b}
+.section{padding:32px 0}.head{margin-bottom:18px}.kicker{display:flex;gap:8px;align-items:center;color:var(--muted);font:700 11px 'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.14em;margin-bottom:9px}.dot{width:8px;height:8px;border-radius:50%;background:var(--cyan)}
+h2{font-size:clamp(28px,4vw,42px);line-height:1.02;letter-spacing:-.035em;margin:0;max-width:850px}.sub{margin:10px 0 0;color:var(--muted);max-width:760px}
+.card{background:linear-gradient(180deg,rgba(20,29,40,.98),rgba(12,17,24,.98));border:1px solid var(--line);border-radius:26px;overflow:hidden;box-shadow:0 30px 90px rgba(0,0,0,.32)}
+.stage{padding:14px}.bar{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:3px 4px 11px}.bar-title{font-size:13px;font-weight:700;color:#dbe5ed}.controls{display:flex;gap:8px}.btn{border:1px solid var(--line);background:#0c1118;color:#dce5ee;border-radius:11px;padding:8px 12px;font-size:12px;cursor:pointer;transition:.18s}.btn:hover{border-color:#4a5b6c;transform:translateY(-1px)}.btn.primary{border-color:#396c77;background:#11292f;color:#c4f5fb}
+.progress{height:4px;border-radius:999px;background:#18212b;overflow:hidden;margin:0 1px 12px}.progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--cyan) 0%,var(--amber) 55%,var(--green) 100%)}
+.scene{width:100%;border:1px solid #202b37;border-radius:20px;background:linear-gradient(180deg,#101720,#0c1219)}
+.caption{min-height:58px;display:grid;place-items:center;text-align:center;color:#dbe5ec;font-size:15px;padding:12px 8px 3px}.caption strong{color:#fff}.tip{text-align:center;color:var(--muted);font-size:12px;margin-top:7px}
+.cmd{display:inline-block;font:600 12px 'JetBrains Mono',monospace;padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:#0b1016;color:#dce8f1}
+.rules{padding:22px 24px 24px}.rules-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}.rule{border:1px solid var(--line);background:#0f151c;border-radius:16px;padding:14px}.rule b{display:block;font-size:13px;margin-bottom:4px}.rule span{font-size:12px;color:var(--muted)}.note{margin-top:14px;border-left:3px solid var(--cyan);padding:12px 14px;background:#0d171d;border-radius:0 12px 12px 0;color:#bdcad5;font-size:13px}
+.footer{text-align:center;padding:62px 0 90px}.footer h3{font-size:25px;margin:0 0 8px}.footer p{color:var(--muted);max-width:690px;margin:auto}
+@media(max-width:760px){.container{width:min(100% - 16px,1120px)}.rules-grid{grid-template-columns:1fr}.bar{align-items:flex-start}.hero{padding-top:54px}.caption{font-size:14px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+/* =============== SCENE 1 =============== */
+.s1-cardA,.s1-cardB{transform-box:fill-box;transform-origin:center}
+.s1-cardA{animation:s1CardA 1.7s 2.4s cubic-bezier(.45,0,.2,1) forwards}
+.s1-cardB{animation:s1CardB 1.7s 2.4s cubic-bezier(.45,0,.2,1) forwards}
+.s1-frame{animation:s1StrokeOut .55s 4.5s ease forwards}
+.s1-basefill{opacity:0;animation:s1FadeIn .6s 4.5s ease forwards}
+.s1-tagA,.s1-tagB{animation:s1FadeOut .45s 4.5s ease forwards}
+.s1-login{opacity:0;animation:s1Login .5s .4s ease forwards,s1FadeOut .45s 2.4s ease forwards}
+.s1-connector-a{stroke-dasharray:240;stroke-dashoffset:240;animation:s1Draw .8s .9s ease forwards,s1FadeOut .45s 2.4s ease forwards}
+.s1-connector-b{stroke-dasharray:240;stroke-dashoffset:240;animation:s1Draw .8s 1.1s ease forwards,s1FadeOut .45s 2.4s ease forwards}
+.s1-caption{animation:s1FadeOut .45s 2.4s ease forwards}
+.s1-linkBurst{opacity:0;animation:s1Burst 1s 1.7s ease forwards}
+.s1-seam{opacity:0;animation:s1SeamIn .22s 4.15s ease forwards,s1SeamOut .6s 4.5s ease forwards}
+.s1-flash{opacity:0;transform-box:fill-box;transform-origin:center;animation:s1Flash .95s 4.5s ease forwards}
+.s1-fused{opacity:0;transform-box:fill-box;transform-origin:center;animation:s1FusedIn .7s 4.5s ease forwards}
+.s1-nameA,.s1-nameB,.s1-ipA,.s1-ipB,.s1-mute3,.s1-mute1,.s1-ban7,.s1-ban21{transform-box:fill-box;transform-origin:center}
+.s1-nameA{animation:s1ReflowA 1.1s 5.6s cubic-bezier(.4,0,.2,1) forwards}
+.s1-nameB{animation:s1ReflowB 1.1s 5.6s cubic-bezier(.4,0,.2,1) forwards}
+.s1-ipA{animation:s1ReflowIpA 1.1s 5.6s cubic-bezier(.4,0,.2,1) forwards}
+.s1-ipB{animation:s1ReflowIpB 1.1s 5.6s cubic-bezier(.4,0,.2,1) forwards}
+.s1-mute3{animation:s1ReflowMute3 1s 5.6s cubic-bezier(.4,0,.2,1) forwards,s1WinPulseM .7s 8.4s ease}
+.s1-ban21{animation:s1ReflowBan21 1s 5.6s cubic-bezier(.4,0,.2,1) forwards,s1WinPulseB .7s 9.8s ease}
+.s1-mute1{animation:s1ReflowMute1 1s 7.4s cubic-bezier(.4,0,.2,1) forwards}
+.s1-ban7{animation:s1ReflowBan7 1s 8.8s cubic-bezier(.4,0,.2,1) forwards}
+.s1-labelNames,.s1-labelIps,.s1-divider{opacity:0;animation:s1FadeIn .6s 5.8s ease forwards}
+.s1-muteMerge,.s1-banMerge{opacity:0;transform-box:fill-box;transform-origin:center;animation:s1MergePulse .6s 8.4s ease forwards}
+.s1-banMerge{animation-delay:9.8s}
+.s1-done{opacity:0;animation:s1Done .7s 10.8s ease forwards}
+.s1-one{opacity:0;animation:s1FadeIn .6s 5.0s ease forwards}
+@keyframes s1CardA{from{transform:translate(0,0)}to{transform:translate(152px,0)}}
+@keyframes s1CardB{from{transform:translate(0,0)}to{transform:translate(-152px,0)}}
+@keyframes s1StrokeOut{to{stroke-opacity:0;fill-opacity:0}}
+@keyframes s1FadeOut{from{opacity:1}to{opacity:0}}
+@keyframes s1FadeIn{from{opacity:0}to{opacity:1}}
+@keyframes s1Login{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:scale(1)}}
+@keyframes s1Draw{to{stroke-dashoffset:0}}
+@keyframes s1Burst{0%{opacity:0;transform:scale(.4)}40%{opacity:1;transform:scale(1.04)}100%{opacity:0;transform:scale(1.3)}}
+@keyframes s1SeamIn{to{opacity:.9}}
+@keyframes s1SeamOut{from{opacity:.9}to{opacity:0}}
+@keyframes s1Flash{0%{opacity:0;transform:scale(.35)}35%{opacity:.9;transform:scale(1)}100%{opacity:0;transform:scale(1.5)}}
+@keyframes s1FusedIn{0%{opacity:0;transform:scale(.985)}100%{opacity:1;transform:scale(1)}}
+@keyframes s1WinPulseM{0%{transform:translate(10px,-33px) scale(1)}45%{transform:translate(10px,-33px) scale(1.09)}100%{transform:translate(10px,-33px) scale(1)}}
+@keyframes s1WinPulseB{0%{transform:translate(-284px,-33px) scale(1)}45%{transform:translate(-284px,-33px) scale(1.09)}100%{transform:translate(-284px,-33px) scale(1)}}
+@keyframes s1ReflowA{from{transform:translate(0,0)}to{transform:translate(10px,8px)}}
+@keyframes s1ReflowB{from{transform:translate(0,0)}to{transform:translate(-202px,8px)}}
+@keyframes s1ReflowIpA{from{transform:translate(0,0)}to{transform:translate(330px,-44px)}}
+@keyframes s1ReflowIpB{from{transform:translate(0,0)}to{transform:translate(176px,-44px)}}
+@keyframes s1ReflowMute3{from{transform:translate(0,0)}to{transform:translate(10px,-33px)}}
+@keyframes s1ReflowBan21{from{transform:translate(0,0)}to{transform:translate(-284px,-33px)}}
+@keyframes s1ReflowMute1{0%{transform:translate(0,0) scale(1);opacity:1}100%{transform:translate(-332px,-33px) scale(.3);opacity:0}}
+@keyframes s1ReflowBan7{0%{transform:translate(0,0) scale(1);opacity:1}100%{transform:translate(56px,-33px) scale(.3);opacity:0}}
+@keyframes s1MergePulse{0%{opacity:0;transform:scale(.7)}50%{opacity:1;transform:scale(1.15)}100%{opacity:0;transform:scale(1.4)}}
+@keyframes s1Done{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* =============== SCENE 2 =============== */
+.s2-live{animation:s2Live .6s .3s ease both}.s2-seam{opacity:0;animation:s2Seam .6s 1.6s ease forwards}.s2-ghostA,.s2-ghostB{opacity:0;animation:s2Ghost .8s 2.4s ease forwards}.s2-question{opacity:0;animation:s2Q .4s ease both}.q1{animation-delay:2.9s}.q2{animation-delay:3.3s}.q3{animation-delay:3.7s}.q4{animation-delay:4.1s}.s2-warning{opacity:0;animation:s2Warning .7s 5.2s ease forwards}.s2-scramble{opacity:0;animation:s2Scramble .6s 6.2s ease forwards}@keyframes s2Live{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}@keyframes s2Seam{0%{opacity:0;transform:scaleX(.1)}50%{opacity:1;transform:scaleX(1.12)}100%{opacity:.9;transform:scaleX(1)}}@keyframes s2Ghost{from{opacity:0;transform:scale(.92)}to{opacity:.3;transform:scale(1)}}@keyframes s2Q{0%{opacity:0;transform:scale(.3)}70%{opacity:1;transform:scale(1.2)}100%{opacity:1;transform:scale(1)}}@keyframes s2Warning{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}@keyframes s2Scramble{from{opacity:0;transform:scale(.7)}to{opacity:.6;transform:scale(1)}}
+
+/* =============== SCENE 3 =============== */
+.s3-originalA,.s3-originalB{animation:s3Appear .5s ease both,s3Dim .6s 4.6s ease forwards}
+.s3-originalB{animation:s3Appear .5s .15s ease both,s3Dim .6s 4.6s ease forwards}
+.s3-copyA,.s3-copyB{opacity:0;transform-box:fill-box;transform-origin:center}
+.s3-copyA{animation:s3CopyA 1.4s .8s cubic-bezier(.4,0,.2,1) forwards}
+.s3-copyB{animation:s3CopyB 1.4s 1.1s cubic-bezier(.4,0,.2,1) forwards}
+.s3-stampA,.s3-stampB{opacity:0;animation:s3Stamp .6s 2.2s ease forwards}
+.s3-log{opacity:0;animation:s3Log .9s 1.7s cubic-bezier(.15,.9,.25,1.1) forwards}
+.s3-pointer{stroke-dasharray:120;stroke-dashoffset:120;animation:s3Draw .8s 3.2s ease forwards}
+.s3-live{opacity:0;animation:s3Live .8s 4.0s cubic-bezier(.4,0,.2,1) forwards}
+.s3-vaultPulse{opacity:0;animation:s3Pulse 2s 4.1s ease-in-out infinite}
+.s3-rollbackCopyA,.s3-rollbackCopyB{opacity:0;transform-box:fill-box;transform-origin:center}
+.s3-rollbackCopyA{animation:s3RestoreA 1.6s 5.6s cubic-bezier(.4,0,.2,1) forwards}
+.s3-rollbackCopyB{animation:s3RestoreB 1.6s 5.9s cubic-bezier(.4,0,.2,1) forwards}
+.s3-after{opacity:0;animation:s3After .7s 7.6s ease forwards}
+.s3-rollbackBtn{opacity:0;animation:s3Btn .6s 8.2s ease forwards}
+@keyframes s3Appear{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes s3Dim{to{opacity:.18}}
+@keyframes s3CopyA{0%{opacity:0;transform:translate(0,0) scale(.9)}20%{opacity:1}100%{opacity:0;transform:translate(355px,32px) scale(.6)}}
+@keyframes s3CopyB{0%{opacity:0;transform:translate(0,0) scale(.9)}20%{opacity:1}100%{opacity:0;transform:translate(-355px,32px) scale(.6)}}
+@keyframes s3Stamp{from{opacity:0;transform:scale(.6) rotate(-5deg)}to{opacity:1;transform:none}}
+@keyframes s3Log{from{opacity:0;transform:scale(.72)}55%{opacity:1;transform:scale(1.06)}to{opacity:1;transform:scale(1)}}
+@keyframes s3Draw{to{stroke-dashoffset:0}}
+@keyframes s3Live{from{opacity:0;transform:translateY(12px) scale(.92)}to{opacity:1;transform:none}}
+@keyframes s3Pulse{0%,100%{opacity:.22}50%{opacity:.55}}
+@keyframes s3RestoreA{0%{opacity:0;transform:translate(355px,32px) scale(.6)}20%{opacity:1}100%{opacity:1;transform:translate(0,0) scale(1)}}
+@keyframes s3RestoreB{0%{opacity:0;transform:translate(-355px,32px) scale(.6)}20%{opacity:1}100%{opacity:1;transform:translate(0,0) scale(1)}}
+@keyframes s3After{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@keyframes s3Btn{from{opacity:0;transform:scale(.8)}to{opacity:1;transform:scale(1)}}
+
+/* =============== SCENE 4 =============== */
+.s4-shell{animation:s4Shell .6s .3s ease both}.s4-chip{transform-box:fill-box;transform-origin:center;animation:s4Detach 1.4s 1.2s cubic-bezier(.15,.9,.2,1) forwards}.s4-cut{opacity:0;animation:s4Cut .5s 2.0s ease forwards}.s4-new{opacity:0;transform-box:fill-box;transform-origin:105px 65px;animation:s4New .9s 2.5s cubic-bezier(.2,.85,.2,1) forwards}.s4-chipNew{opacity:0;animation:s4ChipNew .7s 2.5s cubic-bezier(.15,.9,.2,1) forwards}.s4-cleanPulse{opacity:0;animation:s4Pulse 1s 3.9s ease forwards}@keyframes s4Shell{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:none}}@keyframes s4Detach{0%{transform:translate(0,0) scale(1)}25%{transform:translateY(-28px) scale(1.06)}68%{transform:translate(522px,-16px) scale(1.03)}100%{transform:translate(522px,0) scale(1);opacity:0}}@keyframes s4Cut{0%{opacity:0;transform:scale(.4) rotate(-25deg)}50%{opacity:1;transform:scale(1.15) rotate(7deg)}100%{opacity:0;transform:scale(1)}}@keyframes s4New{0%{opacity:0;transform:scale(.15)}70%{opacity:1;transform:scale(1.03)}100%{opacity:1;transform:scale(1)}}@keyframes s4ChipNew{from{opacity:0;transform:translateX(-35px) scale(.8)}to{opacity:1;transform:none}}@keyframes s4Pulse{0%{opacity:0;transform:scale(.8)}40%{opacity:1;transform:scale(1.12)}100%{opacity:0;transform:scale(1.45)}}
+
+/* =============== SCENE 5 =============== */
+.s5-source,.s5-dest{animation:s5Appear .5s ease both}.s5-dest{animation-delay:.15s}.s5-pill{opacity:0;transform-box:fill-box;transform-origin:center;animation:s5Select .7s 1.3s ease both,s5Move 1.5s 2.2s cubic-bezier(.14,.82,.18,1) forwards}.s5-arrow{opacity:0;animation:s5ArrowIn .4s 1.5s ease forwards,s5ArrowOut .3s 2.15s ease forwards}.s5-emptyslot{opacity:0;animation:s5FadeIn .5s 3.9s ease forwards}.s5-line{stroke-dasharray:260;stroke-dashoffset:260;animation:s5Path .9s 2.0s ease forwards}.s5-targetHalo{opacity:0;animation:s5Halo .8s 3.7s ease forwards}.s5-final{opacity:0;animation:s5Final .7s 3.6s ease forwards}.s5-keepA,.s5-keepB{opacity:0;animation:s5Keep .5s 3.9s ease forwards}@keyframes s5Appear{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}@keyframes s5Select{from{opacity:0;transform:scale(.8)}to{opacity:1;transform:scale(1)}}@keyframes s5ArrowIn{to{opacity:1}}@keyframes s5ArrowOut{to{opacity:0}}@keyframes s5FadeIn{to{opacity:1}}@keyframes s5Path{to{stroke-dashoffset:0}}@keyframes s5Move{0%{opacity:1;transform:translate(0,0) scale(1)}22%{transform:translate(65px,-36px) scale(1.06)}65%{transform:translate(610px,12px) scale(1.03)}100%{transform:translate(610px,45px) scale(1);opacity:0}}@keyframes s5Halo{0%{opacity:0;transform:scale(.82)}50%{opacity:1;transform:scale(1.12)}100%{opacity:0;transform:scale(1.35)}}@keyframes s5Final{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}@keyframes s5Keep{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<header class="hero"><div class="container"><div class="eyebrow">IPDB · moderator guide</div><h1>Records are buckets. These animations show exactly how the buckets change.</h1><p>Follow the motion, not the jargon: a login links two records, a merge fuses them, the merge log preserves the originals, and manual tools let you move identifiers around.</p><div class="rail"><b>1 · Link + merge</b><i>→</i><b>2 · Why undo fails</b><i>→</i><b>3 · Snapshot + rollback</b><i>→</i><b>4 · Isolate</b><i>→</i><b>5 · Move</b></div></div></header>
+<main class="container">
+<section class="section"><div class="head"><div class="kicker"><i class="dot"></i>01 · Link + merge</div><h2>Watch the login connect the records, pull them together, and fuse them into one.</h2><p class="sub">The important part is the motion: the login creates the link, the two records physically converge, and their data flies into one unified record.</p></div>
+<div class="card stage"><div class="bar"><div class="bar-title">Connect → converge → fuse → reconcile</div><div class="controls"><button class="btn primary replay" data-scene="s1">↻ Replay</button></div></div><div class="progress"><i id="p1"></i></div>
+<svg id="s1" class="scene" viewBox="0 0 1100 480" aria-label="Two records physically merge into one. Their names and IPs rearrange inside the fused record, and mute and ban actions combine pairwise.">
+<!-- unified interior background (drawn under both cards so reflowed content is never covered) -->
+<rect class="s1-basefill" x="210" y="62" width="680" height="250" rx="22" fill="#17212d"/>
+
+<!-- Login proof -->
+<g class="s1-login">
+	<circle cx="550" cy="152" r="42" fill="#0b1016" stroke="#59d0e9" stroke-width="2" stroke-dasharray="5 5"/>
+	<g fill="none" stroke="#59d0e9" stroke-width="2.5" stroke-linecap="round">
+		<circle cx="539" cy="145" r="8"/>
+		<path d="M547 145 h21 M557 145 v5 M563 145 v5"/>
+	</g>
+	<text x="550" y="184" fill="#f4fbfe" font-size="11" font-family="JetBrains Mono" text-anchor="middle" font-weight="700">LOGIN</text>
+</g>
+<path class="s1-connector-a" d="M398 143 C 448 128 478 136 508 152" fill="none" stroke="#59d0e9" stroke-width="2"/>
+<path class="s1-connector-b" d="M702 196 C 656 212 624 202 592 172" fill="none" stroke="#ff7c72" stroke-width="2"/>
+<text class="s1-caption" x="550" y="245" fill="#9eacba" font-size="11.5" text-anchor="middle">one login carries a name from A + an IP from B</text>
+<g class="s1-linkBurst">
+	<circle cx="550" cy="152" r="44" fill="none" stroke="#f3ba5d" stroke-width="2.5"/>
+	<circle cx="550" cy="152" r="20" fill="#f3ba5d" opacity=".3"/>
+	<text x="550" y="157" fill="#fff3da" font-size="12" text-anchor="middle" font-weight="800">LINK</text>
+</g>
+
+<!-- Card A -->
+<g class="s1-cardA">
+	<path class="s1-frame" d="M 80 62 H 398 V 312 H 80 Q 58 312 58 290 V 84 Q 58 62 80 62 Z" fill="#17212d" stroke="#59d0e9" stroke-width="2"/>
+	<text class="s1-tagA" x="90" y="96" fill="#59d0e9" font-size="12" font-family="JetBrains Mono" font-weight="700">RECORD A</text>
+	<g class="s1-nameA"><rect x="88" y="126" width="120" height="34" rx="17" fill="#163e49" stroke="#59d0e9"/><text x="148" y="148" fill="#eff9fb" font-size="12.5" text-anchor="middle">Frosty</text></g>
+	<g class="s1-ipA"><rect x="88" y="178" width="180" height="34" rx="17" fill="#0e141b" stroke="#293644"/><text x="178" y="200" fill="#c4d0d9" font-size="11.5" text-anchor="middle">88.14.201.6</text></g>
+	<g class="s1-mute3"><rect x="88" y="236" width="128" height="36" rx="18" fill="#4d371d" stroke="#f3ba5d"/><text x="152" y="259" fill="#ffd28a" font-size="11" font-weight="700" text-anchor="middle">MUTE · 3d</text></g>
+	<g class="s1-ban7"><rect x="222" y="236" width="128" height="36" rx="18" fill="#482421" stroke="#a65b53"/><text x="286" y="259" fill="#eab0aa" font-size="11" font-weight="700" text-anchor="middle">BAN · 7d</text></g>
+</g>
+
+<!-- Card B -->
+<g class="s1-cardB">
+	<path class="s1-frame" d="M 702 62 H 1020 Q 1042 62 1042 84 V 290 Q 1042 312 1020 312 H 702 Z" fill="#17212d" stroke="#f3ba5d" stroke-width="2"/>
+	<text class="s1-tagB" x="734" y="96" fill="#f3ba5d" font-size="12" font-family="JetBrains Mono" font-weight="700">RECORD B</text>
+	<g class="s1-nameB"><rect x="734" y="126" width="145" height="34" rx="17" fill="#0e141b" stroke="#293644"/><text x="806" y="148" fill="#aebbc8" font-size="12.5" text-anchor="middle">Kestrel99</text></g>
+	<g class="s1-ipB"><rect x="734" y="178" width="130" height="34" rx="17" fill="#0e141b" stroke="#293644"/><text x="799" y="200" fill="#c4d0d9" font-size="11.5" text-anchor="middle">88.14.201.9</text></g>
+	<g class="s1-mute1"><rect x="734" y="236" width="128" height="36" rx="18" fill="#3b2b1d" stroke="#a9844c"/><text x="798" y="259" fill="#ceb078" font-size="11" font-weight="700" text-anchor="middle">MUTE · 1d</text></g>
+	<g class="s1-ban21"><rect x="866" y="236" width="128" height="36" rx="18" fill="#482421" stroke="#ff7c72"/><text x="930" y="259" fill="#ffb6af" font-size="11" font-weight="700" text-anchor="middle">BAN · 21d</text></g>
+</g>
+
+<!-- Junction: the seam the two halves meet at, then the unified outline -->
+<line class="s1-seam" x1="550" y1="62" x2="550" y2="312" stroke="#f3ba5d" stroke-width="3" stroke-dasharray="7 7"/>
+<circle class="s1-flash" cx="550" cy="187" r="70" fill="none" stroke="#f3ba5d" stroke-width="2.5"/>
+<rect class="s1-fused" x="210" y="62" width="680" height="250" rx="22" fill="none" stroke="#59d0e9" stroke-width="2"/>
+<text class="s1-one" x="550" y="96" fill="#59d0e9" font-size="12" font-family="JetBrains Mono" font-weight="700" text-anchor="middle">ONE RECORD</text>
+
+<!-- Unified interior -->
+<text class="s1-labelNames" x="250" y="118" fill="#7f8e9c" font-size="11" font-family="JetBrains Mono" font-weight="700">NAMES</text>
+<text class="s1-labelIps" x="570" y="118" fill="#7f8e9c" font-size="11" font-family="JetBrains Mono" font-weight="700">IPS</text>
+<line class="s1-divider" x1="250" y1="185" x2="880" y2="185" stroke="#293644"/>
+<circle class="s1-muteMerge" cx="314" cy="221" r="24" fill="none" stroke="#f3ba5d" stroke-width="2"/>
+<circle class="s1-banMerge" cx="494" cy="221" r="24" fill="none" stroke="#ff7c72" stroke-width="2"/>
+
+<g class="s1-done">
+	<rect x="250" y="340" width="600" height="62" rx="20" fill="#10231a" stroke="#71d79b"/>
+	<text x="550" y="367" fill="#bcefcf" font-size="12.5" text-anchor="middle" font-weight="700">One record · names + IPs + the merged mute + the merged ban</text>
+	<text x="550" y="386" fill="#7fb497" font-size="10.5" text-anchor="middle">The old A/B boundary is gone from the live record.</text>
+</g>
+</svg><div class="caption" id="cap1">Two records exist: <strong>Frosty</strong> is on A, while the login's IP is on B.</div><div class="tip">Watch what moves. Nothing in the animation jumps straight to the end state.</div></div></section>
+
+<section class="section"><div class="head"><div class="kicker"><i class="dot" style="background:var(--red)"></i>02 · Why a plain undo fails</div><h2>After fusion, the live record no longer contains the old seam.</h2><p class="sub">You still know all the identifiers and punishment values. What disappeared is the information about which original bucket each one came from.</p></div>
+<div class="card stage"><div class="bar"><div class="bar-title">Unified record → old seam disappears → split becomes guesswork</div><div class="controls"><button class="btn primary replay" data-scene="s2">↻ Replay</button></div></div><div class="progress"><i id="p2"></i></div>
+<svg id="s2" class="scene" viewBox="0 0 1100 450" aria-label="A merged record loses the original A or B ownership labels, making a plain undo impossible">
+<g class="s2-live"><rect x="185" y="55" width="730" height="245" rx="26" fill="#17212d" stroke="#f3ba5d" stroke-width="2"/><text x="550" y="88" fill="#f3ba5d" font-size="12" font-family="JetBrains Mono" font-weight="800" text-anchor="middle">ONE LIVE RECORD</text>
+	<text x="250" y="124" fill="#7f8e9c" font-size="10" font-family="JetBrains Mono">NAMES</text><rect x="250" y="138" width="120" height="34" rx="17" fill="#0e141b" stroke="#293644"/><text x="310" y="160" fill="#eaf1f5" font-size="11.5" text-anchor="middle">Frosty</text><rect x="382" y="138" width="145" height="34" rx="17" fill="#0e141b" stroke="#293644"/><text x="454" y="160" fill="#eaf1f5" font-size="11.5" text-anchor="middle">Kestrel99</text>
+	<text x="250" y="205" fill="#7f8e9c" font-size="10" font-family="JetBrains Mono">IPS</text><rect x="250" y="219" width="230" height="34" rx="17" fill="#0e141b" stroke="#293644"/><text x="365" y="241" fill="#c4d0d9" font-size="10.8" text-anchor="middle">88.14.201.6</text><rect x="492" y="219" width="180" height="34" rx="17" fill="#0e141b" stroke="#293644"/><text x="582" y="241" fill="#c4d0d9" font-size="10.8" text-anchor="middle">88.14.201.9</text>
+	<rect x="706" y="215" width="150" height="42" rx="18" fill="#3f301a"/><text x="781" y="233" fill="#ffd28a" font-size="10.5" font-weight="700" text-anchor="middle">MUTE 3d</text><text x="781" y="248" fill="#ffb6af" font-size="10.5" font-weight="700" text-anchor="middle">BAN 21d</text>
+</g>
+<line class="s2-seam" x1="550" y1="55" x2="550" y2="300" stroke="#ff7c72" stroke-width="3" stroke-dasharray="7 7"/>
+<g class="s2-ghostA"><rect x="228" y="92" width="275" height="168" rx="20" fill="none" stroke="#59d0e9" stroke-width="2" stroke-dasharray="6 6"/><text x="365" y="114" fill="#59d0e9" font-size="10.5" font-family="JetBrains Mono" text-anchor="middle">OLD A — GONE</text></g>
+<g class="s2-ghostB"><rect x="597" y="92" width="275" height="168" rx="20" fill="none" stroke="#f3ba5d" stroke-width="2" stroke-dasharray="6 6"/><text x="735" y="114" fill="#f3ba5d" font-size="10.5" font-family="JetBrains Mono" text-anchor="middle">OLD B — GONE</text></g>
+<text class="s2-question q1" x="310" y="325" fill="#ff7c72" font-size="23" text-anchor="middle" font-weight="800">?</text><text class="s2-question q2" x="454" y="325" fill="#ff7c72" font-size="23" text-anchor="middle" font-weight="800">?</text><text class="s2-question q3" x="365" y="325" fill="#ff7c72" font-size="23" text-anchor="middle" font-weight="800">?</text><text class="s2-question q4" x="582" y="325" fill="#ff7c72" font-size="23" text-anchor="middle" font-weight="800">?</text>
+<g class="s2-warning"><rect x="300" y="345" width="500" height="70" rx="18" fill="#482421" stroke="#ff7c72"/><text x="550" y="370" fill="#ffc0bb" font-size="12.5" font-weight="700" text-anchor="middle">Which item originally belonged to A? Which to B?</text><text x="550" y="392" fill="#dab3ae" font-size="11" text-anchor="middle">The live record does not say. A plain undo would have to guess.</text></g>
+<g class="s2-scramble"><circle cx="905" cy="380" r="32" fill="none" stroke="#ff7c72" stroke-width="2" stroke-dasharray="4 5"/><text x="905" y="386" fill="#ff7c72" font-size="22" text-anchor="middle">?</text></g>
+</svg><div class="caption" id="cap2">The merged record still knows <strong>what</strong> it contains — but not <strong>which original record owned each piece</strong>.</div></div></section>
+
+<section class="section"><div class="head"><div class="kicker"><i class="dot" style="background:var(--green)"></i>03 · Merge log + rollback</div><h2>The safety net is created before the merge happens.</h2><p class="sub">The original records are duplicated into the merge log. The log also points at the new merged record, so rollback can restore the saved originals exactly.</p></div>
+<div class="card stage"><div class="bar"><div class="bar-title">Copy → stamp → point → merge → restore</div><div class="controls"><button class="btn primary replay" data-scene="s3">↻ Replay</button><button class="btn" id="rollbackNow">↩ Show rollback</button></div></div><div class="progress"><i id="p3"></i></div>
+<svg id="s3" class="scene" viewBox="0 0 1100 520" aria-label="The originals are copied into a merge log before merge, and the saved copies are used for rollback">
+<g class="s3-originalA"><rect x="55" y="48" width="280" height="176" rx="22" fill="#122630" stroke="#59d0e9" stroke-width="2"/><text x="195" y="78" fill="#59d0e9" font-size="11" font-family="JetBrains Mono" font-weight="800" text-anchor="middle">ORIGINAL A</text><text x="195" y="112" fill="#eef5f8" font-size="13" text-anchor="middle">Frosty</text><text x="195" y="134" fill="#acbac5" font-size="11" text-anchor="middle">88.14.201.6</text><text x="195" y="168" fill="#ffd18b" font-size="11" font-weight="700" text-anchor="middle">MUTE 3d · BAN 7d</text></g>
+<g class="s3-originalB"><rect x="765" y="48" width="280" height="176" rx="22" fill="#2d2418" stroke="#f3ba5d" stroke-width="2"/><text x="905" y="78" fill="#f3ba5d" font-size="11" font-family="JetBrains Mono" font-weight="800" text-anchor="middle">ORIGINAL B</text><text x="905" y="112" fill="#eef5f8" font-size="13" text-anchor="middle">Kestrel99</text><text x="905" y="134" fill="#acbac5" font-size="11" text-anchor="middle">88.14.201.6 + 201.9</text><text x="905" y="168" fill="#ffb6af" font-size="11" font-weight="700" text-anchor="middle">MUTE 1d · BAN 21d</text></g>
+<!-- flying duplicate cards -->
+<g class="s3-copyA"><rect x="55" y="48" width="280" height="176" rx="22" fill="#122630" stroke="#59d0e9" stroke-width="2"/><text x="195" y="78" fill="#59d0e9" font-size="10" font-family="JetBrains Mono" text-anchor="middle">COPY / SNAPSHOT</text><text x="195" y="112" fill="#eef5f8" font-size="13" text-anchor="middle">A · full entry</text><text x="195" y="141" fill="#acbac5" font-size="10.5" text-anchor="middle">names · IPs · mute · ban · history</text><text x="195" y="168" fill="#bcefcf" font-size="10" text-anchor="middle">frozen</text></g>
+<g class="s3-copyB"><rect x="765" y="48" width="280" height="176" rx="22" fill="#2d2418" stroke="#f3ba5d" stroke-width="2"/><text x="905" y="78" fill="#f3ba5d" font-size="10" font-family="JetBrains Mono" text-anchor="middle">COPY / SNAPSHOT</text><text x="905" y="112" fill="#eef5f8" font-size="13" text-anchor="middle">B · full entry</text><text x="905" y="141" fill="#acbac5" font-size="10.5" text-anchor="middle">names · IPs · mute · ban · history</text><text x="905" y="168" fill="#bcefcf" font-size="10" text-anchor="middle">frozen</text></g>
+<g class="s3-stampA"><rect x="112" y="190" width="88" height="25" rx="9" fill="#18382a" stroke="#71d79b"/><text x="156" y="207" fill="#bcefcf" font-size="9.5" text-anchor="middle" font-family="JetBrains Mono">SNAPSHOT</text></g><g class="s3-stampB"><rect x="822" y="190" width="88" height="25" rx="9" fill="#18382a" stroke="#71d79b"/><text x="866" y="207" fill="#bcefcf" font-size="9.5" text-anchor="middle" font-family="JetBrains Mono">SNAPSHOT</text></g>
+<!-- log -->
+<g class="s3-log"><rect x="398" y="78" width="304" height="180" rx="24" fill="#0f171a" stroke="#71d79b" stroke-width="2.5"/><text x="550" y="108" fill="#71d79b" font-size="12" font-family="JetBrains Mono" font-weight="800" text-anchor="middle">MERGE LOG #1042</text><rect x="434" y="128" width="232" height="34" rx="12" fill="#18382a"/><text x="550" y="150" fill="#bcefcf" font-size="10.5" text-anchor="middle">stores FULL copies of A + B</text><text x="550" y="185" fill="#c1ced8" font-size="10.5" text-anchor="middle">+ pointer to the merged record</text><circle cx="550" cy="220" r="16" fill="#18382a" stroke="#71d79b"/><text x="550" y="225" fill="#bcefcf" font-size="13" text-anchor="middle">✓</text></g>
+<path class="s3-pointer" d="M550 258 V340" fill="none" stroke="#71d79b" stroke-width="3"/>
+<g class="s3-live"><rect x="335" y="340" width="430" height="118" rx="24" fill="#17212d" stroke="#f3ba5d" stroke-width="2"/><text x="550" y="369" fill="#f3ba5d" font-size="11" font-family="JetBrains Mono" font-weight="800" text-anchor="middle">LIVE MERGED RECORD</text><text x="550" y="401" fill="#e1eaf1" font-size="12" text-anchor="middle">Frosty · Kestrel99 · IPs · mute 3d · ban 21d</text><text x="550" y="426" fill="#8e9ca9" font-size="10.5" text-anchor="middle">the record that exists after the merge</text></g>
+<g class="s3-vaultPulse"><rect x="382" y="66" width="336" height="220" rx="30" fill="none" stroke="#71d79b" stroke-width="2"/></g>
+<!-- rollback copies fly back out to the original slots -->
+<g class="s3-rollbackCopyA"><rect x="55" y="48" width="280" height="176" rx="22" fill="#122630" stroke="#59d0e9" stroke-width="2"/><text x="195" y="78" fill="#59d0e9" font-size="11" font-family="JetBrains Mono" font-weight="800" text-anchor="middle">RESTORED A</text><text x="195" y="118" fill="#eef5f8" font-size="12.5" text-anchor="middle">Frosty · original IP · original punishment</text></g>
+<g class="s3-rollbackCopyB"><rect x="765" y="48" width="280" height="176" rx="22" fill="#2d2418" stroke="#f3ba5d" stroke-width="2"/><text x="905" y="78" fill="#f3ba5d" font-size="11" font-family="JetBrains Mono" font-weight="800" text-anchor="middle">RESTORED B</text><text x="905" y="118" fill="#eef5f8" font-size="12.5" text-anchor="middle">Kestrel99 · original IPs · original punishment</text></g>
+<g class="s3-after"><rect x="380" y="474" width="340" height="30" rx="12" fill="#18382a" stroke="#71d79b"/><text x="550" y="494" fill="#bcefcf" font-size="10.5" font-family="JetBrains Mono" text-anchor="middle">ROLLBACK RESTORES THE SAVED STATE</text></g>
+<g class="s3-rollbackBtn"><rect x="407" y="300" width="286" height="34" rx="11" fill="#18382a" stroke="#71d79b"/><text x="550" y="322" fill="#bcefcf" font-size="11" font-weight="700" text-anchor="middle" font-family="JetBrains Mono">NO GUESSING · USE THE SNAPSHOTS</text></g>
+</svg><div class="caption" id="cap3">Before merging, IPDB makes <strong>full copies</strong> of both originals. That is what makes rollback safe.</div></div></section>
+
+<section class="section"><div class="head"><div class="kicker"><i class="dot" style="background:var(--amber)"></i>04 · Isolate</div><h2>Isolate physically cuts one identifier out and gives it a brand-new record.</h2><p class="sub"><span class="cmd">/ipdb isolate Kestrel99</span></p></div>
+<div class="card stage"><div class="bar"><div class="bar-title">Lift the identifier → cut it free → grow a clean record → drop it in</div><div class="controls"><button class="btn primary replay" data-scene="s4">↻ Replay</button></div></div><div class="progress"><i id="p4"></i></div>
+<svg id="s4" class="scene" viewBox="0 0 1100 380" aria-label="Isolate detaches a name from its existing record and puts it into a new empty record">
+<g class="s4-shell"><rect x="55" y="70" width="390" height="225" rx="24" fill="#17212d" stroke="#ff7c72" stroke-width="2"/><text x="250" y="103" fill="#ffb6af" font-size="11" font-family="JetBrains Mono" font-weight="800" text-anchor="middle">EXISTING RECORD</text><rect x="92" y="135" width="116" height="34" rx="17" fill="#163e49" stroke="#59d0e9"/><text x="150" y="157" fill="#eef8fa" font-size="11.5" text-anchor="middle">Frosty</text><rect x="92" y="183" width="224" height="34" rx="17" fill="#0e141b" stroke="#293644"/><text x="204" y="205" fill="#bcc8d1" font-size="10.8" text-anchor="middle">88.14.201.6</text><rect x="92" y="237" width="205" height="34" rx="17" fill="#482421"/><text x="194" y="259" fill="#ffb6af" font-size="10.8" text-anchor="middle" font-weight="700">MUTE + BAN stay here</text></g>
+<g class="s4-chip"><rect x="238" y="135" width="180" height="34" rx="17" fill="#4d371d" stroke="#f3ba5d" stroke-width="2"/><text x="328" y="157" fill="#ffd28a" font-size="11.5" text-anchor="middle">Kestrel99</text></g>
+<g class="s4-cut"><path d="M452 152 L478 176 M478 152 L452 176" stroke="#f3ba5d" stroke-width="3" stroke-linecap="round"/></g><path d="M445 164 C540 164 620 164 745 164" fill="none" stroke="#f3ba5d" stroke-width="2" stroke-dasharray="6 7"/>
+<g class="s4-new"><rect x="655" y="70" width="390" height="225" rx="24" fill="#10181f" stroke="#59d0e9" stroke-width="2" stroke-dasharray="5 6"/><text x="850" y="103" fill="#59d0e9" font-size="11" font-family="JetBrains Mono" font-weight="800" text-anchor="middle">NEW RECORD</text><text x="850" y="213" fill="#8f9eac" font-size="11" text-anchor="middle">forms around the isolated identifier</text><text x="850" y="238" fill="#8f9eac" font-size="11" text-anchor="middle">mute = empty · ban = empty</text></g>
+<g class="s4-chipNew"><rect x="760" y="135" width="180" height="34" rx="17" fill="#163e49" stroke="#59d0e9"/><text x="850" y="157" fill="#eef8fa" font-size="11.5" text-anchor="middle">Kestrel99</text></g><circle class="s4-cleanPulse" cx="850" cy="147" r="62" fill="none" stroke="#59d0e9" stroke-width="2"/>
+</svg><div class="caption" id="cap4">The old record keeps everything else. The new record starts clean and contains <strong>only the identifier you isolated</strong>.</div></div></section>
+
+<section class="section"><div class="head"><div class="kicker"><i class="dot" style="background:var(--amber)"></i>05 · Move</div><h2>Move is a single-identifier relocation — no merge of the surrounding data.</h2><p class="sub"><span class="cmd">/ipdb move 88.14.201.9 Frosty</span></p></div>
+<div class="card stage"><div class="bar"><div class="bar-title">Select one IP → route it to the destination record → settle it there</div><div class="controls"><button class="btn primary replay" data-scene="s5">↻ Replay</button></div></div><div class="progress"><i id="p5"></i></div>
+<svg id="s5" class="scene" viewBox="0 0 1100 380" aria-label="Move transports one IP from one record into a destination record while leaving other data unchanged">
+<g class="s5-source"><rect x="55" y="70" width="380" height="225" rx="24" fill="#17212d" stroke="#475866" stroke-width="2"/><text x="245" y="103" fill="#ccd7df" font-size="11" font-family="JetBrains Mono" font-weight="800" text-anchor="middle">SOURCE RECORD</text><rect x="92" y="135" width="150" height="34" rx="17" fill="#0e141b" stroke="#293644"/><text x="167" y="157" fill="#e9eff4" font-size="11.5" text-anchor="middle">Kestrel99</text><text class="s5-arrow" x="330" y="205" fill="#ceb078" font-size="10.5" text-anchor="middle">← selected</text><rect class="s5-keepA" x="92" y="237" width="110" height="34" rx="17" fill="#482421"/><text x="147" y="259" fill="#ffb6af" font-size="10.5" text-anchor="middle">other data</text><text class="s5-keepB" x="257" y="259" fill="#9baab7" font-size="10.5">stays here</text></g>
+<path class="s5-line" d="M204 200 C460 95 640 95 702 228" fill="none" stroke="#f3ba5d" stroke-width="3" stroke-dasharray="7 7"/><g class="s5-emptyslot"><rect x="92" y="183" width="224" height="34" rx="17" fill="none" stroke="#475866" stroke-dasharray="5 5"/><text x="204" y="205" fill="#7f8e9c" font-size="10.5" text-anchor="middle">moved out</text></g>
+<g class="s5-dest"><rect x="665" y="70" width="380" height="225" rx="24" fill="#122630" stroke="#59d0e9" stroke-width="2"/><text x="855" y="103" fill="#59d0e9" font-size="11" font-family="JetBrains Mono" font-weight="800" text-anchor="middle">DESTINATION · FROSTY</text><rect x="702" y="135" width="116" height="34" rx="17" fill="#163e49" stroke="#59d0e9"/><text x="760" y="157" fill="#eef8fa" font-size="11.5" text-anchor="middle">Frosty</text><rect x="702" y="183" width="160" height="34" rx="17" fill="#0e141b" stroke="#293644"/><text x="782" y="205" fill="#bcc8d1" font-size="10.8" text-anchor="middle">88.14.201.6</text><rect x="887" y="183" width="118" height="34" rx="17" fill="#18382a" stroke="#71d79b" opacity=".35"/><text x="946" y="205" fill="#bcefcf" font-size="10.5" text-anchor="middle">receives 1 IP</text></g>
+<g class="s5-targetHalo"><circle cx="814" cy="245" r="60" fill="none" stroke="#f3ba5d" stroke-width="2"/></g><g class="s5-final"><rect x="702" y="228" width="224" height="34" rx="17" fill="#4d371d" stroke="#f3ba5d"/><text x="814" y="250" fill="#ffd28a" font-size="10.8" font-family="JetBrains Mono" font-weight="700" text-anchor="middle">88.14.201.9 now lives here</text></g>
+<g class="s5-pill"><rect x="92" y="183" width="224" height="34" rx="17" fill="#4d371d" stroke="#f3ba5d" stroke-width="2"/><text x="204" y="205" fill="#ffd28a" font-size="11" font-family="JetBrains Mono" font-weight="700" text-anchor="middle">88.14.201.9</text></g>
+</svg><div class="caption" id="cap5">Only that one identifier changes address. <strong>Nothing else is merged</strong> and the surrounding record data stays where it was.</div></div></section>
+
+<section class="section"><div class="card rules"><div class="kicker"><i class="dot" style="background:var(--green)"></i>Keep this mental model</div><div class="rules-grid"><div class="rule"><b>Link → merge</b><span>Two live records become one unified record.</span></div><div class="rule"><b>Merge log → rollback</b><span>Copies made before the merge let IPDB restore the originals without guessing.</span></div><div class="rule"><b>Isolate / Move</b><span>Manual tools reorganize identifiers without pretending two records were never separate.</span></div></div><div class="note">Mute and ban are separate. When both originals have a mute, the longer mute wins. When both have a ban, the longer ban wins. A merged record can still contain both a mute and a ban at once.</div></div></section>
+</main><footer class="footer container"><h3>Watch the objects, not the terminology.</h3><p>When you can see the identifier chips, the records, the merge boundary, and the snapshot copies physically move, the rules become much easier to reason about.</p></footer>
+<script>
+(function(){
+	const durations={s1:12000,s2:7000,s3:9000,s4:5500,s5:6000};
+	const captions={
+		s1:[[0,'Two real records exist. Nothing has merged yet.'],[900,'A login carries <strong>Frosty</strong> from A and the IP from B.'],[1800,'That overlap triggers the link. Watch the two records move together.'],[2500,'They slide toward each other until the edges meet.'],[4200,'The seam is the only line left between them.'],[4600,'The seam dissolves and the two halves become one container.'],[5700,'The contents rearrange inside that container: all names and IPs are now part of one record.'],[7500,'For mute, the two values are compared. The <strong>3-day mute wins</strong>.'],[8900,'The ban pair does the same: the 7-day action is absorbed into the 21-day.'],[10900,'Now there is one record, one merged mute, and one merged ban.']],
+		s2:[[0,'The merged record knows everything it kept.'],[1700,'The old A/B seam starts to disappear.'],[2800,'There is no longer a label saying which original record owned each item.'],[5300,'So a plain undo would have to <strong>guess</strong>. That is why rollback needs the merge log.']],
+		s3:[[0,'Before the merge, IPDB makes full copies of both originals.'],[2200,'Those copies are stamped and stored in the merge log.'],[3400,'The log also keeps a pointer to the new merged record.'],[4200,'The live record becomes the merged record. The old copies remain frozen.'],[5900,'Rollback uses those saved copies instead of reconstructing anything.'],[8300,'Result: the original A and B states can be restored exactly.']],
+		s4:[[0,'Pick one name or IP.'],[1500,'It lifts out of the existing record and leaves the other data behind.'],[2400,'The new record forms right around it as it arrives.'],[3300,'The identifier settles into its new home.'],[4500,'That new record starts with no mute, no ban, and no other history from the old record.']],
+		s5:[[0,'Pick one identifier: here, the IP <strong>88.14.201.9</strong>.'],[2500,'It leaves its source record and travels along the move path.'],[3800,'The destination record lights up and receives exactly that one identifier.'],[5300,'Nothing else is fused. The rest of the source record stays put.']]
+	};
+	function setCaption(scene,t){const list=captions[scene]||[];let best=list[0]?.[1]||'';for(const item of list){if(t>=item[0])best=item[1];else break}const el=document.getElementById('cap'+scene.slice(1));if(el)el.innerHTML=best}
+	function run(scene){const start=performance.now();const p=document.getElementById('p'+scene.slice(1));if(p)p.style.width='0%';const tick=now=>{const elapsed=now-start;setCaption(scene,elapsed);if(p)p.style.width=Math.min(100,elapsed/durations[scene]*100)+'%';if(elapsed<durations[scene])requestAnimationFrame(tick)};requestAnimationFrame(tick)}
+	document.querySelectorAll('.replay').forEach(btn=>btn.addEventListener('click',()=>{const id=btn.dataset.scene;const svg=document.getElementById(id);const clone=svg.cloneNode(true);svg.replaceWith(clone);run(id)}));
+	document.getElementById('rollbackNow').addEventListener('click',()=>{const svg=document.getElementById('s3');const clone=svg.cloneNode(true);svg.replaceWith(clone);const p=document.getElementById('p3');if(p)p.style.width='100%';const cap=document.getElementById('cap3');cap.innerHTML='Rollback restores the <strong>saved original entries</strong>. The merged live record is replaced by the frozen copies — no guessing involved.';clone.querySelectorAll('.s3-copyA,.s3-copyB,.s3-originalA,.s3-originalB,.s3-log,.s3-live,.s3-stampA,.s3-stampB,.s3-pointer,.s3-vaultPulse').forEach(el=>{el.style.animation='none';el.style.opacity='.18'});const ra=clone.querySelector('.s3-rollbackCopyA'),rb=clone.querySelector('.s3-rollbackCopyB');[ra,rb].forEach(el=>{el.style.animation='none';el.style.opacity='1';el.style.transform='none'});const after=clone.querySelector('.s3-after');after.style.animation='none';after.style.opacity='1';});
+	['s1','s2','s3','s4','s5'].forEach(run);
+})();
+</script>
+</body>
+</html>

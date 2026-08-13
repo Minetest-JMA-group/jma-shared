@@ -221,13 +221,15 @@ end
 -- back to real names only when the AI's tool calls are executed, so
 -- moderators and the rest of the system keep seeing true usernames.
 --
--- PcgRandom:next() returns a signed 32-bit int, so use the unsigned range.
+-- PcgRandom:range() takes signed 32-bit args, so the max usable value is
+-- 2^31-1 (passing 2^32-1 wraps to -1 and throws "Invalid range (max < min)").
+-- 31 bits per word, 93 bits total - plenty for per-run pseudonyms.
 
 local privacy_rng = PcgRandom(os.time())
 local privacy_salt = string.format("%08x%08x%08x",
-	privacy_rng:next(0, 4294967295),
-	privacy_rng:next(0, 4294967295),
-	privacy_rng:next(0, 4294967295))
+	privacy_rng:next(0, 2147483647),
+	privacy_rng:next(0, 2147483647),
+	privacy_rng:next(0, 2147483647))
 
 local name_to_hash = {}		-- name -> hash
 local hash_to_name = {}		-- hash -> name

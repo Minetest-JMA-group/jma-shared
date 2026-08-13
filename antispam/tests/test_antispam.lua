@@ -19,6 +19,8 @@ core.log = function() end
 core.commands = {}
 core.register_chatcommand = function(name, def) core.commands[name] = def end
 core.get_color_escape_sequence = function() return "" end
+core.get_current_modname = function() return "antispam" end
+core.get_modpath = function() return nil end
 
 simplemod = {
 	mute_ip = function(name, source, reason, duration)
@@ -27,6 +29,7 @@ simplemod = {
 	end,
 }
 
+dofile(script_dir .. "/../../utf8_simple/init.lua")
 dofile(script_dir .. "/../init.lua")
 
 local chat = core.on_chat
@@ -119,6 +122,45 @@ say("frank", "dup")
 check("T6: warns at 2nd repeat", #warns == 1)
 say("frank", "dup")
 check("T6: mutes at 3rd repeat", #mutes == 1)
+
+-- T7: the reported spam as a lone long message -> entropy warning; a second
+-- such message (after a pause) escalates to a mute
+local SPAM_BLAST = ("SPAM spam spam "):rep(66)
+reset()
+local s1 = say("grace", SPAM_BLAST, 7e6)
+check("T7: lone spam blast warns, not mutes", s1 == false and #warns == 1
+	and warns[1]:find("spam") ~= nil and #mutes == 0)
+local s2 = say("grace", SPAM_BLAST, 7e6)
+check("T7: second spam blast mutes", s2 == true and #mutes == 1)
+
+-- T8: mixed-case and Cyrillic spam variants also warn
+reset()
+say("henry", ("SPAM spam Spam sPaM "):rep(25), 7e6)
+check("T8: mixed-case variant warns", #warns == 1)
+say("ivan", ("спам спам спам "):rep(25), 7e6)
+check("T8: cyrillic variant warns", #warns == 2)
+
+-- T9: exemptions — short laughter, Chinese, keyboard mash, normal long chat
+reset()
+say("judy", "hahaha lololol", 7e6)
+check("T9: short laughter exempt", #warns == 0)
+say("judy", ("的"):rep(40), 7e6)
+check("T9: Chinese exempt (no Latin/Cyrillic letters)", #warns == 0)
+say("judy", ("asdfghjkl"):rep(5), 7e6)
+check("T9: keyboard mash above threshold", #warns == 0)
+say("judy", ("the quick brown fox jumps over the lazy dog "):rep(2), 7e6)
+check("T9: normal long chat exempt", #warns == 0)
+
+-- T10: repeated low-entropy long message ("what what what...") warns
+reset()
+say("kevin", ("what what what what what "):rep(5), 7e6)
+check("T10: long repetition warns", #warns == 1)
+
+-- T11: entropy warning in a burst counts once (no double warning)
+reset()
+say("laura", "hi")
+say("laura", SPAM_BLAST)
+check("T11: entropy warn inside burst", #warns == 1 and #mutes == 0)
 
 print(string.format("%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

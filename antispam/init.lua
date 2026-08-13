@@ -18,6 +18,13 @@ local REPEATS_BEFORE_MUTE = 4 -- Repeated messages before mute
 local MESSAGE_RESET_TIME = 30 -- Seconds until message count resets
 local MESSAGE_RESET_TIME_USEC = MESSAGE_RESET_TIME * 1e6
 local MUTE_DURATION = 600 -- In seconds
+-- Entropy check: long messages made of very few different letters (after
+-- lowercasing) are character-level repetition, e.g. "spam spam spam spam...".
+-- Only Latin and Cyrillic letters are counted; other scripts (Chinese etc.)
+-- are skipped entirely, so they neither raise nor lower the entropy.
+local ENTROPY_WARN_THRESHOLD = 3.0 -- bits per character
+local MIN_ENTROPY_LENGTH = 24 -- message byte length before entropy is computed
+local MIN_ENTROPY_LETTERS = 24 -- Latin/Cyrillic letters before entropy is judged
 -- Color scheme
 local COLORS = {
 	WARNING = core.get_color_escape_sequence("#FFBB33"),
@@ -32,6 +39,39 @@ local COLORS = {
 core.register_on_leaveplayer(function(player)
 	antispam.players[player:get_player_name()] = nil
 end)
+
+local utf8_lower = utf8_simple.lower
+local utf8_chars = utf8_simple.chars
+local utf8_codepoint = utf8_simple.codepoint
+
+local function is_latin_or_cyrillic(cp)
+	return (cp >= 0x41 and cp <= 0x5A) or (cp >= 0x61 and cp <= 0x7A)
+		or (cp >= 0x400 and cp <= 0x4FF)
+end
+
+-- Shannon entropy (bits/char) over the lowercased Latin/Cyrillic letters of
+-- the message; returns nil when there are too few letters to judge.
+local function message_entropy(message)
+	local counts, total = {}, 0
+	for _, char in utf8_chars(utf8_lower(message)) do
+		local cp = utf8_codepoint(char)
+		if is_latin_or_cyrillic(cp) then
+			counts[cp] = (counts[cp] or 0) + 1
+			total = total + 1
+		end
+	end
+
+	if total < MIN_ENTROPY_LETTERS then
+		return nil
+	end
+
+	local entropy = 0
+	for _, count in pairs(counts) do
+		local p = count / total
+		entropy = entropy - p * (math.log(p) / math.log(2))
+	end
+	return entropy
+end
 
 local function mute_player(name)
 	local ok = simplemod.mute_ip(
@@ -68,6 +108,20 @@ core.register_on_chat_message(function(name, message)
 	local player = antispam.players[name]
 	local time_since_last = current_time - player.last_message_time
 
+	-- Escalates the warning counter and returns true if the player was muted
+	local function escalate(warning_text)
+		player.warning_count = player.warning_count + 1
+		player.last_warning_time = current_time
+
+		if player.warning_count >= WARNS_BEFORE_MUTE then
+			mute_player(name)
+			return true
+		end
+
+		core.chat_send_player(name, warning_text)
+		return false
+	end
+
 	-- Clean old repeated messages
 	for msg, data in pairs(player.repeated_messages) do
 		if current_time - data.last_time >= MESSAGE_RESET_TIME_USEC then
@@ -80,31 +134,35 @@ core.register_on_chat_message(function(name, message)
 		player.warning_count = 0
 	end
 
+	-- Entropy check, only for long messages
+	local low_entropy = false
+	if #message >= MIN_ENTROPY_LENGTH then
+		local entropy = message_entropy(message)
+		if entropy and entropy < ENTROPY_WARN_THRESHOLD then
+			low_entropy = true
+		end
+	end
+
+	local slow_down_text = COLORS.WARNING .. string.format(
+		"[AntiSpam] Warning [%d/%d]: Please slow down! Wait %d seconds between messages.",
+		player.warning_count + 1, WARNS_BEFORE_MUTE, MIN_TIME_BETWEEN_MESSAGES)
+	local spam_like_text = COLORS.WARNING .. string.format(
+		"[AntiSpam] Warning [%d/%d]: Message looks like spam (too few different characters).",
+		player.warning_count + 1, WARNS_BEFORE_MUTE)
+
 	-- Check message frequency. Warn only once per burst; a burst that keeps
 	-- going past MESSAGES_BEFORE_WARN * WARNS_BEFORE_MUTE escalates to a mute.
 	if time_since_last < MIN_TIME_BETWEEN_MESSAGES_USEC then
 		player.message_count = player.message_count + 1
 
-		if player.message_count >= MESSAGES_BEFORE_WARN and not player.warned_this_burst then
-			player.warned_this_burst = true
-			player.warning_count = player.warning_count + 1
-			player.last_warning_time = current_time
-
-			if player.warning_count >= WARNS_BEFORE_MUTE then
-				mute_player(name)
-				return true
+		if not player.warned_this_burst then
+			if player.message_count >= MESSAGES_BEFORE_WARN then
+				player.warned_this_burst = true
+				if escalate(slow_down_text) then return true end
+			elseif low_entropy then
+				player.warned_this_burst = true
+				if escalate(spam_like_text) then return true end
 			end
-
-			core.chat_send_player(
-				name,
-				COLORS.WARNING
-					.. string.format(
-						"[AntiSpam] Warning [%d/%d]: Please slow down! Wait %d seconds between messages.",
-						player.warning_count,
-						WARNS_BEFORE_MUTE,
-						MIN_TIME_BETWEEN_MESSAGES
-					)
-			)
 		end
 
 		if player.message_count >= MESSAGES_BEFORE_WARN * WARNS_BEFORE_MUTE then
@@ -114,6 +172,11 @@ core.register_on_chat_message(function(name, message)
 	else
 		player.message_count = 1
 		player.warned_this_burst = false
+		if low_entropy then
+			-- a lone long low-entropy message, not part of a burst
+			player.warned_this_burst = true
+			if escalate(spam_like_text) then return true end
+		end
 	end
 
 	-- Check repeated messages separately: warn once per repeated message,
@@ -130,24 +193,11 @@ core.register_on_chat_message(function(name, message)
 
 		if rep_data.count >= REPEATS_BEFORE_WARN and not rep_data.warned then
 			rep_data.warned = true
-			player.warning_count = player.warning_count + 1
-			player.last_warning_time = current_time
-
-			if player.warning_count >= WARNS_BEFORE_MUTE then
-				mute_player(name)
+			if escalate(COLORS.WARNING .. string.format(
+					"[AntiSpam] Warning [%d/%d]: Please avoid repeating the same message. Wait %d seconds.",
+					player.warning_count + 1, WARNS_BEFORE_MUTE, MESSAGE_RESET_TIME)) then
 				return true
 			end
-
-			core.chat_send_player(
-				name,
-				COLORS.WARNING
-					.. string.format(
-						"[AntiSpam] Warning [%d/%d]: Please avoid repeating the same message. Wait %d seconds.",
-						player.warning_count,
-						WARNS_BEFORE_MUTE,
-						MESSAGE_RESET_TIME
-					)
-			)
 		end
 	else
 		player.repeated_messages[message] = {

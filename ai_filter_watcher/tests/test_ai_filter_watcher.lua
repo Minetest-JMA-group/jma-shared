@@ -298,6 +298,12 @@ local n4 = buffer_count(envA)
 envA.ai_filter_watcher.add_message("erin", nil, "MAIL to frank")
 check(buffer_count(envA) == n4, "A: nil message ignored")
 
+-- garbage AI parameter input is rejected, not silently applied
+local okT, retT = cmdA.ai_watcher.func("tester", "temperature abc")
+check(okT == false, "A: garbage temperature rejected")
+local okT2 = cmdA.ai_watcher.func("tester", "temperature 0.5")
+check(okT2 == true, "A: valid temperature accepted")
+
 -- /mail re-registered after load, still not wrapped without email mod
 local new_mail = function() return true end
 envA.core.register_chatcommand("mail", { func = new_mail })
@@ -501,5 +507,19 @@ envG.core.chat_hook("alice", "after disable")
 envG.cloudai.last_prompt = nil
 envG.core.globalstep_cb(61)
 check(envG.cloudai.last_prompt == nil, "G: no new run while disabled")
+
+-- === Scenario H: scan skips while a run is in flight, then fires when it ends ===
+local envH = make_env({}, { min_batch_size = "1" })
+envH.cloudai.defer_cb = true
+envH.core.chat_hook("alice", "first")
+envH.core.globalstep_cb(61)             -- run starts, callback deferred
+contains(envH.cloudai.last_prompt, "first", "H: run in flight")
+envH.core.chat_hook("alice", "second")
+envH.cloudai.last_prompt = nil
+envH.core.globalstep_cb(61)             -- interval elapsed, but run still active
+check(envH.cloudai.last_prompt == nil, "H: no new run while one is in flight")
+envH.cloudai.pending_cb({}, nil, nil)   -- run finishes
+envH.core.globalstep_cb(61)             -- next tick: buffered messages scanned
+contains(envH.cloudai.last_prompt, "second", "H: scan fires when the run finishes")
 
 print("All tests passed.")

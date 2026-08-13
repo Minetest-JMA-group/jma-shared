@@ -23,9 +23,7 @@ local HIDE_USERNAMES = false
 
 local PROMPT_READY = false
 local message_buffer = {}
-local chat_history = {}
-local history_index = 1
-local history_count = 0
+local chat_history = {}		-- newest at the end, trimmed to HISTORY_SIZE
 local watcher_stats = { scans_performed = 0, messages_processed = 0, actions_taken = 0, last_scan_time = 0, last_action_time = 0 }
 local player_history = {}
 local player_history_loaded = false
@@ -92,7 +90,7 @@ local settings_appliers = {
 		default = "100",
 		apply = function(v)
 			local n = tonumber(v)
-			if n and n >= 10 and n <= 1000 then HISTORY_SIZE = n end
+			if n and n >= 10 and n <= 20000 then HISTORY_SIZE = n end
 		end,
 	},
 	history_tracking_time = {
@@ -276,7 +274,7 @@ end)
 -- watcher runs at all, so aborting must be reachable from anywhere that can
 -- set it — the chat command and update_setting_from_db (the shareddb
 -- listener, when another instance disables the watcher).
-abort_current_processing = function(reason)
+local function abort_current_processing(reason)
 	if is_processing and active_context then
 		core.log("action", "[ai_filter_watcher] Aborting ongoing AI processing" ..
 			(reason and (": " .. reason) or ""))
@@ -368,6 +366,30 @@ local function send_action_report(fmt, ...)
 		end
 	end
 	relays.send_action_report("%s", final_msg)
+end
+
+-- "**AI Watcher**: " prefix for action reports. Pre-formatted text must be
+-- embedded with "%s" (send_action_report string.formats its arguments).
+local function report(fmt, ...)
+	send_action_report("**AI Watcher**: " .. fmt, ...)
+end
+
+-- Persist a setting to shareddb and log failures. The DB write is the source
+-- of truth: the trigger echoes it back to update_setting_from_db, which
+-- re-applies the value (queuing it if a run is in flight). Callers still
+-- apply locally as a fallback for when the DB is down and no echo arrives.
+local function save_setting(key, value, what)
+	local ctx = modstorage:get_context()
+	if not ctx then
+		core.log("warning", ("[ai_filter_watcher] shareddb unavailable, %s change not persisted"):format(what))
+		return false
+	end
+	local err = ctx:set_string(key, tostring(value)) or ctx:finalize()
+	if err then
+		core.log("error", ("[ai_filter_watcher] Failed to write %s to shareddb: %s"):format(what, tostring(err)))
+		return false
+	end
+	return true
 end
 
 local function load_system_prompt()
@@ -545,35 +567,24 @@ local function format_player_history(hist)
 	return "Recent moderation history:\n" .. table.concat(lines, "\n")
 end
 
+-- Chat history is a plain list, newest at the end; the oldest entry is
+-- trimmed once it outgrows HISTORY_SIZE. get_history reads at most 50
+-- entries, and even at HISTORY_SIZE = 20000 the per-message trim is a
+-- memmove of tens of microseconds — a ring buffer would only add
+-- modulo/wrap complexity for no measurable gain.
 local function add_to_history(name, msg, tag)
 	if WATCHER_MODE == ai_filter_watcher.MODES.DISABLED then return end
-	chat_history[history_index] = { name = name, message = msg, time = os.time(), tag = tag }
-	history_index = history_index % HISTORY_SIZE + 1
-	if history_count < HISTORY_SIZE then
-		history_count = history_count + 1
+	chat_history[#chat_history + 1] = { name = name, message = msg, time = os.time(), tag = tag }
+	if #chat_history > HISTORY_SIZE then
+		table.remove(chat_history, 1)
 	end
 end
 
 local function get_last_messages(n)
-	local count = math.min(n, history_count)
-	if count == 0 then return {} end
-	local result, idx = {}, 1
-	local cur = history_index - 1
-	if cur <= 0 then cur = cur + HISTORY_SIZE end
-	while idx <= count do
-		local entry = chat_history[cur]
-		if entry then
-			result[idx] = entry
-			idx = idx + 1
-		end
-		cur = cur - 1
-		if cur <= 0 then cur = cur + HISTORY_SIZE end
-		if cur == history_index then break end
-	end
-	-- reverse to chronological order
-	for i = 1, math.floor(#result / 2) do
-		local j = #result - i + 1
-		result[i], result[j] = result[j], result[i]
+	local first = math.max(1, #chat_history - math.floor(n) + 1)
+	local result = {}
+	for i = first, #chat_history do
+		result[#result + 1] = chat_history[i]
 	end
 	return result
 end
@@ -684,8 +695,12 @@ local function process_batch()
 		return
 	end
 
+	-- A scan is already in flight: aborting it would discard its batch's
+	-- review (those messages left the buffer when it started). Skip instead
+	-- and let the buffer keep accumulating; the caller retries once the
+	-- current run completes.
 	if is_processing then
-		abort_current_processing("New batch started, aborting old one")
+		return
 	end
 
 	local batch = message_buffer
@@ -710,6 +725,11 @@ local function process_batch()
 		core.log("error", ("[ai_filter_watcher] Failed to get AI context for batch %d: %s"):format(call_id, tostring(err)))
 		is_processing = false
 		flush_pending()
+		-- Re-queue the batch so the messages aren't lost; the next scan
+		-- retries once cloudai is available again.
+		for _, m in ipairs(batch) do
+			message_buffer[#message_buffer + 1] = m
+		end
 		return
 	end
 
@@ -775,7 +795,7 @@ local function process_batch()
 			else -- permissive
 				local msg = ("[PERMISSIVE] Would have warned player '%s' for: %s"):format(player_name, reason)
 				core.log("action", "[ai_filter_watcher] " .. msg)
-				send_action_report("**AI Watcher**: %s", msg)
+				report("%s", msg)
 			end
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
@@ -805,7 +825,7 @@ local function process_batch()
 			else
 				local msg = ("[PERMISSIVE] Would have muted player '%s' for %d minutes: %s"):format(player_name, duration, reason)
 				core.log("action", "[ai_filter_watcher] " .. msg)
-				send_action_report("**AI Watcher**: %s", msg)
+				report("%s", msg)
 			end
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
@@ -865,13 +885,13 @@ local function process_batch()
 		flush_pending()
 		if error then
 			core.log("warning", ("[ai_filter_watcher] AI error for batch call %d: %s"):format(call_id, tostring(error)))
-			send_action_report("**AI Watcher**: Batch %d error: %s", call_id, tostring(error))
+			report("Batch %d error: %s", call_id, tostring(error))
 		end
 	end)
 
 	if not ok then
 		core.log("warning", ("[ai_filter_watcher] Failed to call AI for batch %d: %s"):format(call_id, tostring(err)))
-		send_action_report("**AI Watcher**: Failed to call AI for batch %d: %s", call_id, tostring(err))
+		report("Failed to call AI for batch %d: %s", call_id, tostring(err))
 		active_context = nil
 		is_processing = false
 		flush_pending()
@@ -914,12 +934,17 @@ core.register_globalstep(function(dtime)
 	cleanup_acc = cleanup_acc + dtime
 
 	if time_acc >= SCAN_INTERVAL then
-		time_acc = 0
-		if #message_buffer >= MIN_BATCH_SIZE then
+		if #message_buffer >= MIN_BATCH_SIZE and not is_processing then
+			time_acc = 0
 			process_batch()
-		else
+		elseif not is_processing then
+			-- Buffer too small: restart the interval.
+			time_acc = 0
 			core.log("verbose", ("[ai_filter_watcher] Buffer too small (%d/%d), skipping scan"):format(#message_buffer, MIN_BATCH_SIZE))
 		end
+		-- else: a scan is in flight. Leave time_acc running so the scan fires
+		-- on the first tick after the current run completes instead of
+		-- waiting out a full interval; the buffer keeps accumulating.
 	end
 
 	if cleanup_acc >= 3600 then
@@ -979,7 +1004,7 @@ AI Watcher Status:
 				SCAN_INTERVAL,
 				MIN_BATCH_SIZE,
 				HISTORY_SIZE,
-				history_count,
+				#chat_history,
 				HISTORY_TRACKING_TIME, HISTORY_TRACKING_TIME/3600,
 				is_processing and ("Yes (call_id: "..active_call_id..")") or "No",
 				#message_buffer,
@@ -1009,18 +1034,9 @@ AI Watcher Status:
 				abort_current_processing()
 			end
 			-- Write to shareddb
-			local ctx = modstorage:get_context()
-			if ctx then
-				local err = ctx:set_string("mode", mode)
-				err = err or ctx:finalize()
-				if err then
-					core.log("error", "[ai_filter_watcher] Failed to write mode to shareddb: " .. tostring(err))
-				end
-			else
-				core.log("warning", "[ai_filter_watcher] shareddb unavailable, mode change not persisted")
-			end
+			save_setting("mode", mode, "mode")
 			WATCHER_MODE = mode
-			send_action_report("**AI Watcher**: Mode changed to %s by %s", mode, name)
+			report("Mode changed to %s by %s", mode, name)
 			return true, "Watcher mode set to: " .. mode
 
 		elseif cmd == "interval" then
@@ -1028,16 +1044,7 @@ AI Watcher Status:
 			if not i or i < 1 or i > 3600 then
 				return false, "Usage: /ai_watcher interval <seconds> (1-3600)"
 			end
-			local ctx = modstorage:get_context()
-			if ctx then
-				local err = ctx:set_string("scan_interval", tostring(i))
-				err = err or ctx:finalize()
-				if err then
-					core.log("error", "[ai_filter_watcher] Failed to write interval to shareddb: " .. tostring(err))
-				end
-			else
-				core.log("warning", "[ai_filter_watcher] shareddb unavailable, interval change not persisted")
-			end
+			save_setting("scan_interval", i, "interval")
 			SCAN_INTERVAL = i
 			time_acc = 0
 			return true, ("Scan interval set to: %d seconds"):format(i)
@@ -1047,16 +1054,7 @@ AI Watcher Status:
 			if not s or s < 1 or s > 100 then
 				return false, "Usage: /ai_watcher batch <size> (1-100)"
 			end
-			local ctx = modstorage:get_context()
-			if ctx then
-				local err = ctx:set_string("min_batch_size", tostring(s))
-				err = err or ctx:finalize()
-				if err then
-					core.log("error", "[ai_filter_watcher] Failed to write batch size to shareddb: " .. tostring(err))
-				end
-			else
-				core.log("warning", "[ai_filter_watcher] shareddb unavailable, batch size change not persisted")
-			end
+			save_setting("min_batch_size", s, "batch size")
 			MIN_BATCH_SIZE = s
 			return true, ("Minimum batch size set to: %d messages"):format(s)
 
@@ -1066,19 +1064,10 @@ AI Watcher Status:
 				return true, "Current temperature: " .. (TEMPERATURE and tostring(TEMPERATURE) or "not set")
 			end
 			local n = tonumber(v)
-			if n and (n < 0 or n > 2) then
+			if not n or n < 0 or n > 2 then
 				return false, "Temperature must be 0-2"
 			end
-			local ctx = modstorage:get_context()
-			if ctx then
-				local err = ctx:set_string("temperature", v)
-				err = err or ctx:finalize()
-				if err then
-					core.log("error", "[ai_filter_watcher] Failed to write temperature to shareddb: " .. tostring(err))
-				end
-			else
-				core.log("warning", "[ai_filter_watcher] shareddb unavailable, temperature change not persisted")
-			end
+			save_setting("temperature", v, "temperature")
 			TEMPERATURE = n
 			return true, ("Temperature set to: %s"):format(v)
 
@@ -1088,19 +1077,10 @@ AI Watcher Status:
 				return true, "Current frequency_penalty: " .. (FREQUENCY_PENALTY and tostring(FREQUENCY_PENALTY) or "not set")
 			end
 			local n = tonumber(v)
-			if n and (n < -2 or n > 2) then
+			if not n or n < -2 or n > 2 then
 				return false, "Frequency penalty must be -2..2"
 			end
-			local ctx = modstorage:get_context()
-			if ctx then
-				local err = ctx:set_string("frequency_penalty", v)
-				err = err or ctx:finalize()
-				if err then
-					core.log("error", "[ai_filter_watcher] Failed to write frequency penalty to shareddb: " .. tostring(err))
-				end
-			else
-				core.log("warning", "[ai_filter_watcher] shareddb unavailable, frequency penalty change not persisted")
-			end
+			save_setting("frequency_penalty", v, "frequency penalty")
 			FREQUENCY_PENALTY = n
 			return true, ("Frequency penalty set to: %s"):format(v)
 
@@ -1110,19 +1090,10 @@ AI Watcher Status:
 				return true, "Current presence_penalty: " .. (PRESENCE_PENALTY and tostring(PRESENCE_PENALTY) or "not set")
 			end
 			local n = tonumber(v)
-			if n and (n < -2 or n > 2) then
+			if not n or n < -2 or n > 2 then
 				return false, "Presence penalty must be -2..2"
 			end
-			local ctx = modstorage:get_context()
-			if ctx then
-				local err = ctx:set_string("presence_penalty", v)
-				err = err or ctx:finalize()
-				if err then
-					core.log("error", "[ai_filter_watcher] Failed to write presence penalty to shareddb: " .. tostring(err))
-				end
-			else
-				core.log("warning", "[ai_filter_watcher] shareddb unavailable, presence penalty change not persisted")
-			end
+			save_setting("presence_penalty", v, "presence penalty")
 			PRESENCE_PENALTY = n
 			return true, ("Presence penalty set to: %s"):format(v)
 
@@ -1139,16 +1110,7 @@ AI Watcher Status:
 			else
 				return false, "Usage: /ai_watcher debug [on|off]"
 			end
-			local ctx = modstorage:get_context()
-			if ctx then
-				local err = ctx:set_string("debug_enabled", tostring(new_val))
-				err = err or ctx:finalize()
-				if err then
-					core.log("error", "[ai_filter_watcher] Failed to write debug setting to shareddb: " .. tostring(err))
-				end
-			else
-				core.log("warning", "[ai_filter_watcher] shareddb unavailable, debug change not persisted")
-			end
+			save_setting("debug_enabled", new_val, "debug setting")
 			DEBUG_ENABLED = new_val
 			return true, "Debug " .. (new_val and "enabled" or "disabled")
 
@@ -1165,16 +1127,7 @@ AI Watcher Status:
 			else
 				return false, "Usage: /ai_watcher hide_usernames [yes|no]"
 			end
-			local ctx = modstorage:get_context()
-			if ctx then
-				local err = ctx:set_string("hide_usernames", tostring(new_val))
-				err = err or ctx:finalize()
-				if err then
-					core.log("error", "[ai_filter_watcher] Failed to write hide_usernames setting to shareddb: " .. tostring(err))
-				end
-			else
-				core.log("warning", "[ai_filter_watcher] shareddb unavailable, hide_usernames change not persisted")
-			end
+			save_setting("hide_usernames", new_val, "hide_usernames setting")
 			-- Don't touch the runtime flag directly: it must only change when
 			-- no AI run is active. The shareddb trigger echoes our own write
 			-- back to update_setting_from_db, which queues it if a run is in
@@ -1196,22 +1149,13 @@ AI Watcher Status:
 			if not new or new < 60 or new > 2592000 then
 				return false, "Invalid time. Must be >=60 seconds or a time string like '10h', '2d' (max 30d)."
 			end
-			local ctx = modstorage:get_context()
-			if ctx then
-				local err = ctx:set_string("history_tracking_time", tostring(new))
-				err = err or ctx:finalize()
-				if err then
-					core.log("error", "[ai_filter_watcher] Failed to write history time to shareddb: " .. tostring(err))
-				end
-			else
-				core.log("warning", "[ai_filter_watcher] shareddb unavailable, history time change not persisted")
-			end
+			save_setting("history_tracking_time", new, "history time")
 			local old = HISTORY_TRACKING_TIME
 			HISTORY_TRACKING_TIME = new
 			if new < old then
 				cleanup_player_history()
 			end
-			send_action_report("**AI Watcher**: History tracking time changed to %d seconds by %s", new, name)
+			report("History tracking time changed to %d seconds by %s", new, name)
 			return true, ("History tracking time set to: %d seconds (%.1f hours)"):format(new, new/3600)
 
 		elseif cmd == "action_rate_limit" then
@@ -1227,16 +1171,7 @@ AI Watcher Status:
 			if not limit then
 				return false, "Invalid rate limit. Usage: /ai_watcher action_rate_limit <count>/<unit>, e.g. 10/1m or 5/60"
 			end
-			local ctx = modstorage:get_context()
-			if ctx then
-				local err = ctx:set_string("action_rate_limit", v)
-				err = err or ctx:finalize()
-				if err then
-					core.log("error", "[ai_filter_watcher] Failed to write action rate limit to shareddb: " .. tostring(err))
-				end
-			else
-				core.log("warning", "[ai_filter_watcher] shareddb unavailable, action rate limit change not persisted")
-			end
+			save_setting("action_rate_limit", v, "action rate limit")
 			ACTION_RATE_LIMIT = limit
 			return true, ("Action report rate limit set to: %s (max %d messages per %d seconds)"):format(v, limit.count, limit.seconds)
 
@@ -1244,6 +1179,9 @@ AI Watcher Status:
 			local force = param:match("%s+force")
 			if #message_buffer < MIN_BATCH_SIZE and not force then
 				return false, ("Buffer has only %d messages (need %d). Use '/ai_watcher process force' to override."):format(#message_buffer, MIN_BATCH_SIZE)
+			end
+			if is_processing then
+				return false, "A scan is already in progress; it will pick up the buffered messages when it finishes"
 			end
 			local cnt = #message_buffer
 			process_batch()
@@ -1264,7 +1202,7 @@ AI Watcher Status:
 		elseif cmd == "abort" then
 			if is_processing then
 				abort_current_processing("Manually aborted by " .. name)
-				send_action_report("**AI Watcher**: Current processing aborted by %s", name)
+				report("Current processing aborted by %s", name)
 				return true, "Ongoing AI processing aborted"
 			else
 				return false, "No processing to abort"
@@ -1275,22 +1213,20 @@ AI Watcher Status:
 			if what == "buffer" then
 				local cnt = #message_buffer
 				message_buffer = {}
-				send_action_report("**AI Watcher**: Cleared %d messages from buffer by %s", cnt, name)
+				report("Cleared %d messages from buffer by %s", cnt, name)
 				return true, ("Cleared %d messages from buffer"):format(cnt)
 			elseif what == "stats" then
 				watcher_stats = { scans_performed = 0, messages_processed = 0, actions_taken = 0, last_scan_time = 0, last_action_time = 0 }
-				send_action_report("**AI Watcher**: Statistics cleared by %s", name)
+				report("Statistics cleared by %s", name)
 				return true, "Statistics cleared"
 			elseif what == "history" then
 				chat_history = {}
-				history_index = 1
-				history_count = 0
-				send_action_report("**AI Watcher**: Chat history cleared by %s", name)
+				report("Chat history cleared by %s", name)
 				return true, "Chat history cleared"
 			elseif what == "player_history" then
 				player_history = {}
 				save_player_history()
-				send_action_report("**AI Watcher**: Player moderation history cleared by %s", name)
+				report("Player moderation history cleared by %s", name)
 				return true, "Player moderation history cleared"
 			else
 				return false, "Usage: /ai_watcher clear <buffer|stats|history|player_history>"
@@ -1313,7 +1249,7 @@ AI Watcher Status:
 				suffix = " from an updated git repository"
 			end
 			if load_system_prompt() then
-				send_action_report("**AI Watcher**: System prompt reloaded by %s", name)
+				report("System prompt reloaded by %s", name)
 				return true, "System prompt reloaded successfully"..suffix
 			else
 				return false, "Failed to reload system prompt"
@@ -1351,8 +1287,8 @@ core.after(0, function()
 	load_system_prompt()
 	load_player_history()
 	cleanup_player_history()
-	core.log("action", ("[ai_filter_watcher] Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s, hide_usernames: %s)"):format(
-		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE, DEBUG_ENABLED and "enabled" or "disabled", HIDE_USERNAMES and "enabled" or "disabled"))
-	send_action_report("**AI Watcher**: Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s, hide_usernames: %s)",
+	local init_msg = ("Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s, hide_usernames: %s)"):format(
 		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE, DEBUG_ENABLED and "enabled" or "disabled", HIDE_USERNAMES and "enabled" or "disabled")
+	core.log("action", "[ai_filter_watcher] " .. init_msg)
+	report("%s", init_msg)
 end)

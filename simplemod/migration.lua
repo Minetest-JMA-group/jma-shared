@@ -3,8 +3,8 @@
 
 return function(shared)
 	local storage = core.get_mod_storage()
-	local dbmanager, dbmanager_err = ipdb.get_internal(4, "dbmanager")
-	local db, db_err = ipdb.get_internal(4, "database")
+	local dbmanager, dbmanager_err = ipdb.get_internal(5, "dbmanager")
+	local db, db_err = ipdb.get_internal(5, "database")
 	local MODNAME = core.get_current_modname()
 
 	local META_ENTRY_NAME_BANS = "entry_name_bans"

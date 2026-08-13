@@ -69,7 +69,7 @@ Additional Architecture Decisions (2026-03-08)
   - pcall around dbmanager operations.
 
 Coupling Policy
-- Accept moderate coupling to ipdb internals via trusted + version-gated get_internal(2, ...).
+- Accept moderate coupling to ipdb internals via trusted + version-gated get_internal(<current dbmanager schema version>, ...). The version must match ipdb's dbmanager schema version (migration_N.sql -> version N+1; see ipdb/dbmanager.lua run_migration) — when ipdb adds a migration, ALL get_internal callers must be bumped.
 - Keep coupling isolated in adapter-style backend code so most of simplemod remains backend-agnostic.
 
 Name-based Path Notes
@@ -86,7 +86,7 @@ Immediate Practical Ordering
 
 Final Implementation Plan (2026-03-08)
 1) Hard Dependency Init
-- At load, require ipdb.get_internal(2, "dbmanager") and ipdb.get_internal(2, "database").
+- At load, require ipdb.get_internal(<current dbmanager schema version>, "dbmanager") and ipdb.get_internal(<current dbmanager schema version>, "database").
 - If unavailable/version mismatch/not trusted: disable simplemod startup (no hooks/commands/forms).
 
 2) Synthetic Stores

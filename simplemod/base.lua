@@ -5,8 +5,8 @@ return function(shared)
 	local discordmt_available = core.global_exists("discord") and discord.enabled
 	local discord_mute_log_channel = "1210689151993774180"
 	local storage = core.get_mod_storage()
-	local dbmanager, dbmanager_err = ipdb.get_internal(4, "dbmanager")
-	local db, db_err = ipdb.get_internal(4, "database")
+	local dbmanager, dbmanager_err = ipdb.get_internal(5, "dbmanager")
+	local db, db_err = ipdb.get_internal(5, "database")
 	local SQLITE_ROW = 100
 	local LOG_LIMIT = 100
 	local MODERATOR_MAX_BAN_DURATION = 15 * 60

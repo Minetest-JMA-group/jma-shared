@@ -27,7 +27,7 @@ simplemod = {
 	end,
 }
 
-dofile(script_dir .. "/init.lua")
+dofile(script_dir .. "/../init.lua")
 
 local chat = core.on_chat
 local config = core.commands.antispam.func

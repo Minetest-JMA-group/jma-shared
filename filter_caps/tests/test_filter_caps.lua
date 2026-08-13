@@ -2,8 +2,9 @@
 --     lua test_filter_caps.lua
 --
 -- It stubs core/shareddb and loads the real utf8_simple, so this file must
--- sit next to the mod's init.lua in a checkout where filter_caps and
--- utf8_simple are siblings. All paths are relative to this file's location.
+-- live in a tests/ subdirectory of the mod in a checkout where filter_caps
+-- and utf8_simple are siblings. All paths are relative to this file's
+-- location.
 --
 -- get_player_by_name is stubbed case-insensitive, like the real engine
 -- (ServerEnvironment::getPlayer uses strcasecmp). shareddb keys are the
@@ -57,8 +58,8 @@ shareddb = {
 	register_listener = function(l) listener = l end,
 }
 
-dofile(script_dir .. "/../utf8_simple/init.lua")
-dofile(script_dir .. "/init.lua")
+dofile(script_dir .. "/../../utf8_simple/init.lua")
+dofile(script_dir .. "/../init.lua")
 
 local passed, failed = 0, 0
 local function dump_keys(t)
@@ -118,7 +119,7 @@ test("listener reloads capsWrap", filter_caps.parse("t", "@@@bob") == "@@@bob",
 
 -- --- restart simulation with a legacy capsMax row from the old code ---
 storage["capsMax"] = "5"  -- as written by the pre-fix set_setting
-dofile(script_dir .. "/init.lua")
+dofile(script_dir .. "/../init.lua")
 test("legacy capsMax row picked up", filter_caps.parse("t", "BOBBY") == "BOBBY",
 	filter_caps.parse("t", "BOBBY"))
 test("capsWrap 3 survives restart", filter_caps.parse("t", "@@@bob") == "@@@bob",
@@ -145,7 +146,7 @@ test("DB error: logged", has_err, "")
 -- --- boot with DB error: settings stay at code defaults ---
 storage["capsMax"] = "5"
 db_error = true
-dofile(modpath)
+dofile(script_dir .. "/../init.lua")
 db_error = false
 test("boot DB error: capsMax stays code default 2, not the stored 5",
 	filter_caps.parse("t", "BOBBY") == "BObby", filter_caps.parse("t", "BOBBY"))

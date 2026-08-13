@@ -3,13 +3,13 @@
 --     luajit test_ai_filter_watcher.lua
 --
 -- It stubs core/chat_lib/shareddb/cloudai/relays/algorithms and loads the
--- real init.lua in a sandbox, so this file must sit next to the mod's
--- init.lua in a checkout. Two scenarios are loaded: email absent
--- (Mineclone2/Creative) and email present (CTF).
+-- real init.lua in a sandbox, so this file must live in a tests/
+-- subdirectory of the mod in a checkout. Two scenarios are loaded: email
+-- absent (Mineclone2/Creative) and email present (CTF).
 
 local script_path = arg and arg[0] or debug.getinfo(1, "S").source:match("^@(.+)$")
 local script_dir = script_path:match("^(.*)/[^/]*$") or "."
-local MOD_DIR = script_dir .. "/"
+local MOD_DIR = script_dir .. "/../"
 
 local function load_with_env(source, env)
 	if setfenv then -- Lua 5.1 / LuaJIT

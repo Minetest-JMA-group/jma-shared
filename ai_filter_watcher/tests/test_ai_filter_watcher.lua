@@ -106,19 +106,29 @@ local function make_env(globals, shareddb_values)
 	end
 
 	local shareddb = {}
+	-- One store shared by get/set, simulating the PostgreSQL table: a write
+	-- is visible to a later read (the listener echo re-reads what was set).
+	local db_values = {}
+	if shareddb_values then
+		for k, v in pairs(shareddb_values) do db_values[k] = v end
+	end
+	shareddb.db = db_values -- exposed so tests can simulate external writes
+	shareddb.listener = nil
 	shareddb.get_mod_storage = function()
 		return {
 			get_context = function()
-				local data = {}
 				return {
-					get_string = function(self, k) return shareddb_values and shareddb_values[k] end,
-					set_string = function(self, k, v) data[k] = v return nil end,
+					get_string = function(self, k) return db_values[k] end,
+					set_string = function(self, k, v) db_values[k] = v return nil end,
 					finalize = function(self) return nil end,
 				}
 			end,
 		}
 	end
-	shareddb.register_listener = function() end
+	shareddb.register_listener = function(listener)
+		shareddb.listener = listener
+		return nil
+	end
 
 	local env
 	env = setmetatable({
@@ -417,6 +427,7 @@ local ok, ret = cmdD.ai_watcher.func("tester", "hide_usernames")
 check(ok == true and ret == "Username hiding is enabled", "D: no-arg reports current state")
 local ok2, ret2 = cmdD.ai_watcher.func("tester", "hide_usernames off")
 check(ok2 == true and ret2 == "Username hiding disabled", "D: off disables")
+envD.shareddb.listener("hide_usernames") -- self-echo from the DB trigger
 envD.core.chat_hook("bob", "after disable")
 envD.core.globalstep_cb(61)
 contains(envD.cloudai.last_prompt, "<bob>: after disable", "D: disabled -> real names again")
@@ -436,5 +447,59 @@ envE.core.globalstep_cb(61)
 local promptE = envE.cloudai.last_prompt
 contains(promptE, "[" .. test_hash("bob") .. "] again", "E: bob hashed in next batch after flush")
 check(not promptE:find("bob", 1, true), "E: no bare bob after flush")
+
+-- === Scenario F: hide_usernames flip is deferred until the active run ends ===
+local envF = make_env({}, { hide_usernames = "false", min_batch_size = "1" })
+local cmdF = envF.core.registered_chatcommands
+envF.core.join_cb({ get_player_name = function() return "alice" end })
+envF.core.chat_hook("alice", "bob hello")
+envF.cloudai.defer_cb = true
+envF.core.globalstep_cb(61)
+contains(envF.cloudai.last_prompt, "<alice>: bob hello", "F: run starts unmasked")
+local gh_defF = find_tool(envF, "get_history")
+
+-- flip while a run is active: the command reports it will apply later,
+-- and the shareddb echo (still mid-run) queues it instead of applying
+local okF, retF = cmdF.ai_watcher.func("tester", "hide_usernames yes")
+check(okF == true and retF:find("after the current AI run", 1, true) ~= nil,
+	"F: flip during run reports deferred application")
+envF.shareddb.listener("hide_usernames") -- self-echo arrives while still processing
+contains(gh_defF.func({ messages = "5" }).history, "<alice>: bob hello", "F: get_history still unmasked mid-run")
+
+-- run ends -> queued setting applied, next context fully masked
+envF.cloudai.pending_cb({}, nil, nil)
+envF.cloudai.defer_cb = false
+envF.core.chat_hook("alice", "bob again")
+envF.core.globalstep_cb(61)
+local promptF = envF.cloudai.last_prompt
+contains(promptF, "[" .. test_hash("alice") .. "] bob again", "F: next batch masked after run end")
+check(not promptF:find("alice", 1, true), "F: no bare alice after flip applied")
+
+-- === Scenario G: mode disabled via shareddb aborts an active run immediately ===
+local envG = make_env({}, { mode = "enabled", min_batch_size = "1" })
+local cmdG = envG.core.registered_chatcommands
+envG.core.join_cb({ get_player_name = function() return "alice" end })
+envG.core.chat_hook("alice", "bob hello")
+envG.cloudai.defer_cb = true
+envG.core.globalstep_cb(61)
+contains(envG.cloudai.last_prompt, "<alice>: bob hello", "G: run in flight")
+local _, statusG = cmdG.ai_watcher.func("tester", "status")
+contains(statusG, "Currently processing: Yes", "G: processing before mode change")
+
+-- another server instance disables the watcher: the echo must abort now,
+-- not wait for the run to complete on its own
+envG.shareddb.db.mode = "disabled"
+envG.shareddb.listener("mode")
+local okG, statusG2 = cmdG.ai_watcher.func("tester", "status")
+check(okG == true, "G: status readable after mode change")
+contains(statusG2, "Mode: disabled", "G: mode applied")
+contains(statusG2, "Currently processing: No", "G: active run aborted immediately")
+
+-- no new runs start while disabled, and the aborted run's callback is
+-- never delivered
+envG.core.chat_hook("alice", "after disable")
+envG.cloudai.last_prompt = nil
+envG.core.globalstep_cb(61)
+check(envG.cloudai.last_prompt == nil, "G: no new run while disabled")
 
 print("All tests passed.")

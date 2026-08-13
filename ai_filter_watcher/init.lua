@@ -131,6 +131,11 @@ local settings_appliers = {
 	},
 	hide_usernames = {
 		default = "false",
+		-- Changes what the AI sees mid-conversation: an active run's prompt
+		-- and tool results were rendered under the old flag, so flipping it
+		-- mid-run would show a name masked in one render and plaintext in
+		-- the next. Queued until the run completes (see apply_setting_deferred).
+		defer_while_processing = true,
 		apply = function(v)
 			HIDE_USERNAMES = (v == "true")
 		end,
@@ -143,75 +148,7 @@ local settings_appliers = {
 	},
 }
 
-local function update_setting_from_db(key)
-	local errmsg = "[ai_filter_watcher] shareddb database error, cannot update settings"
-	local ctx = modstorage:get_context()
-	if not ctx then
-		core.log("error", errmsg)
-		return
-	end
-
-	-- Like filter_caps: nil (boot) loads every setting, a specific key
-	-- (shareddb listener) loads just that one, unknown keys load nothing.
-	-- Missing values fall back to the setting's default.
-	for k, entry in pairs(settings_appliers) do
-		if not key or key == k then
-			local v, err = ctx:get_string(k)
-			if err then
-				ctx:finalize()
-				core.log("error", errmsg)
-				return
-			end
-			entry.apply(v ~= nil and v or entry.default)
-		end
-	end
-	ctx:finalize()
-end
-
-shareddb.register_listener(update_setting_from_db)
-
-local rate_count = 0
-local rate_window_start = 0
-
--- Rate-limited wrapper for relays.send_action_report: at most
--- ACTION_RATE_LIMIT.count reports per ACTION_RATE_LIMIT.seconds window.
--- Overflowing reports are dropped to the server log instead of the
--- action channel.
-local function send_action_report(fmt, ...)
-	local final_msg = string.format(fmt, ...)
-	local limit = ACTION_RATE_LIMIT
-	if limit then
-		local now = os.time()
-		if now - rate_window_start >= limit.seconds then
-			rate_window_start = now
-			rate_count = 0
-		end
-		rate_count = rate_count + 1
-		if rate_count > limit.count then
-			core.log("action", ("[ai_filter_watcher] Action report rate limit exceeded (%d per %ds), dropping: %s"):format(
-				limit.count, limit.seconds, final_msg))
-			return
-		end
-	end
-	relays.send_action_report("%s", final_msg)
-end
-
-local function load_system_prompt()
-	local file = io.open(system_prompt_file, "r")
-	if file then
-		system_prompt = file:read("*a")
-		file:close()
-		PROMPT_READY = true
-		core.log("action", "[ai_filter_watcher] System prompt loaded from file")
-		return true
-	else
-		core.log("error", "[ai_filter_watcher] System prompt file not found: " .. system_prompt_file)
-		system_prompt = ""
-		PROMPT_READY = false
-		WATCHER_MODE = ai_filter_watcher.MODES.DISABLED
-		return false
-	end
-end
+local pending_settings = {}	-- settings queued until the active AI run finishes
 
 -- === Privacy: hash player names before they reach the AI ===
 --
@@ -316,16 +253,139 @@ local function privacy_add_name(name)
 	get_or_make_hash(name)
 end
 
-local function flush_pending_names()
+-- Apply everything queued while the active run was in flight: name adds and
+-- deferred settings. Called only with is_processing already false, so the
+-- next run starts with a fully consistent view.
+local function flush_pending()
 	for name in pairs(pending_name_adds) do
 		pending_name_adds[name] = nil
 		get_or_make_hash(name)
+	end
+	for key, value in pairs(pending_settings) do
+		pending_settings[key] = nil
+		local entry = settings_appliers[key]
+		if entry then entry.apply(value) end
 	end
 end
 
 core.register_on_joinplayer(function(player)
 	privacy_add_name(player:get_player_name())
 end)
+
+-- Stop the AI immediately, whatever is in flight. Mode gates whether the
+-- watcher runs at all, so aborting must be reachable from anywhere that can
+-- set it — the chat command and update_setting_from_db (the shareddb
+-- listener, when another instance disables the watcher).
+abort_current_processing = function(reason)
+	if is_processing and active_context then
+		core.log("action", "[ai_filter_watcher] Aborting ongoing AI processing" ..
+			(reason and (": " .. reason) or ""))
+		active_context:destroy()
+		active_context = nil
+	end
+	is_processing = false
+	active_call_id = active_call_id + 1
+	flush_pending()
+end
+
+-- Settings marked defer_while_processing must not flip while a context is
+-- active (same reasoning as the privacy_add_name deferral above): the run
+-- started with one view of names, and switching mid-run would make tool
+-- results come back differently rendered than the prompt. Queue the change
+-- and apply it when the run completes; the next context starts fully
+-- consistent. Non-deferred settings apply immediately.
+local function apply_setting_deferred(key, value)
+	local entry = settings_appliers[key]
+	if not entry then return end
+	if is_processing then
+		pending_settings[key] = value
+	else
+		entry.apply(value)
+	end
+end
+
+local function update_setting_from_db(key)
+	local errmsg = "[ai_filter_watcher] shareddb database error, cannot update settings"
+	local ctx = modstorage:get_context()
+	if not ctx then
+		core.log("error", errmsg)
+		return
+	end
+
+	-- Like filter_caps: nil (boot) loads every setting, a specific key
+	-- (shareddb listener) loads just that one, unknown keys load nothing.
+	-- Missing values fall back to the setting's default.
+	for k, entry in pairs(settings_appliers) do
+		if not key or key == k then
+			local v, err = ctx:get_string(k)
+			if err then
+				ctx:finalize()
+				core.log("error", errmsg)
+				return
+			end
+			local value = v ~= nil and v or entry.default
+			-- mode gates whether the AI runs at all, so it can't be deferred:
+			-- a switch to disabled must stop an active run immediately, even
+			-- when the change arrives via shareddb from another instance
+			-- (same guard as the chat command, so the command's own echo
+			-- doesn't double-abort).
+			if k == "mode" and value == "disabled" and WATCHER_MODE ~= "disabled" then
+				abort_current_processing("Watcher mode set to disabled via shareddb")
+			end
+			if entry.defer_while_processing then
+				apply_setting_deferred(k, value)
+			else
+				entry.apply(value)
+			end
+		end
+	end
+	ctx:finalize()
+end
+
+shareddb.register_listener(update_setting_from_db)
+
+local rate_count = 0
+local rate_window_start = 0
+
+-- Rate-limited wrapper for relays.send_action_report: at most
+-- ACTION_RATE_LIMIT.count reports per ACTION_RATE_LIMIT.seconds window.
+-- Overflowing reports are dropped to the server log instead of the
+-- action channel.
+local function send_action_report(fmt, ...)
+	local final_msg = string.format(fmt, ...)
+	local limit = ACTION_RATE_LIMIT
+	if limit then
+		local now = os.time()
+		if now - rate_window_start >= limit.seconds then
+			rate_window_start = now
+			rate_count = 0
+		end
+		rate_count = rate_count + 1
+		if rate_count > limit.count then
+			core.log("action", ("[ai_filter_watcher] Action report rate limit exceeded (%d per %ds), dropping: %s"):format(
+				limit.count, limit.seconds, final_msg))
+			return
+		end
+	end
+	relays.send_action_report("%s", final_msg)
+end
+
+local function load_system_prompt()
+	local file = io.open(system_prompt_file, "r")
+	if file then
+		system_prompt = file:read("*a")
+		file:close()
+		PROMPT_READY = true
+		core.log("action", "[ai_filter_watcher] System prompt loaded from file")
+		return true
+	else
+		core.log("error", "[ai_filter_watcher] System prompt file not found: " .. system_prompt_file)
+		system_prompt = ""
+		PROMPT_READY = false
+		WATCHER_MODE = ai_filter_watcher.MODES.DISABLED
+		return false
+	end
+end
 
 -- Replace known player names in text bound for the AI with [hash].
 -- Tokenizes on spaces like filter_caps; multi-token names (relay authors)
@@ -405,18 +465,6 @@ local function privacy_wrap(func)
 		local result = func(map_value(args, unmask_names))
 		return map_value(result, mask_names)
 	end
-end
-
-local function abort_current_processing(reason)
-	if is_processing and active_context then
-		core.log("action", "[ai_filter_watcher] Aborting ongoing AI processing" ..
-			(reason and (": " .. reason) or ""))
-		active_context:destroy()
-		active_context = nil
-	end
-	is_processing = false
-	active_call_id = active_call_id + 1
-	flush_pending_names()
 end
 
 local function load_player_history()
@@ -661,7 +709,7 @@ local function process_batch()
 	if not context then
 		core.log("error", ("[ai_filter_watcher] Failed to get AI context for batch %d: %s"):format(call_id, tostring(err)))
 		is_processing = false
-		flush_pending_names()
+		flush_pending()
 		return
 	end
 
@@ -814,7 +862,7 @@ local function process_batch()
 	local ok, err = context:call(prompt, function(_, _, error)
 		active_context = nil
 		is_processing = false
-		flush_pending_names()
+		flush_pending()
 		if error then
 			core.log("warning", ("[ai_filter_watcher] AI error for batch call %d: %s"):format(call_id, tostring(error)))
 			send_action_report("**AI Watcher**: Batch %d error: %s", call_id, tostring(error))
@@ -826,7 +874,7 @@ local function process_batch()
 		send_action_report("**AI Watcher**: Failed to call AI for batch %d: %s", call_id, tostring(err))
 		active_context = nil
 		is_processing = false
-		flush_pending_names()
+		flush_pending()
 	end
 end
 
@@ -1127,7 +1175,16 @@ AI Watcher Status:
 			else
 				core.log("warning", "[ai_filter_watcher] shareddb unavailable, hide_usernames change not persisted")
 			end
-			HIDE_USERNAMES = new_val
+			-- Don't touch the runtime flag directly: it must only change when
+			-- no AI run is active. The shareddb trigger echoes our own write
+			-- back to update_setting_from_db, which queues it if a run is in
+			-- flight; this direct call is the fallback when the DB is down
+			-- (no echo). Either way the current context keeps the masking it
+			-- started with, and the next one gets the change.
+			apply_setting_deferred("hide_usernames", tostring(new_val))
+			if is_processing then
+				return true, ("Username hiding %s (will apply after the current AI run completes)"):format(new_val and "enabled" or "disabled")
+			end
 			return true, "Username hiding " .. (new_val and "enabled" or "disabled")
 
 		elseif cmd == "history_time" then

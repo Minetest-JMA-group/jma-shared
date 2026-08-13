@@ -11,8 +11,10 @@ antispam = { players = {} }
 -- Default settings
 local MIN_TIME_BETWEEN_MESSAGES = 6 -- Minimum seconds between messages
 local MIN_TIME_BETWEEN_MESSAGES_USEC = MIN_TIME_BETWEEN_MESSAGES * 1e6
-local MESSAGES_BEFORE_WARN = 6 -- Messages before first warning
-local WARNS_BEFORE_MUTE = 3 -- Number of warnings before mute
+local MESSAGES_BEFORE_WARN = 4 -- Messages before first warning
+local WARNS_BEFORE_MUTE = 2 -- Number of warnings before mute
+local REPEATS_BEFORE_WARN = 3 -- Repeated messages before first warning
+local REPEATS_BEFORE_MUTE = 4 -- Repeated messages before mute
 local MESSAGE_RESET_TIME = 30 -- Seconds until message count resets
 local MESSAGE_RESET_TIME_USEC = MESSAGE_RESET_TIME * 1e6
 local MUTE_DURATION = 600 -- In seconds
@@ -54,9 +56,9 @@ core.register_on_chat_message(function(name, message)
 	-- Initialize player data if not exists
 	if not antispam.players[name] then
 		antispam.players[name] = {
-			messages = {},
 			repeated_messages = {},
 			message_count = 0,
+			warned_this_burst = false,
 			last_message_time = 0,
 			warning_count = 0,
 			last_warning_time = 0,
@@ -65,14 +67,6 @@ core.register_on_chat_message(function(name, message)
 
 	local player = antispam.players[name]
 	local time_since_last = current_time - player.last_message_time
-
-	-- Clean old messages (frequency check)
-	for msg, time in pairs(player.messages) do
-		if current_time - time >= MESSAGE_RESET_TIME_USEC then
-			player.messages[msg] = nil
-			player.message_count = player.message_count - 1
-		end
-	end
 
 	-- Clean old repeated messages
 	for msg, data in pairs(player.repeated_messages) do
@@ -86,11 +80,13 @@ core.register_on_chat_message(function(name, message)
 		player.warning_count = 0
 	end
 
-	-- Check message frequency
+	-- Check message frequency. Warn only once per burst; a burst that keeps
+	-- going past MESSAGES_BEFORE_WARN * WARNS_BEFORE_MUTE escalates to a mute.
 	if time_since_last < MIN_TIME_BETWEEN_MESSAGES_USEC then
 		player.message_count = player.message_count + 1
 
-		if player.message_count >= MESSAGES_BEFORE_WARN then
+		if player.message_count >= MESSAGES_BEFORE_WARN and not player.warned_this_burst then
+			player.warned_this_burst = true
 			player.warning_count = player.warning_count + 1
 			player.last_warning_time = current_time
 
@@ -110,17 +106,30 @@ core.register_on_chat_message(function(name, message)
 					)
 			)
 		end
+
+		if player.message_count >= MESSAGES_BEFORE_WARN * WARNS_BEFORE_MUTE then
+			mute_player(name)
+			return true
+		end
 	else
 		player.message_count = 1
+		player.warned_this_burst = false
 	end
 
-	-- Check repeated messages separately
-	if player.repeated_messages[message] then
-		local msg_data = player.repeated_messages[message]
-		msg_data.count = msg_data.count + 1
-		msg_data.last_time = current_time
+	-- Check repeated messages separately: warn once per repeated message,
+	-- mute once the same message has been sent REPEATS_BEFORE_MUTE times
+	local rep_data = player.repeated_messages[message]
+	if rep_data then
+		rep_data.count = rep_data.count + 1
+		rep_data.last_time = current_time
 
-		if msg_data.count >= MESSAGES_BEFORE_WARN then
+		if rep_data.count >= REPEATS_BEFORE_MUTE then
+			mute_player(name)
+			return true
+		end
+
+		if rep_data.count >= REPEATS_BEFORE_WARN and not rep_data.warned then
+			rep_data.warned = true
 			player.warning_count = player.warning_count + 1
 			player.last_warning_time = current_time
 
@@ -144,11 +153,10 @@ core.register_on_chat_message(function(name, message)
 		player.repeated_messages[message] = {
 			count = 1,
 			last_time = current_time,
+			warned = false,
 		}
 	end
 
-	-- Store message data for frequency checking
-	player.messages[message] = current_time
 	player.last_message_time = current_time
 
 	return false
@@ -182,7 +190,7 @@ core.register_chatcommand("antispam", {
 					.. COLORS.TEXT
 					.. "(default: "
 					.. COLORS.VALUE
-					.. "6"
+					.. "4"
 					.. COLORS.TEXT
 					.. ")",
 				COLORS.TEXT
@@ -192,7 +200,27 @@ core.register_chatcommand("antispam", {
 					.. COLORS.TEXT
 					.. "(default: "
 					.. COLORS.VALUE
+					.. "2"
+					.. COLORS.TEXT
+					.. ")",
+				COLORS.TEXT
+					.. "• rwarn: "
+					.. COLORS.VALUE
+					.. "Repeated messages before warning "
+					.. COLORS.TEXT
+					.. "(default: "
+					.. COLORS.VALUE
 					.. "3"
+					.. COLORS.TEXT
+					.. ")",
+				COLORS.TEXT
+					.. "• rmute: "
+					.. COLORS.VALUE
+					.. "Repeated messages before mute "
+					.. COLORS.TEXT
+					.. "(default: "
+					.. COLORS.VALUE
+					.. "4"
 					.. COLORS.TEXT
 					.. ")",
 				COLORS.TEXT
@@ -244,10 +272,24 @@ core.register_chatcommand("antispam", {
 			},
 			mute = {
 				update = function(v)
-					WARNS_BEFORE_KICK = v
+					WARNS_BEFORE_MUTE = v
 				end,
 				name = "warnings before mute",
 				desc = "warnings before mute",
+			},
+			rwarn = {
+				update = function(v)
+					REPEATS_BEFORE_WARN = v
+				end,
+				name = "repeated messages before warning",
+				desc = "repeated messages",
+			},
+			rmute = {
+				update = function(v)
+					REPEATS_BEFORE_MUTE = v
+				end,
+				name = "repeated messages before mute",
+				desc = "repeated messages",
 			},
 			duration = {
 				update = function(v)

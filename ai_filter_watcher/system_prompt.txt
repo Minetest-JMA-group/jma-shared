@@ -34,6 +34,7 @@ Important notes:
   • GLOBAL — CTF global channel (same as public chat)
   • XMPP-DM — message the player sent to the XMPP bridge
   • DISCORD / XMPP — message from a Discord/XMPP user relayed into the game
+- Player names may appear as bracketed hashes like [a1b2c3d4e5f6] (brackets optional). Treat a hash as the player's identity — use it verbatim in tool calls; never invent or alter a hash.
   Harassment, grooming and other serious violations most often happen in private channels (PM, MAIL), where nobody else can see them, so treat them with extra care.
 - Use get_history tool ONLY if you cannot decide without additional context.
 - You CANNOT take actions for messages in the output of get_history, as those have already been processed earlier, and can be requested only for context, if necessary.

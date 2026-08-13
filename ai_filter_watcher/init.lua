@@ -19,6 +19,7 @@ local FREQUENCY_PENALTY = nil
 local PRESENCE_PENALTY = nil
 local DEBUG_ENABLED = false
 local ACTION_RATE_LIMIT = nil		-- nil = unlimited
+local HIDE_USERNAMES = false
 
 local PROMPT_READY = false
 local message_buffer = {}
@@ -128,6 +129,12 @@ local settings_appliers = {
 			DEBUG_ENABLED = (v == "true")
 		end,
 	},
+	hide_usernames = {
+		default = "false",
+		apply = function(v)
+			HIDE_USERNAMES = (v == "true")
+		end,
+	},
 	action_rate_limit = {
 		default = nil,
 		apply = function(v)
@@ -206,6 +213,198 @@ local function load_system_prompt()
 	end
 end
 
+-- === Privacy: hash player names before they reach the AI ===
+--
+-- Every player name sent to the AI is replaced with a salted hash, so the
+-- AI provider never sees plaintext usernames. The salt is regenerated every
+-- server run, making the hashes per-run pseudonyms. Names are translated
+-- back to real names only when the AI's tool calls are executed, so
+-- moderators and the rest of the system keep seeing true usernames.
+--
+-- PcgRandom:next() returns a signed 32-bit int, so use the unsigned range.
+
+local privacy_rng = core.PcgRandom(os.time())
+local privacy_salt = string.format("%08x%08x%08x",
+	privacy_rng:next(0, 4294967295),
+	privacy_rng:next(0, 4294967295),
+	privacy_rng:next(0, 4294967295))
+
+local name_to_hash = {}		-- name -> hash
+local hash_to_name = {}		-- hash -> name
+local name_tokens = {}		-- name -> { stripped whitespace tokens }
+local first_token_index = {}	-- stripped first token -> { names }, longest sequence first
+local pending_name_adds = {}	-- names waiting for the active AI run to finish
+
+-- Strip non-name characters from each side of a word, so e.g. "@bob",
+-- "bob!", "(bob,)" or "[LmaoRocal_]>:" all match. Mirrors filter_caps'
+-- stripping, but without a wrapper-count cap: a cap would miss names
+-- wrapped by more than 2 characters, and an uncapped strip cannot create
+-- false matches because the result is looked up exactly in the table. The
+-- same function is used on registered names and on message tokens, so
+-- matching stays symmetric.
+local function strip_name_wrap(word)
+	while true do
+		local first = utf8_simple.sub(word, 1, 1)
+		if first == "" or utf8_simple.player_name_chars[utf8_simple.codepoint(first)] then
+			break
+		end
+		word = utf8_simple.sub(word, 2)
+	end
+	while true do
+		local last = utf8_simple.sub(word, -1)
+		if last == "" or utf8_simple.player_name_chars[utf8_simple.codepoint(last)] then
+			break
+		end
+		word = utf8_simple.sub(word, 1, -2)
+	end
+	return word
+end
+
+-- Split a name into its stripped whitespace tokens, e.g.
+-- "gl4iv3 [LmaoRocal_]" -> {"gl4iv3", "LmaoRocal_"}. Multi-token names
+-- come from relay authors (Discord display names).
+local function name_to_tokens(name)
+	local tokens = {}
+	for token in name:gmatch("[^ ]+") do
+		tokens[#tokens + 1] = strip_name_wrap(token)
+	end
+	return tokens
+end
+
+-- Compute the hash for a name (sha1 truncated to 12 hex chars, extended
+-- automatically on the astronomically rare collision) and register it in
+-- both directions plus the multi-token index. Idempotent per name.
+local function get_or_make_hash(name)
+	local existing = name_to_hash[name]
+	if existing then return existing end
+	local full = core.sha1(name .. privacy_salt)
+	local len = 12
+	local hash
+	repeat
+		hash = full:sub(1, len)
+		if not hash_to_name[hash] or hash_to_name[hash] == name then break end
+		len = len + 2
+	until len > #full
+	hash_to_name[hash] = name
+	name_to_hash[name] = hash
+	local tokens = name_to_tokens(name)
+	name_tokens[name] = tokens
+	local list = first_token_index[tokens[1]] or {}
+	-- Keep the list sorted so longer token sequences match first
+	local pos = 1
+	while pos <= #list and #name_tokens[list[pos]] > #tokens do
+		pos = pos + 1
+	end
+	table.insert(list, pos, name)
+	first_token_index[tokens[1]] = list
+	return hash
+end
+
+-- Add a name to the identity table. While an AI run is in flight the add
+-- is deferred: the run's prompt was rendered without this name, and adding
+-- it mid-run would make later renders (e.g. get_history results) show a
+-- hash for a person the AI saw unmasked in the prompt. Deferring keeps the
+-- whole run consistent; the next run is fully masked.
+local function privacy_add_name(name)
+	if not name or name == "" then return end
+	if is_processing then
+		pending_name_adds[name] = true
+		return
+	end
+	get_or_make_hash(name)
+end
+
+local function flush_pending_names()
+	for name in pairs(pending_name_adds) do
+		pending_name_adds[name] = nil
+		get_or_make_hash(name)
+	end
+end
+
+core.register_on_joinplayer(function(player)
+	privacy_add_name(player:get_player_name())
+end)
+
+-- Replace known player names in text bound for the AI with [hash].
+-- Tokenizes on spaces like filter_caps; multi-token names (relay authors)
+-- match by consecutive token sequence, longest first, so the whole author
+-- name collapses into one hash. A no-op while hide_usernames is off.
+local function mask_names(text)
+	if not HIDE_USERNAMES or not text then return text end
+	local tokens, stripped = {}, {}
+	for token in text:gmatch("[^ ]+") do
+		tokens[#tokens + 1] = token
+		stripped[#stripped + 1] = strip_name_wrap(token)
+	end
+	local out = {}
+	local i = 1
+	while i <= #tokens do
+		local list = first_token_index[stripped[i]]
+		local matched
+		if list then
+			for _, name in ipairs(list) do
+				local nt = name_tokens[name]
+				local ok = true
+				for j = 1, #nt do
+					if stripped[i + j - 1] ~= nt[j] then
+						ok = false
+						break
+					end
+				end
+				if ok then
+					out[#out + 1] = "[" .. name_to_hash[name] .. "]"
+					i = i + #nt
+					matched = true
+					break
+				end
+			end
+		end
+		if not matched then
+			out[#out + 1] = tokens[i]
+			i = i + 1
+		end
+	end
+	return table.concat(out, " ")
+end
+
+-- Translate [hash] (brackets optional) back to the player name in text
+-- coming FROM the AI. Only hex runs that exactly match a known hash are
+-- replaced, so arbitrary hex text is untouched. Bracketed forms are
+-- handled first so the brackets are consumed with the hash.
+local function unmask_names(text)
+	if not HIDE_USERNAMES or not text then return text end
+	text = text:gsub("%[([%x]+)%]", function(hash)
+		return hash_to_name[hash] or ("[" .. hash .. "]")
+	end)
+	return (text:gsub("(%x+)", function(hash)
+		return hash_to_name[hash] or hash
+	end))
+end
+
+local function map_value(v, fn)
+	if type(v) == "table" then
+		local out = {}
+		for k, val in pairs(v) do
+			out[k] = map_value(val, fn)
+		end
+		return out
+	elseif type(v) == "string" then
+		return fn(v)
+	end
+	return v
+end
+
+-- Wrap a tool func so the AI's arguments are de-hashed before the call
+-- executes (logs, action reports and moderation history see real names)
+-- and the result is re-hashed before it is fed back to the AI on the next
+-- round-trip.
+local function privacy_wrap(func)
+	return function(args)
+		local result = func(map_value(args, unmask_names))
+		return map_value(result, mask_names)
+	end
+end
+
 local function abort_current_processing(reason)
 	if is_processing and active_context then
 		core.log("action", "[ai_filter_watcher] Aborting ongoing AI processing" ..
@@ -215,6 +414,7 @@ local function abort_current_processing(reason)
 	end
 	is_processing = false
 	active_call_id = active_call_id + 1
+	flush_pending_names()
 end
 
 local function load_player_history()
@@ -459,6 +659,7 @@ local function process_batch()
 	if not context then
 		core.log("error", ("[ai_filter_watcher] Failed to get AI context for batch %d: %s"):format(call_id, tostring(err)))
 		is_processing = false
+		flush_pending_names()
 		return
 	end
 
@@ -481,7 +682,7 @@ local function process_batch()
 
 	context:add_tool({
 		name = "get_history",
-		func = function(args)
+		func = privacy_wrap(function(args)
 			if type(args) == "string" then
 				local first = args:match("-?%d+")
 				if not first then return {error = "Missing 'messages' parameter"} end
@@ -496,7 +697,7 @@ local function process_batch()
 			end
 			local hist = get_last_messages(n)
 			return { history = format_history(hist), count = #hist }
-		end,
+		end),
 		description = "Get additional chat history for context (use ONLY if necessary)",
 		strict = false,
 		properties = {
@@ -511,7 +712,7 @@ local function process_batch()
 
 	context:add_tool({
 		name = "warn_player",
-		func = function(args)
+		func = privacy_wrap(function(args)
 			if type(args) == "string" then return { error = "Invalid JSON string" } end
 			if not args or not args.reason then return {error = "Missing 'reason' parameter"} end
 			local player_name = args.name
@@ -529,7 +730,7 @@ local function process_batch()
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
 			return { success = true }
-		end,
+		end),
 		description = "Warn player for rule violation",
 		strict = false,
 		properties = {
@@ -540,7 +741,7 @@ local function process_batch()
 
 	context:add_tool({
 		name = "mute_player",
-		func = function(args)
+		func = privacy_wrap(function(args)
 			if type(args) == "string" then return { error = "Invalid JSON string" } end
 			if not args or not args.reason then return {error = "Missing 'reason' parameter"} end
 			local player_name = args.name
@@ -559,7 +760,7 @@ local function process_batch()
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
 			return { success = true }
-		end,
+		end),
 		description = "Mute player for specified duration",
 		strict = false,
 		properties = {
@@ -571,7 +772,7 @@ local function process_batch()
 
 	context:add_tool({
 		name = "report_player",
-		func = function(args)
+		func = privacy_wrap(function(args)
 			if type(args) == "string" then return { error = "Invalid JSON string" } end
 			if not args or not args.reason then return {error = "Missing 'reason' parameter"} end
 			local player_name = args.name
@@ -583,7 +784,7 @@ local function process_batch()
 			local msg = string.format("**AI Watcher**: Reported player %s to moderators: %s", player_name, reason)
 			discord.send_mention(msg, "1525628775923060958")
 			return { success = true, message = ("Player %s reported to moderators"):format(player_name) }
-		end,
+		end),
 		description = "Report a player to human moderators for review",
 		strict = false,
 		properties = {
@@ -606,11 +807,12 @@ local function process_batch()
 		end
 	end
 
-	local prompt = ("Batch of %d recent messages (already sent to chat):\n%s\n%s\nReview these messages and take moderation actions if needed."):format(#batch, formatted_batch, hist_section)
+	local prompt = mask_names(("Batch of %d recent messages (already sent to chat):\n%s\n%s\nReview these messages and take moderation actions if needed."):format(#batch, formatted_batch, hist_section))
 
 	local ok, err = context:call(prompt, function(_, _, error)
 		active_context = nil
 		is_processing = false
+		flush_pending_names()
 		if error then
 			core.log("warning", ("[ai_filter_watcher] AI error for batch call %d: %s"):format(call_id, tostring(error)))
 			send_action_report("**AI Watcher**: Batch %d error: %s", call_id, tostring(error))
@@ -622,6 +824,7 @@ local function process_batch()
 		send_action_report("**AI Watcher**: Failed to call AI for batch %d: %s", call_id, tostring(err))
 		active_context = nil
 		is_processing = false
+		flush_pending_names()
 	end
 end
 
@@ -648,6 +851,7 @@ chat_lib.register_on_chat_send_all(function(msg, source)
 		author, content = source, plain
 	end
 	author = author:gsub("[<>]", ""):gsub("%s+", " ")
+	privacy_add_name(author)
 	if content and content ~= "" then
 		record_message(author, content, tag)
 	end
@@ -712,6 +916,7 @@ AI Watcher Status:
   • Frequency penalty: %s
   • Presence penalty: %s
 - Debug logging: %s
+- Username hiding: %s
 - Statistics:
   • Scans performed: %d
   • Messages processed: %d
@@ -734,6 +939,7 @@ AI Watcher Status:
 				val_or_def(FREQUENCY_PENALTY),
 				val_or_def(PRESENCE_PENALTY),
 				DEBUG_ENABLED and "Enabled" or "Disabled",
+				HIDE_USERNAMES and "Enabled" or "Disabled",
 				watcher_stats.scans_performed,
 				watcher_stats.messages_processed,
 				watcher_stats.actions_taken,
@@ -895,6 +1101,32 @@ AI Watcher Status:
 			end
 			DEBUG_ENABLED = new_val
 			return true, "Debug " .. (new_val and "enabled" or "disabled")
+
+		elseif cmd == "hide_usernames" then
+			local v = param:match("%s+(%S+)")
+			if not v then
+				return true, "Username hiding is " .. (HIDE_USERNAMES and "enabled" or "disabled")
+			end
+			local new_val
+			if v == "yes" or v == "on" then
+				new_val = true
+			elseif v == "no" or v == "off" then
+				new_val = false
+			else
+				return false, "Usage: /ai_watcher hide_usernames [yes|no]"
+			end
+			local ctx = modstorage:get_context()
+			if ctx then
+				local err = ctx:set_string("hide_usernames", tostring(new_val))
+				err = err or ctx:finalize()
+				if err then
+					core.log("error", "[ai_filter_watcher] Failed to write hide_usernames setting to shareddb: " .. tostring(err))
+				end
+			else
+				core.log("warning", "[ai_filter_watcher] shareddb unavailable, hide_usernames change not persisted")
+			end
+			HIDE_USERNAMES = new_val
+			return true, "Username hiding " .. (new_val and "enabled" or "disabled")
 
 		elseif cmd == "history_time" then
 			local v = param:match("%s+(%S+)")
@@ -1060,8 +1292,8 @@ core.after(0, function()
 	load_system_prompt()
 	load_player_history()
 	cleanup_player_history()
-	core.log("action", ("[ai_filter_watcher] Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s)"):format(
-		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE, DEBUG_ENABLED and "enabled" or "disabled"))
-	send_action_report("**AI Watcher**: Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s)",
-		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE, DEBUG_ENABLED and "enabled" or "disabled")
+	core.log("action", ("[ai_filter_watcher] Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s, hide_usernames: %s)"):format(
+		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE, DEBUG_ENABLED and "enabled" or "disabled", HIDE_USERNAMES and "enabled" or "disabled"))
+	send_action_report("**AI Watcher**: Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s, hide_usernames: %s)",
+		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE, DEBUG_ENABLED and "enabled" or "disabled", HIDE_USERNAMES and "enabled" or "disabled")
 end)

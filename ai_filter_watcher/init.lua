@@ -223,7 +223,7 @@ end
 --
 -- PcgRandom:next() returns a signed 32-bit int, so use the unsigned range.
 
-local privacy_rng = core.PcgRandom(os.time())
+local privacy_rng = PcgRandom(os.time())
 local privacy_salt = string.format("%08x%08x%08x",
 	privacy_rng:next(0, 4294967295),
 	privacy_rng:next(0, 4294967295),

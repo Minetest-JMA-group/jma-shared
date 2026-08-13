@@ -70,10 +70,6 @@ local function make_env(globals, shareddb_values)
 	core.serialize = function(t) return t end
 	core.deserialize = function(s) return s end
 	core.strip_colors = function(s) return s end
-	core.PcgRandom = function()
-		local n = 0
-		return { next = function() n = n + 1 return n end }
-	end
 	core.sha1 = stub_sha1
 	core.register_on_joinplayer = function(fn) core.join_cb = fn end
 
@@ -153,6 +149,12 @@ local function make_env(globals, shareddb_values)
 				table.insert(env.discord_mentions, msg)
 			end,
 		},
+		-- Global (not core.*) in the engine, so init.lua's PcgRandom(os.time())
+		-- call resolves here rather than via __index = _G.
+		PcgRandom = function()
+			local n = 0
+			return { next = function() n = n + 1 return n end }
+		end,
 		utf8_simple = {
 			lower = function(s) return s:lower() end,
 			sub = function(s, i, j) return string.sub(s, i, j) end,

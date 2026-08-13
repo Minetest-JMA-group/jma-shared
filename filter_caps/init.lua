@@ -68,12 +68,9 @@ local utf8_chars = utf8_simple.chars
 local utf8_sub = utf8_simple.sub
 local utf8_codepoint = utf8_simple.codepoint
 
--- Allowed player name characters, mirrored from the engine's
--- PLAYERNAME_ALLOWED_CHARS define
-local player_name_chars = {}
-for _, char in utf8_chars("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_АБВГДЂЕЖЗИЈКЛЉМНЊОПРСТЋУФХЦЧЏШабвгдђежзијклљмнњопрстћуфхцчџџшЁёЙйЩщЪъЫыЬьЭэЮюЯя") do
-	player_name_chars[utf8_codepoint(char)] = true
-end
+-- Allowed player name characters, shared from utf8_simple (engine's
+-- PLAYERNAME_ALLOWED_CHARS define)
+local player_name_chars = utf8_simple.player_name_chars
 
 local function clamp_uppercase(word)
 	local uppercase_count = 0

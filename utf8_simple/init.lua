@@ -156,19 +156,33 @@ local function walk(s, handler)
 	local visual = 0
 
 	while byte_index <= slen do
-		local width, lead, codepoint = next_char(s, byte_index)
+		local b1 = byte(s, byte_index)
 
-		if not width then
-			break
-		end
+		if b1 < 0x80 then
+			-- ASCII fast path: skip the next_char call entirely
+			visual = visual + 1
+			local stop = handler(visual, byte_index, 1, b1, b1)
 
-		visual = visual + 1
-		local stop = handler(visual, byte_index, width, lead, codepoint)
+			byte_index = byte_index + 1
 
-		byte_index = byte_index + width
+			if stop then
+				break
+			end
+		else
+			local width, lead, codepoint = next_char(s, byte_index)
 
-		if stop then
-			break
+			if not width then
+				break
+			end
+
+			visual = visual + 1
+			local stop = handler(visual, byte_index, width, lead, codepoint)
+
+			byte_index = byte_index + width
+
+			if stop then
+				break
+			end
 		end
 	end
 end
@@ -192,7 +206,59 @@ utf8_simple.map =
 -- generator for the above -- to iterate over all utf8 chars
 utf8_simple.chars =
 	function (s, no_subs)
-		return coroutine.wrap(function () return utf8_simple.map(s, coroutine.yield, no_subs) end)
+		local byte_index = 1
+		local slen = #s
+		local visual = 0
+
+		return function ()
+			if byte_index > slen then
+				return nil
+			end
+
+			local width, lead, codepoint = next_char(s, byte_index)
+
+			if not width then
+				return nil
+			end
+
+			visual = visual + 1
+			byte_index = byte_index + width
+
+			local start = byte_index - width
+			if no_subs then
+				return visual, width, start
+			end
+			return visual, sub(s, start, byte_index - 1), start
+		end
+	end
+
+-- iterate over utf8 code points (like Lua 5.3's utf8.codes)
+utf8_simple.codes =
+	function (s)
+		local byte_index = 1
+		local slen = #s
+
+		return function ()
+			if byte_index > slen then
+				return nil
+			end
+
+			local b1 = byte(s, byte_index)
+
+			if b1 < 0x80 then
+				byte_index = byte_index + 1
+				return b1
+			end
+
+			local width, lead, codepoint = next_char(s, byte_index)
+
+			if not width then
+				return nil
+			end
+
+			byte_index = byte_index + width
+			return codepoint
+		end
 	end
 
 -- returns the number of characters in a UTF-8 string
@@ -291,31 +357,34 @@ utf8_simple.sub =
 		end
 
 local function apply_case_map(s, mapping)
-	if type(s) ~= 'string' then
+	if type(s) ~= 'string' or s == '' then
 		return ''
 	end
 
-	if s == '' then
-		return ''
-	end
-
-	local out = {}
-	local changed
+	local out
+	local run_start = 1 -- start of the current unchanged run
 
 	walk(s, function (_, byte_index, width, _, codepoint)
-		local chunk = sub(s, byte_index, byte_index + width - 1)
 		local replacement = mapping[codepoint]
 
-		if replacement and replacement ~= chunk then
-			changed = true
+		if replacement then
+			if not out then
+				out = {}
+			end
+			if run_start < byte_index then
+				out[#out + 1] = sub(s, run_start, byte_index - 1)
+			end
 			out[#out + 1] = replacement
-		else
-			out[#out + 1] = chunk
+			run_start = byte_index + width
 		end
 	end)
 
-	if not changed then
+	if not out then
 		return s
+	end
+
+	if run_start <= #s then
+		out[#out + 1] = sub(s, run_start)
 	end
 
 	return concat(out)
@@ -376,5 +445,17 @@ utf8_simple.codepoint =
 
 		return value
 	end
+
+-- Allowed player name characters, mirrored from the engine's
+-- PLAYERNAME_ALLOWED_CHARS define. Exposed as a shared constant so other
+-- mods (filter_caps, ai_filter_watcher) use one definition.
+utf8_simple.PLAYERNAME_ALLOWED_CHARS =
+	'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_АБВГДЂЕЖЗИЈКЛЉМНЊОПРСТЋУФХЦЧЏШабвгдђежзијклљмнњопрстћуфхцчџџшЁёЙйЩщЪъЫыЬьЭэЮюЯя'
+
+-- Codepoint set built from PLAYERNAME_ALLOWED_CHARS, for O(1) membership
+utf8_simple.player_name_chars = {}
+walk(utf8_simple.PLAYERNAME_ALLOWED_CHARS, function(_, _, _, _, codepoint)
+	utf8_simple.player_name_chars[codepoint] = true
+end)
 
 return utf8_simple

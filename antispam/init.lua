@@ -41,8 +41,7 @@ core.register_on_leaveplayer(function(player)
 end)
 
 local utf8_lower = utf8_simple.lower
-local utf8_chars = utf8_simple.chars
-local utf8_codepoint = utf8_simple.codepoint
+local utf8_codes = utf8_simple.codes
 
 local function is_latin_or_cyrillic(cp)
 	return (cp >= 0x41 and cp <= 0x5A) or (cp >= 0x61 and cp <= 0x7A)
@@ -53,8 +52,7 @@ end
 -- the message; returns nil when there are too few letters to judge.
 local function message_entropy(message)
 	local counts, total = {}, 0
-	for _, char in utf8_chars(utf8_lower(message)) do
-		local cp = utf8_codepoint(char)
+	for cp in utf8_codes(utf8_lower(message)) do
 		if is_latin_or_cyrillic(cp) then
 			counts[cp] = (counts[cp] or 0) + 1
 			total = total + 1

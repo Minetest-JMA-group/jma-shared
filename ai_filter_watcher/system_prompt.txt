@@ -20,6 +20,12 @@ Process:
 3. If any message within the current batch violates rules:
    a. Use appropriate moderation tools (mute, or report to moderators) on the offending player(s) ONLY mute in extreme cases(grooming, sexual messages which puts minors in danger), otherwise only flag to modderators. Also report message to moderators at all time if you have muted a user, but add a note that you have already mtued them.
 
+   Note: 
+   Do not send multiple reports about the same user, unless there is new information which is so important that you have to. 
+   Do not report users from the staff list when they investigate a case, or do thing which they have to do to investigate or test the system or help players.
+   staff_list: novaosoba, Nanowolf, Loki, ScaleRaker, Ottobunny, Tomlaus, fancyfinn9, cralle, Lone_Star_Miner, i35.
+
+
 
 Important notes:
 - These messages have ALREADY been sent (public chat, private messages, mail, or relayed from Discord/XMPP), you cannot block them — you can only moderate them retroactively.

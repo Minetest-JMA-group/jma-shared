@@ -24,13 +24,17 @@ ranks.register("youtube", {
 	prefix = "[YouTuber]",
 	colour = {a = 255, r = 200, g = 30, b = 30},
 })
+ranks.register("vip", {
+	prefix = "[VIP]",
+	colour = {a = 255, r = 255, g = 255, b = 0},
+})
 
-ranks.register("pro", {
-	prefix = "[PRO]",
+ranks.register("staff", {
+	prefix = "[Staff]",
 	colour = {a = 255, r = 0, g = 255, b = 0},
 })
 
-ranks.register("speedrunner", {
-	prefix = "[SpeedRunner]",
+ranks.register("t-staff", {
+	prefix = "[Staff-trainee]",
 	colour = {a = 255, r = 0, g = 255, b = 255},
 })

@@ -57,7 +57,9 @@ load_data("mode")
 local violation_types = {
 	blacklisted = {
 		name = "something.",
-		chat_msg = "Your message contained a blocked word, please stay respectful and nice in the chat.",
+		chat_msg = "Your message contained a \n
+                    blocked word, please be \n
+                    respectful in the chat.",
 		kick_msg = "Kicked by chat filter for repeatedly trying to send messages containing blocked words.",
 		log_msg = "VIOLATION (inappropriate content)",
 		formspec_title = "Message could not be send.",

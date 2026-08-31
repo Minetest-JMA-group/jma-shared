@@ -56,11 +56,11 @@ load_data("mode")
 -- Define violation types and their messages
 local violation_types = {
 	blacklisted = {
-		name = "inappropriate content",
-		chat_msg = "Watch your language!",
-		kick_msg = "Please mind your language!",
+		name = "something.",
+		chat_msg = "Your message contained a blocked word, please stay respectful and nice in the chat.",
+		kick_msg = "Kicked by chat filter for repeatedly trying to send messages containing blocked words.",
 		log_msg = "VIOLATION (inappropriate content)",
-		formspec_title = "Please watch your language!",
+		formspec_title = "Message could not be send.",
 		formspec_image = "filter_warning.png",
 	},
 }

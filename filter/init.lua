@@ -108,6 +108,8 @@ end
 function filter.mute(name, duration, violation_type, message)
 	local v_type = violation_types[violation_type] or violation_types.blacklisted
 
+	core.chat_send_all(name .. " has been temporarily muted for " .. v_type.name .. ".")
+	core.chat_send_player(name, v_type.chat_msg)
 
 	local reason = string.format('%s"%s" using blacklist regex: "%s"', filter.phrase, message, filter.get_lastreg())
 	local ok, err = simplemod.mute_ip(name, "filter", reason, duration * 60)

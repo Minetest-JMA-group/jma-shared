@@ -18,6 +18,10 @@ local function bump_rules_version()
 	return new_version
 end
 
+function jma_greeter.get_rules()
+	return rules_text
+end
+
 core.register_on_mods_loaded(function()
 	local content = jma_greeter.load_file(filename)
 	if content then

@@ -591,11 +591,11 @@ end
 
 local function format_history(msgs)
 	local lines = {}
-	for _, m in ipairs(msgs) do
+	for msg_index, m in ipairs(msgs) do
 		if m.tag then
-			table.insert(lines, ("[%s] <%s> [%s]: %s"):format(os.date("%H:%M", m.time), m.name, m.tag, m.message))
+			table.insert(lines, ("%s. ([%s] <%s> [%s]: %s)"):format(msg_index, os.date("%H:%M", m.time), m.name, m.tag, m.message))
 		else
-			table.insert(lines, ("[%s] <%s>: %s"):format(os.date("%H:%M", m.time), m.name, m.message))
+			table.insert(lines, ("%s. ([%s] <%s>: %s)"):format(msg_index, os.date("%H:%M", m.time), m.name, m.message))
 		end
 	end
 	return table.concat(lines, "\n")

@@ -43,6 +43,7 @@ local modstorage = shareddb.get_mod_storage()
 -- Message tokens for start and end of each message.
 local msg_token_start = ""
 local msg_token_end = ""
+-- length of message token
 local msg_token_length = 3
 
 --Simple code generator for the message tokens.

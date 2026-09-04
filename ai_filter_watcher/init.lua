@@ -39,6 +39,20 @@ ai_filter_watcher = {
 
 local modstorage = shareddb.get_mod_storage()
 
+-- Message token
+-- Message tokens for start and end of each message.
+local msg_token_start = ""
+local msg_token_end = ""
+local msg_token_length = 3
+
+--Simple code generator for the message tokens.
+local function generate_msg_token()
+    for i = 1, msg_token_length do
+        msg_token_start = msg_token_start .. tostring(math.random(0,9))
+        msg_token_end = msg_token_end .. tostring(math.random(0,9))
+    end
+end
+
 -- Parse "<count>/<unit>" (e.g. "10/1m", "5/60", "2/1h30m") into
 -- { count, seconds, raw }. Returns nil on invalid input. Values are
 -- validated here, at the chat command, so the database only ever
@@ -593,9 +607,9 @@ local function format_history(msgs)
 	local lines = {}
 	for msg_index, m in ipairs(msgs) do
 		if m.tag then
-			table.insert(lines, ("%s. ([%s] <%s> [%s]: %s)"):format(msg_index, os.date("%H:%M", m.time), m.name, m.tag, m.message))
+			table.insert(lines, ("%s. {%s) [%s] <%s> [%s]: %s (%s}"):format(msg_index, msg_token_start, os.date("%H:%M", m.time), m.name, m.tag, m.message, msg_token_end))
 		else
-			table.insert(lines, ("%s. ([%s] <%s>: %s)"):format(msg_index, os.date("%H:%M", m.time), m.name, m.message))
+			table.insert(lines, ("%s. {%s) [%s] <%s>: %s (%s}"):format(msg_index, msg_token_start, os.date("%H:%M", m.time), m.name, m.message, msg_token_end))
 		end
 	end
 	return table.concat(lines, "\n")
@@ -719,7 +733,8 @@ local function process_batch()
 
 	core.log("action", ("[ai_filter_watcher] Processing batch of %d messages (call_id: %d)"):format(#batch, call_id))
 
-	local formatted_batch = format_history(batch)
+	generate_msg_token()
+    local formatted_batch = format_history(batch)
 	local context, err = cloudai.get_context()
 	if not context then
 		core.log("error", ("[ai_filter_watcher] Failed to get AI context for batch %d: %s"):format(call_id, tostring(err)))

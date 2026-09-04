@@ -22,11 +22,11 @@ function jma_greeter.get_base_formspec(def)
 	local size = def.size
 	local title = def.title_override or string.format("%s — %s", game_title, def.title)
 	return "formspec_version[7]"
-	.. string.format("size[%d,%d]", size.x, size.y)
+	.. string.format("size[%f,%f]", size.x, size.y)
 	.. "bgcolor[#00000000;false]"
-	.. string.format("box[0,0;%d,0.7;%s]", size.x, def.bar_color or "#2d42fc")
+	.. string.format("box[0,0;%f,0.7;%s]", size.x, def.bar_color or "#2d42fc")
 	.. string.format(
-		"hypertext[0,0;%d,0.7;title;<global align=center valign=middle><b>%s</b>]",
+		"hypertext[0,0;%f,0.7;title;<global align=center valign=middle><b>%s</b>]",
 		size.x,
 		core.formspec_escape(title)
 	)

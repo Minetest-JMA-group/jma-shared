@@ -893,7 +893,7 @@ local function process_batch()
 		end
 	end
 
-	local prompt = mask_names(("Batch of %d recent messages (already sent to chat):\n%s\n%s\nReview these messages and take moderation actions if needed."):format(#batch, formatted_batch, hist_section))
+	local prompt = mask_names(("Start message token: %s\nEnd message token:%s\nBatch of %d recent messages (already sent to chat):\n%s\n%s\nReview these messages and take moderation actions if needed."):format(msg_token_start, msg_token_end, #batch, formatted_batch, hist_section))
 
 	local ok, err = context:call(prompt, function(_, _, error)
 		active_context = nil

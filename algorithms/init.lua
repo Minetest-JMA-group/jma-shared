@@ -543,6 +543,162 @@ algorithms.parse_time = function(t)
 	return secs
 end
 
+-- Parse complex time into an object
+-- Syntax: Days,Hours;Days,Hours
+-- Example: weekdays,19:00-20:00; sat-sun,10:00-12:00
+-- Example: montue, 16:20 - 18:15; weekend, 10:00-13:00
+-- Times are in the UTC timezone
+local day_table = { [1] = "mon", [2] = "tue", [3] = "wed", [4] = "thu", [5] = "fri", [6] = "sat", [7] = "sun" }
+local presentable_day_table = {
+	[1] = "Monday", [2] = "Tuesday", [3] = "Wednesday", [4] = "Thursday", [5] = "Friday", [6] = "Saturday", [7] = "Sunday"
+}
+local function parse_hour(hour)
+	-- Break down time
+	local iter = hour:gmatch("%s*([^:]+)%s*")
+	local hh = iter()
+	local mm = iter()
+	if not mm then
+		return nil, "Hours must be specified as HH:MM after days, like weekdays,19:00-20:00"
+	end
+	hh = tonumber(hh)
+	mm = tonumber(mm)
+	if not hh or not mm then
+		return nil, "Hours must be specified as HH:MM after days, like weekdays,19:00-20:00"
+	end
+	if hh < 0 or hh > 23 or mm < 0 or mm > 59 then
+		return nil, "Invalid hour or minute (must be 0-23 and 0-59)"
+	end
+	return (hh*60) + mm
+end
+algorithms.parse_complex_time = function(t)
+	if type(t) ~= "string" then
+		return nil, "Wrong argument type"
+	end
+	-- [day] = { [1] = {start = startmin, ending = endmin}, [2] = { ... } }
+	local times_per_day = {}
+	times_per_day.add_time = function(self, wday, startmin, endmin)
+		if type(self) ~= "table" or type(wday) ~= "number" or type(startmin) ~= "number"
+		or type(endmin) ~= "number" then
+			return "Invalid arguments"
+		end
+		if not self[wday] then
+			self[wday] = {}
+			table.insert(self[wday], { start = startmin, ending = endmin })
+			return
+		end
+		for _, interval in ipairs(self[wday]) do
+			if startmin <= interval.ending and interval.start <= endmin then
+				return "Conflict; two parts of the string specify overlapping time for "..presentable_day_table[wday]
+			end
+		end
+		table.insert(self[wday], { start = startmin, ending = endmin })
+	end
+	t = t:lower()
+	-- Split by semicolon and trim whitespace
+	for spec in t:gmatch("%s*([^;]+)%s*") do
+		local iter = spec:gmatch("%s*([^,]+)%s*")
+		local days = iter()
+		local hours = iter()
+		if not days or not hours then
+			return nil, "Invalid time string, specify it in a format like weekdays,19:00-20:00"
+		end
+
+		-- Parse hours
+		local iter = hours:gmatch("%s*([^-]+)%s*")
+		local h1 = iter()
+		local h2 = iter()
+		if not h2 then
+			return nil, "Hours must be specified in a range after days, like weekdays,19:00-20:00"
+		end
+		local start, err = parse_hour(h1)
+		if err then return nil, err end
+		local ending, err = parse_hour(h2)
+		if err then return nil, err end
+		if start > ending then
+			return nil, "Invalid hour range, specify lower hour first"
+		end
+
+		-- Parse days
+		local iter = days:gmatch("%s*([^-]+)%s*")
+		local d1 = iter()
+		local d2 = iter()
+		if not d2 then
+			if d1:find("weekday", 1, true) then
+				for i = 1,5 do
+					local err = times_per_day:add_time(i, start, ending)
+					if err then return nil, err end
+				end
+			elseif d1:find("weekend", 1, true) then
+				for i = 6,7 do
+					local err = times_per_day:add_time(i, start, ending)
+					if err then return nil, err end
+				end
+			elseif d1:find("everyday", 1, true) then
+				for i = 1,7 do
+					local err = times_per_day:add_time(i, start, ending)
+					if err then return nil, err end
+				end
+			else
+				local found = false
+				for i = 1,7 do
+					if d1:find(day_table[i], 1, true) then
+						found = true
+						local err = times_per_day:add_time(i, start, ending)
+						if err then return nil, err end
+					end
+				end
+				if not found then
+					return nil, "Unable to parse day specifier: "..days
+				end
+			end
+		else
+			local dstart, dend
+			for i = 1,7 do
+				if d1:find(day_table[i], 1, true) then
+					dstart = i
+				end
+				if d2:find(day_table[i], 1, true) then
+					dend = i
+				end
+			end
+			if not dstart or not dend then
+				return nil, "Unable to parse day specifier: "..days
+			end
+			if dstart > dend then
+				return nil, "Invalid day range: start day must come before end day"
+			end
+			for i = dstart,dend do
+				local err = times_per_day:add_time(i, start, ending)
+				if err then return nil, err end
+			end
+		end
+	end
+	-- Times are parsed, add function to the object
+	times_per_day.contains = function(self, x)
+		if type(self) ~= "table" or (type(x) ~= "number" and type(x) ~= "nil") then
+			return false
+		end
+		if not x then
+			x = os.date("!*t")
+		else
+			x = os.date("!*t", x)
+		end
+		-- Convert from Sunday-first to a Monday-first week
+		local wday = ((x.wday - 2) % 7) + 1
+		if not self[wday] then
+			return false
+		end
+		local target = (x.hour * 60) + x.min
+		for _, interval in ipairs(self[wday]) do
+			if target <= interval.ending and target >= interval.start then
+				return true, interval
+			end
+		end
+		return false
+	end
+	return times_per_day
+end
+
 local function checkPlural(timeNum, timeStr)
 	if timeNum == 1 then
 		return timeStr

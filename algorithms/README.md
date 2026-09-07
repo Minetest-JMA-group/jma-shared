@@ -29,6 +29,9 @@ _Functions marked with (C++) depend on the C++ module of this mod. Functions mar
 - number `algorithms.XATTR_CREATE` - constant used with setxattr(2)
 - number `algorithms.XATTR_REPLACE` - constant used with setxattr(2)
 - table `algorithms.errno` - _Exists only_ on Linux! A table mapping error names to error codes. E.g. algorithms.errno.EPERM = 1
+- object `algorithms.parse_complex_time(t: string)` - Parse a schedule string (e.g. "weekdays,09:00-17:00; sat,10:00-14:00") into a schedule object. Supports day ranges, `weekdays`, `weekend` and `everyday`. Times are always in UTC.
+    - boolean, [interval] `schedule:contains([timestamp: number])` - Return true if the given Unix timestamp (or current UTC time if omitted) falls within any interval on that day. If it does, return that interval as well, in the form of a { start = startmin, ending = endmin } table
+    - nil or string `schedule:add_time(wday: number, startmin: number, endmin: number)` - Add a new interval to the schedule. Returns `nil` on success, or an error string on failure (e.g. invalid args or overlap).
 
 ### Insecure Environment API
 

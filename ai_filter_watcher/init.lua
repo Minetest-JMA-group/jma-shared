@@ -39,21 +39,6 @@ ai_filter_watcher = {
 
 local modstorage = shareddb.get_mod_storage()
 
--- Message token:
--- Message tokens for start and end of each message.
-local msg_token_start = ""
-local msg_token_end = ""
--- length of message token
-local msg_token_length = 3
-
---Simple code generator for the message tokens.
-local function generate_msg_token()
-    for i = 1, msg_token_length do
-        msg_token_start = msg_token_start .. tostring(math.random(0,9))
-        msg_token_end = msg_token_end .. tostring(math.random(0,9))
-    end
-end
-
 -- Parse "<count>/<unit>" (e.g. "10/1m", "5/60", "2/1h30m") into
 -- { count, seconds, raw }. Returns nil on invalid input. Values are
 -- validated here, at the chat command, so the database only ever
@@ -192,8 +177,8 @@ local pending_name_adds = {}	-- names waiting for the active AI run to finish
 -- stripping, but without a wrapper-count cap: a cap would miss names
 -- wrapped by more than 2 characters, and an uncapped strip cannot create
 -- false matches because the result is looked up exactly in the table. The
--- same function is used on registered names and on message tokens, so
--- matching stays symmetric.
+-- same function is used on registered names and on message words during
+-- masking, so matching stays symmetric.
 local function strip_name_wrap(word)
 	while true do
 		local first = utf8_simple.sub(word, 1, 1)
@@ -217,7 +202,7 @@ end
 -- come from relay authors (Discord display names).
 local function name_to_tokens(name)
 	local tokens = {}
-	for token in name:gmatch("[^ ]+") do
+	for token in name:gmatch("[^%s]+") do
 		tokens[#tokens + 1] = strip_name_wrap(token)
 	end
 	return tokens
@@ -424,20 +409,33 @@ local function load_system_prompt()
 	end
 end
 
--- Replace known player names in text bound for the AI with [hash].
--- Tokenizes on spaces like filter_caps; multi-token names (relay authors)
--- match by consecutive token sequence, longest first, so the whole author
--- name collapses into one hash. A no-op while hide_usernames is off.
-local function mask_names(text)
+-- Replace known player names in text bound for the AI with [hash], preserving
+-- all original whitespace byte-for-byte: only name->hash swaps happen, so
+-- masking never collapses runs of spaces or alters newline structure in
+-- message content. Words are any run of non-whitespace, so a name sitting on
+-- its own line after a newline is still found. Multi-token names (relay
+-- authors) match by consecutive token sequence, longest first, so the whole
+-- author name collapses into one hash; the whitespace *inside* the name is
+-- consumed with it. A no-op while hide_usernames is off.
+local function mask_text(text)
 	if not HIDE_USERNAMES or not text then return text end
-	local tokens, stripped = {}, {}
-	for token in text:gmatch("[^ ]+") do
-		tokens[#tokens + 1] = token
-		stripped[#stripped + 1] = strip_name_wrap(token)
+	-- Split into (leading whitespace, word) pairs; the gmatch misses any
+	-- trailing whitespace, so account for it by tracking consumed length.
+	local seps, words = {}, {}
+	local consumed = 0
+	for sep, word in text:gmatch("(%s*)(%S+)") do
+		seps[#seps + 1] = sep
+		words[#words + 1] = word
+		consumed = consumed + #sep + #word
+	end
+	local trailing = text:sub(consumed + 1)
+	local stripped = {}
+	for i = 1, #words do
+		stripped[i] = strip_name_wrap(words[i])
 	end
 	local out = {}
 	local i = 1
-	while i <= #tokens do
+	while i <= #words do
 		local list = first_token_index[stripped[i]]
 		local matched
 		if list then
@@ -445,12 +443,14 @@ local function mask_names(text)
 				local nt = name_tokens[name]
 				local ok = true
 				for j = 1, #nt do
-					if stripped[i + j - 1] ~= nt[j] then
+					local w = stripped[i + j - 1]
+					if w ~= nt[j] then
 						ok = false
 						break
 					end
 				end
 				if ok then
+					out[#out + 1] = seps[i]
 					out[#out + 1] = "[" .. name_to_hash[name] .. "]"
 					i = i + #nt
 					matched = true
@@ -459,11 +459,12 @@ local function mask_names(text)
 			end
 		end
 		if not matched then
-			out[#out + 1] = tokens[i]
+			out[#out + 1] = seps[i]
+			out[#out + 1] = words[i]
 			i = i + 1
 		end
 	end
-	return table.concat(out, " ")
+	return table.concat(out) .. trailing
 end
 
 -- Translate [hash] (brackets optional) back to the player name in text
@@ -500,7 +501,7 @@ end
 local function privacy_wrap(func)
 	return function(args)
 		local result = func(map_value(args, unmask_names))
-		return map_value(result, mask_names)
+		return map_value(result, mask_text)
 	end
 end
 
@@ -542,10 +543,10 @@ local function cleanup_player_history()
 	end
 end
 
-local function add_to_player_history(name, typ, dur, reason)
+local function add_to_player_history(name, typ, dur, summary)
 	if not player_history_loaded then load_player_history() end
 	player_history[name] = player_history[name] or {}
-	table.insert(player_history[name], { time = os.time(), type = typ, duration = dur, reason = reason })
+	table.insert(player_history[name], { time = os.time(), type = typ, duration = dur, summary = summary })
 	if #player_history[name] > 50 then
 		table.remove(player_history[name], 1)
 	end
@@ -565,65 +566,139 @@ local function get_player_moderation_history(name)
 	return recent
 end
 
+-- Human-readable (operator-facing) rendering of one player's moderation
+-- history; the AI-facing variant is built as JSON in process_batch. Entries
+-- carry a short summary; legacy entries stored before summaries existed
+-- fall back to their full reason. Durations are stored in minutes and shown
+-- with the engine's smart time phrasing.
 local function format_player_history(hist)
 	if #hist == 0 then
 		return "No recent moderation history."
 	end
 	local lines = {}
 	for _, e in ipairs(hist) do
-		local ago = os.time() - e.time
-		local time_str = algorithms.time_to_string(ago) .. " ago"
+		local when = algorithms.time_to_string(os.time() - e.time) .. " ago"
+		local detail = e.summary or e.reason
 		if e.type == "warn" then
-			table.insert(lines, ("- Warned %s for: %s"):format(time_str, e.reason))
+			table.insert(lines, ("- Warned %s for: %s"):format(when, detail))
 		elseif e.type == "mute" then
-			table.insert(lines, ("- Muted for %d minutes %s for: %s"):format(e.duration or 0, time_str, e.reason))
+			table.insert(lines, ("- Muted for %s %s for: %s"):format(algorithms.time_to_string((e.duration or 0) * 60), when, detail))
+		elseif e.type == "report" then
+			table.insert(lines, ("- Reported %s for: %s"):format(when, detail))
 		end
 	end
 	return "Recent moderation history:\n" .. table.concat(lines, "\n")
 end
 
 -- Chat history is a plain list, newest at the end; the oldest entry is
--- trimmed once it outgrows HISTORY_SIZE. get_history reads at most 50
--- entries, and even at HISTORY_SIZE = 20000 the per-message trim is a
--- memmove of tens of microseconds — a ring buffer would only add
--- modulo/wrap complexity for no measurable gain.
-local function add_to_history(name, msg, tag)
-	if WATCHER_MODE == ai_filter_watcher.MODES.DISABLED then return end
-	chat_history[#chat_history + 1] = { name = name, message = msg, time = os.time(), tag = tag }
+-- trimmed once it outgrows HISTORY_SIZE. Even at HISTORY_SIZE = 20000 the
+-- per-message trim is a memmove of tens of microseconds — a ring buffer
+-- would only add modulo/wrap complexity for no measurable gain.
+local next_msg_id = 1
+
+-- Every captured message gets a monotonically increasing id, unique for the
+-- server run (chat_history is in-memory and wiped on restart, so ids can
+-- be too). Ids are the machine-readable frame for everything the AI sees:
+-- the batch is reviewable, history older than the batch is context, and
+-- get_history pages over ids instead of re-rendered numbering.
+local function make_message_record(name, message, tag)
+	local rec = { id = next_msg_id, name = name, message = message, time = os.time(), tag = tag }
+	next_msg_id = next_msg_id + 1
+	return rec
+end
+
+local function add_to_history(rec)
+	chat_history[#chat_history + 1] = rec
 	if #chat_history > HISTORY_SIZE then
 		table.remove(chat_history, 1)
 	end
 end
 
-local function get_last_messages(n)
-	local first = math.max(1, #chat_history - math.floor(n) + 1)
+-- Id of the oldest entry still in chat_history (nil when empty). Anything
+-- older than this was trimmed and is unreachable.
+local function oldest_available_id()
+	if #chat_history == 0 then return nil end
+	return chat_history[1].id
+end
+
+-- Newest-first slice of chat_history with ids in [start_id, end_id], at most
+-- limit entries. chat_history is oldest-first, so walk it backwards.
+local function get_history_slice(start_id, end_id, limit)
 	local result = {}
-	for i = first, #chat_history do
-		result[#result + 1] = chat_history[i]
+	if #chat_history == 0 then return result end
+	for i = #chat_history, 1, -1 do
+		local rec = chat_history[i]
+		if rec.id <= end_id then
+			if rec.id >= start_id then
+				result[#result + 1] = rec
+				if #result >= limit then break end
+			else
+				break -- ids only get older from here
+			end
+		end
 	end
 	return result
 end
 
-local function format_history(msgs)
-	local lines = {}
-	for msg_index, m in ipairs(msgs) do
-		if m.tag then
-			table.insert(lines, ("%s. {%s) [%s] <%s> [%s]: %s (%s}"):format(msg_index, msg_token_start, os.date("%H:%M", m.time), m.name, m.tag, m.message, msg_token_end))
-		else
-			table.insert(lines, ("%s. {%s) [%s] <%s>: %s (%s}"):format(msg_index, msg_token_start, os.date("%H:%M", m.time), m.name, m.message, msg_token_end))
-		end
+-- Collapse a moderation detail to one capped line. The AI's short summary
+-- argument is what moderation history stores for future batches; when the
+-- model omits it, fall back to a truncated copy of the full reason. Full
+-- reasons still go to their human-facing sinks (Discord report, warn
+-- formspec, mute) untouched.
+local SUMMARY_MAX_LEN = 200
+local function make_summary(s, fallback)
+	local text = s
+	if type(text) ~= "string" or text == "" then
+		text = fallback
 	end
-	return table.concat(lines, "\n")
+	text = tostring(text or "")
+	text = text:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+	if #text > SUMMARY_MAX_LEN then
+		text = text:sub(1, SUMMARY_MAX_LEN - 1) .. "…"
+	end
+	return text
+end
+
+-- One message record in the JSON the AI sees. Every string field is masked
+-- (sender and tag recipients are player names; message text may mention
+-- names), numbers pass through. Called before core.write_json, so all
+-- escaping happens exactly once, in the serializer.
+local function render_message(rec)
+	return {
+		id = rec.id,
+		time = os.date("%m-%d %H:%M:%S", rec.time),
+		sender = mask_text(rec.name),
+		tag = rec.tag and mask_text(rec.tag) or nil,
+		text = mask_text(rec.message),
+	}
+end
+
+-- C0 control characters other than \n \r \t can make core.write_json fail
+-- (or serialize into something the provider rejects); replace them with
+-- spaces. Recursive, in place — only ever called on freshly built payload
+-- tables. Never reached in normal operation.
+local function sanitize_controls(t)
+	if type(t) == "table" then
+		for k, v in pairs(t) do
+			t[k] = sanitize_controls(v)
+		end
+		return t
+	elseif type(t) == "string" then
+		return (t:gsub("[%z\1-\8\11\12\14-\31]", " "))
+	end
+	return t
 end
 
 -- Single entry point for all captured communication: public chat, chat
--- command content, inbound relay messages and other mods' API calls.
+-- command content, inbound relay messages and other mods' API calls. The
+-- same record object goes to chat_history and the batch buffer, so ids are
+-- consistent between the two views. Captures nothing while disabled.
 local function record_message(name, message, tag)
 	if not message then return end
-	add_to_history(name, message, tag)
-	if WATCHER_MODE ~= ai_filter_watcher.MODES.DISABLED then
-		table.insert(message_buffer, { name = name, message = message, time = os.time(), tag = tag })
-	end
+	if WATCHER_MODE == ai_filter_watcher.MODES.DISABLED then return end
+	local rec = make_message_record(name, message, tag)
+	add_to_history(rec)
+	message_buffer[#message_buffer + 1] = rec
 end
 
 -- Channels whose content lives in the chat command's arguments. A command is
@@ -734,8 +809,7 @@ local function process_batch()
 
 	core.log("action", ("[ai_filter_watcher] Processing batch of %d messages (call_id: %d)"):format(#batch, call_id))
 
-	generate_msg_token()
-    local formatted_batch = format_history(batch)
+	local batch_first_id = batch[1].id
 	local context, err = cloudai.get_context()
 	if not context then
 		core.log("error", ("[ai_filter_watcher] Failed to get AI context for batch %d: %s"):format(call_id, tostring(err)))
@@ -770,29 +844,55 @@ local function process_batch()
 		name = "get_history",
 		func = privacy_wrap(function(args)
 			if type(args) == "string" then
-				local first = args:match("-?%d+")
-				if not first then return {error = "Missing 'messages' parameter"} end
-				args = { messages = first }
+				args = core.parse_json(args)
 			end
-			if not args or not args.messages then
-				return {error = "Missing 'messages' parameter"}
+			local start_id = tonumber(args and args.start_id)
+			local end_id = tonumber(args and args.end_id)
+			if not start_id or not end_id then
+				return {error = "Missing 'start_id' or 'end_id' parameter"}
 			end
-			local n = tonumber(args.messages)
-			if not n or n < 1 or n > 50 then
-				return {error = "Number of messages must be between 1 and 50"}
+			if end_id < start_id then
+				return {error = "end_id must be >= start_id"}
 			end
-			local hist = get_last_messages(n)
-			return { history = format_history(hist), count = #hist }
+			-- Only history older than the current batch is reachable: the
+			-- batch's own messages are under review and never returned here,
+			-- so the tool's output always matches "already processed earlier".
+			local note
+			if end_id >= batch_first_id then
+				end_id = batch_first_id - 1
+				note = ("Requested range overlaps the current batch (first id %d); clamped to older history."):format(batch_first_id)
+			end
+			local first_id = oldest_available_id()
+			if first_id and start_id < first_id then
+				start_id = first_id
+				note = (note and note .. " " or "") ..
+					("History starts at id %d; older messages were trimmed."):format(first_id)
+			end
+			local messages = {}
+			if first_id then
+				for _, rec in ipairs(get_history_slice(start_id, end_id, 50)) do
+					messages[#messages + 1] = render_message(rec)
+				end
+			end
+			local result = {
+				messages = messages,
+				count = #messages,
+				batch_first_id = batch_first_id,
+			}
+			if first_id then
+				result.oldest_available_id = first_id
+			end
+			if #messages > 0 then
+				result.oldest_returned_id = messages[#messages].id
+			end
+			if note then result.note = note end
+			return result
 		end),
-		description = "Get additional chat history for context (use ONLY if necessary)",
+		description = "Get messages older than the current batch for context. start_id and end_id form an inclusive id range; returns at most 50 messages, newest first, all strictly older than the current batch. Page further back by calling again with end_id = oldest_returned_id - 1; oldest_available_id marks the beginning of available history. These messages were already processed - context only, take no action on them.",
 		strict = false,
 		properties = {
-			messages = {
-				type = "integer",
-				description = "Number of previous messages to retrieve",
-				minimum = 1,
-				maximum = 50
-			}
+			start_id = { type = "integer", description = "Inclusive lower bound (oldest id to return)", minimum = 1 },
+			end_id = { type = "integer", description = "Inclusive upper bound (newest id to return)", minimum = 1 }
 		}
 	})
 
@@ -804,10 +904,13 @@ local function process_batch()
 			local player_name = args.name
 			if not player_name then return {error = "Missing 'name' parameter"} end
 			local reason = args.reason
+			-- Moderation history stores only the one-sentence summary; the full
+			-- reason goes to the player-facing formspec.
+			local summary = make_summary(args.summary, reason)
 			if WATCHER_MODE == ai_filter_watcher.MODES.ENABLED then
 				if not is_essentials then return {error = "Essentials mod not available"} end
 				essentials.show_warn_formspec(player_name, reason, "AI Watcher")
-				add_to_player_history(player_name, "warn", nil, reason)
+				add_to_player_history(player_name, "warn", nil, summary)
 			else -- permissive
 				local msg = ("[PERMISSIVE] Would have warned player '%s' for: %s"):format(player_name, reason)
 				core.log("action", "[ai_filter_watcher] " .. msg)
@@ -821,7 +924,8 @@ local function process_batch()
 		strict = false,
 		properties = {
 			name = { type = "string", description = "Player name to warn" },
-			reason = { type = "string", description = "Reason for warning" }
+			reason = { type = "string", description = "Reason for warning" },
+			summary = { type = "string", description = "One short sentence capturing the incident; recorded in moderation history" }
 		}
 	})
 
@@ -834,10 +938,11 @@ local function process_batch()
 			if not player_name then return {error = "Missing 'name' parameter"} end
 			local duration = math.min(math.max(tonumber(args.duration) or 10, 1), 1440)
 			local reason = args.reason
+			local summary = make_summary(args.summary, reason)
 			if WATCHER_MODE == ai_filter_watcher.MODES.ENABLED then
 				local success, err = simplemod.mute_name(player_name, "AI Watcher", reason, duration * 60)
 				if not success then return {error = err} end
-				add_to_player_history(player_name, "mute", duration, reason)
+				add_to_player_history(player_name, "mute", duration, summary)
 			else
 				local msg = ("[PERMISSIVE] Would have muted player '%s' for %d minutes: %s"):format(player_name, duration, reason)
 				core.log("action", "[ai_filter_watcher] " .. msg)
@@ -852,7 +957,8 @@ local function process_batch()
 		properties = {
 			name = { type = "string", description = "Player name to mute" },
 			duration = { type = "integer", description = "Mute duration in minutes", minimum = 1, maximum = 1440 },
-			reason = { type = "string", description = "Reason for muting" }
+			reason = { type = "string", description = "Reason for muting" },
+			summary = { type = "string", description = "One short sentence capturing the incident; recorded in moderation history" }
 		}
 	})
 
@@ -864,36 +970,82 @@ local function process_batch()
 			local player_name = args.name
 			if not player_name then return {error = "Missing 'name' parameter"} end
 			local reason = args.reason
+			local summary = make_summary(args.summary, reason)
 			if not is_discord_available then return {error = "Discord relay not available. Reports won't work."} end
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
 			local msg = string.format("**AI Watcher**: Reported player %s to moderators: %s", player_name, reason)
 			discord.send_mention(msg, "1525628775923060958")
+			-- Record the report so later batches show the player was already
+			-- reported (moderation history); the AI deduplicates from there.
+			add_to_player_history(player_name, "report", nil, summary)
 			return { success = true, message = ("Player %s reported to moderators"):format(player_name) }
 		end),
 		description = "Report a player to human moderators for review",
 		strict = false,
 		properties = {
 			name = { type = "string", description = "Player name to report" },
-			reason = { type = "string", description = "Detailed reason for reporting" }
+			reason = { type = "string", description = "Detailed reason for reporting" },
+			summary = { type = "string", description = "One short sentence capturing the incident; recorded in moderation history" }
 		}
 	})
 
-	local players = {}
-	for _, msg in ipairs(batch) do
-		players[msg.name] = true
+	-- The whole user message is one JSON payload: pure data, no prose, no
+	-- instructions. Escaping happens exactly once, in core.write_json, so
+	-- message content can never imitate the structure around it.
+	local payload = {
+		server_time = os.date("%m-%d %H:%M:%S"),
+		current_batch = {},
+	}
+	for _, rec in ipairs(batch) do
+		payload.current_batch[#payload.current_batch + 1] = render_message(rec)
 	end
-	local hist_section = ""
 	if WATCHER_MODE ~= ai_filter_watcher.MODES.PERMISSIVE then
-		for p in pairs(players) do
-			local h = get_player_moderation_history(p)
-			if #h > 0 then
-				hist_section = hist_section .. ("\n--- Moderation history for player '%s' ---\n%s"):format(p, format_player_history(h))
+		-- Moderation history of the players in this batch: context so the AI
+		-- can see that a player was already reported, warned or muted — never
+		-- an instruction. Only present for batch participants.
+		local seen = {}
+		local entries = {}
+		for _, rec in ipairs(batch) do
+			if not seen[rec.name] then
+				seen[rec.name] = true
+				for _, e in ipairs(get_player_moderation_history(rec.name)) do
+					entries[#entries + 1] = {
+						player = mask_text(rec.name),
+						action = e.type,
+						when = algorithms.time_to_string(os.time() - e.time) .. " ago",
+						duration = e.type == "mute" and algorithms.time_to_string((e.duration or 0) * 60) or nil,
+						summary = mask_text(e.summary or e.reason or ""),
+					}
+				end
 			end
+		end
+		if #entries > 0 then
+			payload.moderation_history = entries
 		end
 	end
 
-	local prompt = mask_names(("Start message token: %s\nEnd message token:%s\nBatch of %d recent messages (already sent to chat):\n%s\n%s\nReview these messages and take moderation actions if needed."):format(msg_token_start, msg_token_end, #batch, formatted_batch, hist_section))
+	local prompt, json_err = core.write_json(payload)
+	if not prompt then
+		-- Stray control bytes in one message can fail serialization; strip
+		-- them and retry once before re-queuing the batch.
+		core.log("warning", ("[ai_filter_watcher] JSON serialization failed for batch %d, retrying with control characters stripped: %s"):format(call_id, tostring(json_err)))
+		prompt = core.write_json(sanitize_controls(payload))
+	end
+	if not prompt then
+		core.log("error", ("[ai_filter_watcher] Failed to serialize batch %d for the AI: %s"):format(call_id, tostring(json_err)))
+		report("Failed to serialize batch %d for the AI", call_id)
+		if active_context then
+			active_context:destroy()
+			active_context = nil
+		end
+		is_processing = false
+		flush_pending()
+		for _, rec in ipairs(batch) do
+			message_buffer[#message_buffer + 1] = rec
+		end
+		return
+	end
 
 	local ok, err = context:call(prompt, function(_, _, error)
 		active_context = nil

@@ -138,7 +138,7 @@ refresh_models()
 
 local function send_debug(context, label, data)
 	if not context._debug or not is_xmpp then return end
-	local id = context._current_debug_id
+	local id = context._current_request_id
 	if not id then return end
 	local data_str
 	if type(data) == "table" then
@@ -156,11 +156,18 @@ end
 --   false, err  → context still busy (response pending or tool recursion ongoing)
 -- When called via core.after (auto_call = true), returns are discarded.
 -- Callback should add response to history, but we add tool calls
-local function handle_response(context, auto_call)
+local function handle_response(context, current_request_id, auto_call)
+	if current_request_id ~= context._current_request_id then
+		-- There was probably a race with context:call()
+		-- We are likely an old scheduled handle_response, but context:call() ran before us
+		-- It called handle_response manually and then created a new API request.
+		-- This is not ours to handle anymore, just return.
+		return
+	end
 	local response = http_api.fetch_async_get(context._handle)
 	if not response.completed then
 		if auto_call then
-			core.after(0, handle_response, context, true)
+			core.after(0, handle_response, context, current_request_id, true)
 			return
 		else
 			return false, "You cannot send a new message to the same conversation before the old response completes"
@@ -168,13 +175,17 @@ local function handle_response(context, auto_call)
 	end
 	context._handle = nil  -- The request has completed, successfully or not
 	if context._destroyed then
+		-- Terminal path: clear the markers so any queued poll of this
+		-- generation dies at the id check instead of polling a nil handle
+		context._callback = nil
+		context._current_request_id = nil
 		return false, "Context destroyed, not triggering callback"
 	end
 	local ok, parsed = parse_response(response)
 	if not ok then
 		context._callback(context._history, nil, parsed)
 		context._callback = nil
-		context._current_debug_id = nil
+		context._current_request_id = nil
 		return true
 	end
 
@@ -188,7 +199,7 @@ local function handle_response(context, auto_call)
 	   or not parsed.choices[1].message.role then
 		context._callback(context._history, nil, "Malformed response")
 		context._callback = nil
-		context._current_debug_id = nil
+		context._current_request_id = nil
 		return true
 	else
 		if parsed.choices[1].finish_reason == "tool_calls" then
@@ -198,7 +209,7 @@ local function handle_response(context, auto_call)
 			if type(msg.tool_calls) ~= "table" or #msg.tool_calls == 0 then
 				context._callback(context._history, nil, "Malformed response")
 				context._callback = nil
-				context._current_debug_id = nil
+				context._current_request_id = nil
 				return true
 			end
 			for _, tool_call in ipairs(msg.tool_calls) do
@@ -207,7 +218,7 @@ local function handle_response(context, auto_call)
 					if context._max_steps_now < 0 then
 						context._callback(context._history, nil, "Exceeded the maximum number of tool calls")
 						context._callback = nil
-						context._current_debug_id = nil
+						context._current_request_id = nil
 						return true
 					end
 				end
@@ -215,7 +226,7 @@ local function handle_response(context, auto_call)
 				if not context._tools[name] then
 					context._callback(context._history, nil, "Tool "..tostring(name).." doesn't exist")
 					context._callback = nil
-					context._current_debug_id = nil
+					context._current_request_id = nil
 					return true
 				end
 				local args = tool_call["function"].arguments
@@ -226,7 +237,7 @@ local function handle_response(context, auto_call)
 					if context._tools[name].strict then
 						context._callback(context._history, nil, "Malformed arguments in tool call to "..name..": "..err)
 						context._callback = nil
-						context._current_debug_id = nil
+						context._current_request_id = nil
 						return true
 					end
 				end
@@ -237,7 +248,7 @@ local function handle_response(context, auto_call)
 						context._callback(context._history, nil, "Malformed response from tool "..name..
 						": Returned table that couldn't be converted to JSON\n"..err)
 						context._callback = nil
-						context._current_debug_id = nil
+						context._current_request_id = nil
 						return true
 					end
 				end
@@ -249,7 +260,7 @@ local function handle_response(context, auto_call)
 			if not result then
 				context._callback(context._history, nil, "Failed to continue after tool call: "..err)
 				context._callback = nil
-				context._current_debug_id = nil
+				context._current_request_id = nil
 				return true
 			end
 			return false, "You cannot send a new message to the same conversation before the old response completes"
@@ -258,12 +269,13 @@ local function handle_response(context, auto_call)
 			send_debug(context, "final_response", parsed.choices[1].message)
 			context._callback(context._history, parsed.choices[1].message)
 			context._callback = nil
-			context._current_debug_id = nil
+			context._current_request_id = nil
 			return true
 		end
 	end
 end
 
+local MONOTONIC_COUNTER = 1
 cloudai.get_context = function()
 	if not working then
 		return nil, "cloudai is not properly configured to work. Check minetest.conf"
@@ -288,7 +300,7 @@ cloudai.get_context = function()
 		_frequency_penalty = nil,
 		_presence_penalty = nil,
 		_debug = false,
-		_current_debug_id = nil,
+		_current_request_id = nil,
 		_model = model,
 		_thinking = "disabled",
 		_reasoning_effort = nil,
@@ -328,7 +340,7 @@ cloudai.get_context = function()
 				data = data,
 				extra_headers = { "Content-Type: application/json", auth_header }
 			})
-			core.after(0, handle_response, self, true)
+			core.after(0, handle_response, self, self._current_request_id, true)
 			return true
 		end,
 		-- Callback gets history and AI response (nil in case of error, in which case third argument is the error string)
@@ -342,7 +354,7 @@ cloudai.get_context = function()
 				if not self._handle then
 					return false, "You cannot send a new message to a conversation that is processing a call"
 				end
-				local handled, err = handle_response(self)
+				local handled, err = handle_response(self, self._current_request_id)
 				if not handled then
 					return false, err
 				end
@@ -352,8 +364,9 @@ cloudai.get_context = function()
 			end
 			table.insert(self._history, {role = "user", content = message})
 
+			self._current_request_id = MONOTONIC_COUNTER
+			MONOTONIC_COUNTER = MONOTONIC_COUNTER + 1
 			if self._debug then
-				self._current_debug_id = tostring(core.get_us_time())
 				send_debug(self, "initial_history", self._history)
 				-- Tools are constant for the duration of a call, so dump them once here
 				if #self._formatted_tools > 0 then
@@ -368,7 +381,7 @@ cloudai.get_context = function()
 				-- A failed dispatch leaves no request and no poll chain running;
 				-- roll back the markers so the context isn't locked as in-flight
 				self._callback = nil
-				self._current_debug_id = nil
+				self._current_request_id = nil
 			end
 			return ok, err
 		end,

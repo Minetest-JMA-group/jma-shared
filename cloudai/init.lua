@@ -336,7 +336,12 @@ cloudai.get_context = function()
 			if self._destroyed then
 				return false, "Cannot use a destroyed context"
 			end
-			if self._handle then
+			if self._callback then
+				-- _callback marks an in-flight call (_handle clears as soon as the
+				-- response arrives, i.e. mid tool-loop, so it can't be used alone)
+				if not self._handle then
+					return false, "You cannot send a new message to a conversation that is processing a call"
+				end
 				local handled, err = handle_response(self)
 				if not handled then
 					return false, err
@@ -350,13 +355,27 @@ cloudai.get_context = function()
 			if self._debug then
 				self._current_debug_id = tostring(core.get_us_time())
 				send_debug(self, "initial_history", self._history)
+				-- Tools are constant for the duration of a call, so dump them once here
+				if #self._formatted_tools > 0 then
+					send_debug(self, "tools", self._formatted_tools)
+				end
 			end
 
 			self._callback = callback
 			self._max_steps_now = self._max_steps
-			return self:_make_request()
+			local ok, err = self:_make_request()
+			if not ok then
+				-- A failed dispatch leaves no request and no poll chain running;
+				-- roll back the markers so the context isn't locked as in-flight
+				self._callback = nil
+				self._current_debug_id = nil
+			end
+			return ok, err
 		end,
 		add_tool = function(self, tool_definition)
+			if self._callback then
+				return false, "You cannot add tools while a call is in progress"
+			end
 			tool_definition.name = tool_definition.name or "Unknown"
 			if self._tools[tool_definition.name] then
 				return false, "A tool with the same name already exists"
@@ -395,6 +414,9 @@ cloudai.get_context = function()
 			return true
 		end,
 		set_model = function(self, id)
+			if self._callback then
+				return false, "You cannot change the model while a call is in progress"
+			end
 			if type(id) ~= "string" then
 				return false, "Model name must be a string"
 			end
@@ -405,6 +427,9 @@ cloudai.get_context = function()
 			return true
 		end,
 		set_reasoning_effort = function(self, effort)
+			if self._callback then
+				return false, "You cannot change the reasoning effort while a call is in progress"
+			end
 			if effort ~= "high" and effort ~= "max" then
 				return false, string.format("Valid values are: high, max (got %s)", tostring(effort))
 			end
@@ -412,6 +437,9 @@ cloudai.get_context = function()
 			return true
 		end,
 		set_thinking = function(self, thinking)
+			if self._callback then
+				return false, "You cannot change the thinking mode while a call is in progress"
+			end
 			if thinking ~= "enabled" and thinking ~= "disabled" then
 				return false, string.format("Valid values are: enabled, disabled (got %s)", tostring(thinking))
 			end
@@ -426,6 +454,9 @@ cloudai.get_context = function()
 			return true
 		end,
 		set_temperature = function(self, temp)
+			if self._callback then
+				return false, "You cannot change the temperature while a call is in progress"
+			end
 			if temp ~= nil then
 				if type(temp) ~= "number" or temp < 0 or temp > 2 then
 					return false, "Temperature must be a number between 0 and 2"
@@ -435,6 +466,9 @@ cloudai.get_context = function()
 			return true
 		end,
 		set_frequency_penalty = function(self, fp)
+			if self._callback then
+				return false, "You cannot change the frequency penalty while a call is in progress"
+			end
 			if fp ~= nil then
 				if type(fp) ~= "number" or fp < -2 or fp > 2 then
 					return false, "Frequency penalty must be a number between -2 and 2"
@@ -444,6 +478,9 @@ cloudai.get_context = function()
 			return true
 		end,
 		set_presence_penalty = function(self, pp)
+			if self._callback then
+				return false, "You cannot change the presence penalty while a call is in progress"
+			end
 			if pp ~= nil then
 				if type(pp) ~= "number" or pp < -2 or pp > 2 then
 					return false, "Presence penalty must be a number between -2 and 2"

@@ -171,6 +171,44 @@ local function load_with_env(source, env)
 	end
 end
 
+-- The quiet-hours feature leans on algorithms.parse_complex_time. Load the
+-- real implementation straight from the sibling algorithms mod: it is pure
+-- Lua and sits, self-contained, between two stable comment markers in
+-- algorithms/init.lua. ai_filter_watcher hard-depends on algorithms and both
+-- live in the same checkout, so the parser is always present - fail loudly
+-- instead of testing against a copy that could drift from the real thing.
+local function load_parse_complex_time()
+	local path = script_dir .. "/../../algorithms/init.lua"
+	local file = io.open(path, "r")
+	assert(file, "cannot open " .. path .. " - run the tests from an ai_filter_watcher checkout inside the jma-shared modpack")
+	local src = file:read("*a")
+	file:close()
+	local start_marker = "-- Parse complex time into an object"
+	local end_marker = "-- Convert time in seconds"
+	local s = src:find(start_marker, 1, true)
+	local e = src:find(end_marker, 1, true)
+	assert(s and e and e > s, "could not locate algorithms.parse_complex_time in " .. path .. " (comment markers moved?)")
+	local alg = {}
+	local env = setmetatable({ algorithms = alg }, { __index = _G })
+	local chunk
+	local ok
+	if setfenv then -- Lua 5.1 / LuaJIT
+		chunk = loadstring(src:sub(s, e - 1))
+		assert(chunk, "loadstring failed for the extracted block from " .. path)
+		setfenv(chunk, env)
+		ok = pcall(chunk)
+	else -- Lua 5.2+
+		chunk = load(src:sub(s, e - 1), path, "t", env)
+		assert(chunk, "load failed for the extracted block from " .. path)
+		ok = pcall(chunk)
+	end
+	assert(ok, "failed to execute the extracted parse_complex_time block from " .. path)
+	assert(type(alg.parse_complex_time) == "function", "the extracted block from " .. path .. " did not define algorithms.parse_complex_time")
+	return alg.parse_complex_time
+end
+
+local parse_complex_time = load_parse_complex_time()
+
 local function make_env(globals, shareddb_values)
 	local core = {}
 	core.registered_chatcommands = {}
@@ -206,7 +244,8 @@ local function make_env(globals, shareddb_values)
 	core.register_globalstep = function(fn) core.globalstep_cb = fn end
 	core.register_on_chat_message = function() end
 	core.after = function(delay, fn) core.after_cb = fn end
-	core.log = function() end
+	core.log_msgs = {}
+	core.log = function(level, msg) table.insert(core.log_msgs, tostring(msg)) end
 	core.serialize = function(t) return t end
 	core.deserialize = function(s) return s end
 	core.write_json = json_encode
@@ -223,6 +262,9 @@ local function make_env(globals, shareddb_values)
 	cloudai.last_prompt = nil
 	cloudai.defer_cb = false
 	cloudai.pending_cb = nil
+	cloudai.prompts = {}		-- every prompt handed to call(), in order
+	cloudai.fail_error = nil	-- when set, call() completes with this error
+	cloudai.reject_call = nil	-- when set, call() refuses synchronously
 	cloudai.get_context = function()
 		local ctx = {}
 		ctx.tools = {}
@@ -237,8 +279,14 @@ local function make_env(globals, shareddb_values)
 		ctx.call = function(self, prompt, cb)
 			cloudai.last_prompt = prompt
 			cloudai.last_ctx = ctx
+			cloudai.prompts[#cloudai.prompts + 1] = prompt
+			if cloudai.reject_call then
+				return false, "call rejected"
+			end
 			if cloudai.defer_cb then
 				cloudai.pending_cb = cb
+			elseif cloudai.fail_error then
+				cb({}, nil, cloudai.fail_error)
 			else
 				cb({}, nil, nil)
 			end
@@ -287,6 +335,8 @@ local function make_env(globals, shareddb_values)
 			-- Deterministic stand-ins for smart time phrasing
 			time_to_string = function(sec) return tostring(math.floor(tonumber(sec) or 0)) .. " seconds" end,
 			parse_time = function() return 0 end,
+			-- Real parse_complex_time (real algorithms source or embedded port)
+			parse_complex_time = parse_complex_time,
 		},
 		essentials = {
 			show_warn_formspec = function(name, reason, source)
@@ -386,6 +436,14 @@ local function contains(haystack, needle, label)
 		error("FAIL: " .. label .. " (missing: " .. needle .. ")")
 	end
 	print("ok: " .. label)
+end
+
+local function count_occurrences(list, needle)
+	local n = 0
+	for _, s in ipairs(list) do
+		if s:find(needle, 1, true) then n = n + 1 end
+	end
+	return n
 end
 
 -- The prompt is now a JSON envelope; these helpers decode it.
@@ -829,5 +887,254 @@ local mK = find_msg(payK.current_batch, function(m) return m.sender == "[" .. ka
 check(mK ~= nil and mK.text == "[" .. kb .. "]   hi\n[" .. kb .. "] yo  [" .. kb .. "]",
 	"K: whitespace preserved byte-for-byte, names found across newlines")
 check(not any_string_contains(payK, "bob"), "K: no bare bob anywhere after masking")
+
+-- === Scenario L: quiet hours (sleep schedule) hold, release, force ===
+local wday_abbr = { "mon", "tue", "wed", "thu", "fri", "sat", "sun" }
+local utc_now = os.date("!*t")
+local cur_wday = ((utc_now.wday - 2) % 7) + 1		-- Monday = 1, matching algorithms
+-- A window from the current UTC minute to 23:59 is deterministic for the
+-- run of this test (only a test straddling midnight at 23:59:5x could flake).
+local active_spec = ("%s,%02d:%02d-23:59"):format(wday_abbr[cur_wday], utc_now.hour, utc_now.min)
+-- A full day on a weekday that is not today is guaranteed inactive.
+local inactive_spec = ("%s,00:00-23:59"):format(wday_abbr[(cur_wday % 7) + 1])
+local envL = make_env({}, { min_batch_size = "2" })
+local cmdL = envL.core.registered_chatcommands
+
+-- unset state reported, no usage nag
+local okL, retL = cmdL.ai_watcher.func("tester", "sleep")
+check(okL == true and retL:find("No quiet hours set", 1, true) ~= nil, "L: sleep unset reported")
+
+-- invalid specs rejected, nothing persisted
+check(cmdL.ai_watcher.func("tester", "sleep total-garbage") == false, "L: garbage spec rejected")
+local okL2, retL2 = cmdL.ai_watcher.func("tester", "sleep mon-sun,25:00-26:00")
+check(okL2 == false and retL2:find("Invalid hour or minute", 1, true) ~= nil, "L: bad hour rejected")
+local okL3, retL3 = cmdL.ai_watcher.func("tester", "sleep noday,10:00-11:00")
+check(okL3 == false and retL3:find("day specifier", 1, true) ~= nil, "L: unknown day rejected")
+check(envL.shareddb.db.sleep_schedule == nil, "L: nothing persisted on rejection")
+local _, stL = cmdL.ai_watcher.func("tester", "status")
+contains(stL, "Quiet hours: none", "L: status shows no schedule")
+
+-- setting an active window
+local okL4, retL4 = cmdL.ai_watcher.func("tester", "sleep " .. active_spec)
+check(okL4 == true and retL4:find("Active now", 1, true) ~= nil, "L: active window flagged at set time")
+check(envL.shareddb.db.sleep_schedule == active_spec, "L: schedule persisted to shareddb")
+envL.shareddb.listener("sleep_schedule")	-- self-echo from the DB trigger
+
+-- scans hold during quiet hours, messages accumulate, announced once
+envL.core.chat_hook("alice", "during quiet 1")
+envL.core.chat_hook("alice", "during quiet 2")
+envL.core.globalstep_cb(61)
+check(envL.cloudai.last_prompt == nil, "L: scan holds during quiet hours")
+check(buffer_count(envL) == 2, "L: held messages accumulate in the buffer")
+check(count_occurrences(envL.core.log_msgs, "Quiet hours active") == 1, "L: hold logged once")
+check(count_occurrences(envL.relay_msgs, "Quiet hours active") == 0, "L: hold NOT announced on the action channel")
+envL.core.chat_hook("alice", "during quiet 3")
+envL.core.globalstep_cb(61)
+check(envL.cloudai.last_prompt == nil, "L: still held on later scans")
+check(count_occurrences(envL.core.log_msgs, "Quiet hours active") == 1, "L: hold not re-logged")
+check(buffer_count(envL) == 3, "L: buffer keeps growing while held")
+
+-- status reflects the hold
+local _, stL2 = cmdL.ai_watcher.func("tester", "status")
+contains(stL2, active_spec, "L: status shows the schedule")
+contains(stL2, "ACTIVE, holding", "L: status shows the active hold")
+
+-- manual process refused during quiet
+local okL5, retL5 = cmdL.ai_watcher.func("tester", "process")
+check(okL5 == false and retL5:find("Quiet hours are active", 1, true) ~= nil, "L: process refused during quiet")
+
+-- switching to an inactive schedule releases the hold on the next scan
+local okL6 = cmdL.ai_watcher.func("tester", "sleep " .. inactive_spec)
+check(okL6 == true, "L: inactive schedule accepted")
+envL.core.globalstep_cb(61)
+local payL = last_payload(envL)
+check(payL ~= nil and #payL.current_batch == 3, "L: backlog processed on release")
+check(payL.current_batch[1].id == 1 and payL.current_batch[3].id == 3, "L: release processed in capture order")
+check(count_occurrences(envL.core.log_msgs, "Quiet hours ended: processing 3 buffered messages") == 1, "L: release logged once")
+check(count_occurrences(envL.relay_msgs, "Quiet hours ended") == 0, "L: release NOT announced on the action channel")
+
+-- back into quiet: force overrides
+cmdL.ai_watcher.func("tester", "sleep " .. active_spec)
+envL.cloudai.last_prompt = nil
+envL.core.chat_hook("alice", "force me")	-- id 4
+envL.core.chat_hook("alice", "force me too")	-- id 5
+envL.core.globalstep_cb(61)
+check(envL.cloudai.last_prompt == nil, "L: quiet holds again")
+local okL7 = cmdL.ai_watcher.func("tester", "process")
+check(okL7 == false, "L: process refused again while quiet")
+local okL8, retL8 = cmdL.ai_watcher.func("tester", "process force")
+check(okL8 == true and retL8:find("Processing batch of 2 messages", 1, true) ~= nil, "L: process force overrides quiet")
+local payL2 = last_payload(envL)
+check(payL2 ~= nil and payL2.current_batch[1].id == 4, "L: forced batch processed")
+
+-- off disables and cleans the state
+local okL9, retL9 = cmdL.ai_watcher.func("tester", "sleep off")
+check(okL9 == true and retL9:find("disabled", 1, true) ~= nil, "L: sleep off disables")
+check(envL.shareddb.db.sleep_schedule == "", "L: off persisted as empty")
+envL.shareddb.listener("sleep_schedule")
+local _, stL3 = cmdL.ai_watcher.func("tester", "status")
+contains(stL3, "Quiet hours: none", "L: status clean after off")
+
+-- === Scenario M: max_batch caps payloads, backlog drains over consecutive scans ===
+local envM = make_env({}, { min_batch_size = "1", max_batch = "3" })
+local cmdM = envM.core.registered_chatcommands
+local _, stM = cmdM.ai_watcher.func("tester", "status")
+contains(stM, "Max batch size: 3 messages per scan", "M: status shows cap from db")
+for i = 1, 7 do
+	envM.core.chat_hook("alice", "m" .. i)
+end
+envM.core.globalstep_cb(61)	-- chunk 1 of 3; drain timer pre-charged
+envM.core.globalstep_cb(0.1)	-- sub-interval tick still fires chunk 2...
+envM.core.globalstep_cb(0.1)	-- ...and chunk 3: drain does not trickle
+check(#envM.cloudai.prompts == 3, "M: backlog split into 3 payloads")
+local function prompt_ids(env, prompt)
+	local ids = {}
+	for _, m in ipairs(env.core.parse_json(prompt).current_batch) do
+		ids[#ids + 1] = m.id
+	end
+	return ids
+end
+check(table.concat(prompt_ids(envM, envM.cloudai.prompts[1]), ",") == "1,2,3", "M: chunk 1 oldest first")
+check(table.concat(prompt_ids(envM, envM.cloudai.prompts[2]), ",") == "4,5,6", "M: chunk 2 next")
+check(table.concat(prompt_ids(envM, envM.cloudai.prompts[3]), ",") == "7", "M: final chunk drains the rest")
+check(buffer_count(envM) == 0, "M: buffer empty after drain")
+
+-- cap removal via the command + echo
+local okM, retM = cmdM.ai_watcher.func("tester", "max_batch")
+check(okM == true and retM:find("3 messages per scan", 1, true) ~= nil, "M: max_batch reports the cap")
+check(cmdM.ai_watcher.func("tester", "max_batch 0") == true, "M: max_batch 0 accepted (no cap)")
+envM.shareddb.listener("max_batch")
+for i = 8, 11 do
+	envM.core.chat_hook("alice", "n" .. i)
+end
+envM.core.globalstep_cb(61)
+check(#envM.cloudai.prompts == 4 and #prompt_ids(envM, envM.cloudai.prompts[4]) == 4, "M: no cap = one payload again")
+check(prompt_ids(envM, envM.cloudai.prompts[4])[4] == 11, "M: uncapped payload carries everything")
+
+-- === Scenario N: call errors requeue in capture order, bounded retries ===
+local envN = make_env({}, { min_batch_size = "1" })
+envN.cloudai.fail_error = "upstream exploded"
+envN.core.chat_hook("alice", "first")
+envN.core.chat_hook("alice", "second")
+envN.core.globalstep_cb(61)
+check(#envN.cloudai.prompts == 1, "N: failing call attempted once")
+check(buffer_count(envN) == 2, "N: batch requeued after call error")
+local dumpN = dump_buffer(envN)
+check(dumpN:find("first", 1, true) < dumpN:find("second", 1, true), "N: requeue keeps capture order")
+check(count_occurrences(envN.core.log_msgs, "AI error for batch call 1: upstream exploded") == 1, "N: call error logged")
+check(count_occurrences(envN.relay_msgs, "Batch 1 error") == 0, "N: per-attempt error NOT on the action channel")
+-- newer arrivals land behind the requeued batch; recovery processes all
+envN.core.chat_hook("alice", "third")
+envN.cloudai.fail_error = nil
+envN.core.globalstep_cb(61)
+local payN = last_payload(envN)
+check(payN ~= nil and #payN.current_batch == 3, "N: requeued + new messages processed together")
+local textsN = {}
+for _, m in ipairs(payN.current_batch) do textsN[#textsN + 1] = m.text end
+check(table.concat(textsN, ",") == "first,second,third", "N: processed in capture order")
+
+-- permanent failure: dropped after MAX_CALL_REQUEUES (5) failed attempts
+local envN2 = make_env({}, { min_batch_size = "1" })
+envN2.cloudai.fail_error = "permanent"
+envN2.core.chat_hook("alice", "doomed")
+envN2.core.chat_hook("alice", "doomed too")
+for _ = 1, 6 do envN2.core.globalstep_cb(61) end
+check(#envN2.cloudai.prompts == 6, "N2: six attempts before the drop")
+check(buffer_count(envN2) == 0, "N2: batch dropped after MAX_CALL_REQUEUES")
+contains(envN2.relay_msgs[#envN2.relay_msgs], "Dropped 2 message(s) (first id 1) after 6 failed AI calls", "N2: drop reported")
+envN2.cloudai.fail_error = nil
+envN2.core.chat_hook("alice", "after the drop")
+envN2.core.globalstep_cb(61)
+local payN2 = last_payload(envN2)
+check(payN2 ~= nil and #payN2.current_batch == 1 and payN2.current_batch[1].id == 3, "N2: watcher healthy after the drop")
+
+-- synchronous call refusal also requeues
+local envN3 = make_env({}, { min_batch_size = "1" })
+envN3.cloudai.reject_call = true
+envN3.core.chat_hook("alice", "rejected")
+envN3.core.globalstep_cb(61)
+check(buffer_count(envN3) == 1, "N3: sync call refusal requeues")
+check(count_occurrences(envN3.core.log_msgs, "Failed to call AI for batch 1") == 1, "N3: refusal logged")
+check(count_occurrences(envN3.relay_msgs, "Failed to call AI for batch 1") == 0, "N3: refusal NOT on the action channel")
+envN3.cloudai.reject_call = nil
+envN3.core.globalstep_cb(61)
+local payN3 = last_payload(envN3)
+check(payN3 ~= nil and #payN3.current_batch == 1 and payN3.current_batch[1].text == "rejected", "N3: requeued message processed after recovery")
+
+-- === Scenario O: cloudai down requeues without spinning per tick ===
+local envO = make_env({}, { min_batch_size = "1" })
+local real_get_context = envO.cloudai.get_context
+envO.cloudai.get_context = function() return nil, "down" end
+envO.core.chat_hook("alice", "while down")
+envO.core.globalstep_cb(61)	-- attempt fails before any AI call
+check(#envO.cloudai.prompts == 0 and buffer_count(envO) == 1, "O: context failure requeues the batch")
+envO.core.globalstep_cb(1)	-- one second later the scan must NOT spin
+check(#envO.cloudai.prompts == 0, "O: no per-tick retry while cloudai is down")
+envO.cloudai.get_context = real_get_context
+envO.core.globalstep_cb(61)
+local payO = last_payload(envO)
+check(payO ~= nil and #payO.current_batch == 1, "O: message processed once cloudai is back")
+
+-- === Scenario P: schedule active at boot from the database ===
+local p_spec = ("%s,%02d:%02d-23:59"):format(wday_abbr[cur_wday], utc_now.hour, utc_now.min)
+local envP = make_env({}, { min_batch_size = "1", sleep_schedule = p_spec })
+envP.core.chat_hook("alice", "held at boot")
+envP.core.globalstep_cb(61)
+check(envP.cloudai.last_prompt == nil and buffer_count(envP) == 1, "P: boot schedule holds scans")
+check(count_occurrences(envP.core.log_msgs, "Quiet hours active") == 1, "P: hold logged after boot")
+check(count_occurrences(envP.relay_msgs, "Quiet hours active") == 0, "P: hold not announced on the action channel")
+
+-- === Scenario Q: unparseable schedule in the db disarms, watcher keeps working ===
+local envQ = make_env({}, { min_batch_size = "1", sleep_schedule = "total garbage" })
+envQ.core.chat_hook("alice", "still works")
+envQ.core.globalstep_cb(61)
+local payQ = last_payload(envQ)
+check(payQ ~= nil and #payQ.current_batch == 1, "Q: bad db schedule does not hold processing")
+local _, stQ = envQ.core.registered_chatcommands.ai_watcher.func("tester", "status")
+contains(stQ, "Quiet hours: none", "Q: status shows schedule disarmed")
+
+-- === Scenario R: failed attempts never inherit the drain pre-charge ===
+-- An async failure must undo the pre-charge granted at dispatch, so the
+-- bounded retries stretch over minutes instead of burning through in under
+-- a second (a transient provider error needs time to clear).
+local envR1 = make_env({}, { min_batch_size = "1", max_batch = "3" })
+envR1.cloudai.defer_cb = true
+for i = 1, 7 do envR1.core.chat_hook("alice", "r1-" .. i) end
+envR1.core.globalstep_cb(61)		-- chunk 1 (ids 1-3) dispatched, callback deferred
+check(#envR1.cloudai.prompts == 1, "R1: chunk 1 dispatched")
+envR1.cloudai.pending_cb({}, nil, "boom")	-- the call fails asynchronously
+envR1.core.globalstep_cb(0.1)
+check(#envR1.cloudai.prompts == 1, "R1: no retry on the tick after an async failure")
+check(buffer_count(envR1) == 7, "R1: failed chunk requeued in front of the remainder")
+envR1.core.globalstep_cb(61)		-- a full interval later: retry
+check(#envR1.cloudai.prompts == 2, "R1: retry spaced a full scan interval after failure")
+check(table.concat(prompt_ids(envR1, envR1.cloudai.prompts[2]), ",") == "1,2,3",
+	"R1: retry takes the failed chunk first")
+
+-- A synchronous error must keep the plain scan cadence too (no pre-charge).
+local envR2 = make_env({}, { min_batch_size = "1" })
+envR2.cloudai.fail_error = "sync boom"
+envR2.core.chat_hook("alice", "sync fail")
+envR2.core.globalstep_cb(61)
+check(#envR2.cloudai.prompts == 1, "R2: sync error attempted once")
+envR2.core.globalstep_cb(0.1)
+check(#envR2.cloudai.prompts == 1, "R2: sync error does not pre-charge a retry")
+envR2.cloudai.fail_error = nil
+envR2.core.globalstep_cb(61)
+check(#envR2.cloudai.prompts == 2 and prompt_ids(envR2, envR2.cloudai.prompts[2])[1] == 1,
+	"R2: retry succeeds after a full interval")
+
+-- A refused call in the cap path behaves the same.
+local envR3 = make_env({}, { min_batch_size = "1", max_batch = "3" })
+envR3.cloudai.reject_call = true
+for i = 1, 7 do envR3.core.chat_hook("alice", "r3-" .. i) end
+envR3.core.globalstep_cb(61)
+check(#envR3.cloudai.prompts == 1 and buffer_count(envR3) == 7, "R3: refused chunk requeued over the remainder")
+envR3.core.globalstep_cb(0.1)
+check(#envR3.cloudai.prompts == 1, "R3: refusal does not pre-charge a retry")
+envR3.cloudai.reject_call = nil
+envR3.core.globalstep_cb(61)
+check(#envR3.cloudai.prompts == 2 and table.concat(prompt_ids(envR3, envR3.cloudai.prompts[2]), ",") == "1,2,3",
+	"R3: retry takes the refused chunk after a full interval")
 
 print("All tests passed.")

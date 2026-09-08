@@ -20,6 +20,9 @@ local PRESENCE_PENALTY = nil
 local DEBUG_ENABLED = false
 local ACTION_RATE_LIMIT = nil		-- nil = unlimited
 local HIDE_USERNAMES = false
+local SLEEP_SCHEDULE = nil		-- parsed quiet-hours schedule (UTC), nil = never sleep
+local SLEEP_SCHEDULE_RAW = nil		-- schedule string as typed, for display
+local MAX_BATCH_SIZE = nil		-- nil = no cap: the whole buffer goes in one payload per scan
 
 local PROMPT_READY = false
 local message_buffer = {}
@@ -32,6 +35,8 @@ local system_prompt_file = modpath .. "/system_prompt.txt"
 local is_processing = false
 local active_call_id = 0
 local active_context = nil
+local quiet_hold_reported = false	-- quiet-hours hold was announced (avoid per-tick report spam)
+local time_acc, cleanup_acc = 0, 0	-- scan/cleanup accumulators; time_acc is reset by failed runs too
 
 ai_filter_watcher = {
 	MODES = { ENABLED = "enabled", PERMISSIVE = "permissive", DISABLED = "disabled" }
@@ -58,6 +63,37 @@ local function parse_action_rate_limit(value)
 		return nil
 	end
 	return { count = count, seconds = seconds, raw = value }
+end
+
+-- Parse and apply a quiet-hours schedule from the database or the chat
+-- command. The raw string is what the operator typed (validated when the
+-- command wrote it) and is re-validated here on every boot/echo via
+-- algorithms.parse_complex_time. A value that fails to parse disarms the
+-- schedule: an invalid schedule must never hold processing forever.
+local function set_sleep_schedule(v)
+	if v == nil or v == "" then
+		SLEEP_SCHEDULE = nil
+		SLEEP_SCHEDULE_RAW = nil
+		return true
+	end
+	local sched, err = algorithms.parse_complex_time(tostring(v))
+	if not sched then
+		core.log("error", ("[ai_filter_watcher] Invalid sleep schedule in settings, ignoring: %s"):format(tostring(err)))
+		SLEEP_SCHEDULE = nil
+		SLEEP_SCHEDULE_RAW = nil
+		return false
+	end
+	SLEEP_SCHEDULE = sched
+	SLEEP_SCHEDULE_RAW = v
+	return true
+end
+
+-- True while the configured quiet-hours schedule covers the current UTC
+-- time. With no schedule set this is always false and the watcher behaves
+-- exactly as before. Windows are minute-granular and inclusive on both
+-- ends, so a window ending at HH:MM expires at the top of HH:MM+1.
+local function quiet_hours_active()
+	return SLEEP_SCHEDULE ~= nil and SLEEP_SCHEDULE:contains() or false
 end
 
 -- Single source of truth for settings: key -> { default, apply }.
@@ -142,6 +178,22 @@ local settings_appliers = {
 		default = nil,
 		apply = function(v)
 			ACTION_RATE_LIMIT = parse_action_rate_limit(v)
+		end,
+	},
+	sleep_schedule = {
+		-- nil (unset): the watcher never sleeps
+		default = nil,
+		apply = function(v)
+			set_sleep_schedule(v)
+		end,
+	},
+	max_batch = {
+		-- nil (unset): the whole buffer goes into one payload per scan
+		default = nil,
+		apply = function(v)
+			-- Unparseable, absent or explicit 0 all mean "no cap"
+			local n = tonumber(v)
+			MAX_BATCH_SIZE = (n and n >= 1) and math.floor(n) or nil
 		end,
 	},
 }
@@ -779,7 +831,45 @@ function ai_filter_watcher.add_message(name, message, tag)
 	record_message(name, message, tag)
 end
 
-local function process_batch()
+-- Return a failed batch to the FRONT of the buffer, so processing stays in
+-- capture order even though newer messages arrived while the run was in
+-- flight (they stay behind the requeued batch).
+-- When bounded, the requeue is counted per message and a message is dropped
+-- after MAX_CALL_REQUEUES failed AI calls: call errors can be permanent
+-- (e.g. a payload too large for the model), and without the ceiling such a
+-- batch would retry forever, one scan at a time. Requeues after failures to
+-- even start a run (cloudai down, serialization) stay unbounded, as before.
+local MAX_CALL_REQUEUES = 5
+local function requeue_batch(batch, reason, bounded)
+	local newer = message_buffer		-- arrived while the run was in flight
+	message_buffer = {}
+	local dropped, first_dropped_id = 0
+	for _, rec in ipairs(batch) do
+		local keep = true
+		if bounded then
+			rec.requeues = (rec.requeues or 0) + 1
+			keep = rec.requeues <= MAX_CALL_REQUEUES
+		end
+		if keep then
+			message_buffer[#message_buffer + 1] = rec
+		else
+			rec.requeues = nil
+			dropped = dropped + 1
+			if not first_dropped_id then first_dropped_id = rec.id end
+		end
+	end
+	for _, rec in ipairs(newer) do
+		message_buffer[#message_buffer + 1] = rec
+	end
+	if dropped > 0 then
+		local msg = ("Dropped %d message(s) (first id %d) after %d failed AI calls: %s"):format(
+			dropped, first_dropped_id, MAX_CALL_REQUEUES + 1, reason)
+		core.log("error", "[ai_filter_watcher] " .. msg)
+		report("%s", msg)
+	end
+end
+
+local function process_batch(override_quiet)
 	if WATCHER_MODE == ai_filter_watcher.MODES.DISABLED then
 		if is_processing then abort_current_processing() end
 		return
@@ -793,8 +883,27 @@ local function process_batch()
 		return
 	end
 
-	local batch = message_buffer
-	message_buffer = {}
+	-- Quiet hours: hold the batch unless the caller explicitly overrides
+	-- (the chat command's 'process force'). Messages keep accumulating and
+	-- the scan loop retries on the first tick after the window ends.
+	if not override_quiet and SLEEP_SCHEDULE and SLEEP_SCHEDULE:contains() then
+		return
+	end
+
+	-- Take the next chunk: up to MAX_BATCH_SIZE of the oldest buffered
+	-- messages (nil = the whole buffer in one payload). A backlog that grew
+	-- past the cap — typically during a quiet window — drains over
+	-- consecutive scans instead of risking one oversized payload.
+	local batch
+	if MAX_BATCH_SIZE and #message_buffer > MAX_BATCH_SIZE then
+		batch = {}
+		for _ = 1, MAX_BATCH_SIZE do
+			batch[#batch + 1] = table.remove(message_buffer, 1)
+		end
+	else
+		batch = message_buffer
+		message_buffer = {}
+	end
 	if #batch == 0 then
 		is_processing = false
 		return
@@ -817,9 +926,7 @@ local function process_batch()
 		flush_pending()
 		-- Re-queue the batch so the messages aren't lost; the next scan
 		-- retries once cloudai is available again.
-		for _, m in ipairs(batch) do
-			message_buffer[#message_buffer + 1] = m
-		end
+		requeue_batch(batch, "cloudai context unavailable")
 		return
 	end
 
@@ -1041,29 +1148,58 @@ local function process_batch()
 		end
 		is_processing = false
 		flush_pending()
-		for _, rec in ipairs(batch) do
-			message_buffer[#message_buffer + 1] = rec
-		end
+		requeue_batch(batch, "JSON serialization failed")
 		return
 	end
 
+	-- call_errored records whether the completion callback reported an
+	-- error before process_batch returned. The callback normally fires
+	-- asynchronously, but if cloudai ever completes synchronously (as the
+	-- test double does), this tells the return value below that no live run
+	-- is left for the scan loop to fast-forward.
+	local call_errored = false
 	local ok, err = context:call(prompt, function(_, _, error)
 		active_context = nil
 		is_processing = false
 		flush_pending()
 		if error then
+			call_errored = true
+			-- Per-attempt errors are log-only: transient failures that
+			-- self-heal on a later retry are routine noise, and the batch
+			-- is never lost while requeued. If it is eventually dropped,
+			-- requeue_batch raises the one action-channel report.
 			core.log("warning", ("[ai_filter_watcher] AI error for batch call %d: %s"):format(call_id, tostring(error)))
-			report("Batch %d error: %s", call_id, tostring(error))
+			-- Re-queue in capture order (bounded: a permanently failing
+			-- payload is dropped after MAX_CALL_REQUEUES attempts instead of
+			-- looping forever, one scan at a time).
+			requeue_batch(batch, ("AI call %d error: %s"):format(call_id, tostring(error)), true)
+			-- A failed attempt must NOT inherit the drain pre-charge: restart
+			-- the scan interval so retries space out at one attempt per scan
+			-- interval. Without this, a fast-failing payload in the cap path
+			-- would burn all bounded attempts in under a second and drop the
+			-- batch before a transient provider error could clear.
+			time_acc = 0
 		end
 	end)
 
 	if not ok then
 		core.log("warning", ("[ai_filter_watcher] Failed to call AI for batch %d: %s"):format(call_id, tostring(err)))
-		report("Failed to call AI for batch %d: %s", call_id, tostring(err))
 		active_context = nil
 		is_processing = false
 		flush_pending()
+		requeue_batch(batch, ("failed to start AI call %d: %s"):format(call_id, tostring(err)), true)
+		-- No request went out and no run is in flight: report as not
+		-- dispatched so the scan loop keeps the plain interval cadence.
+		return false
 	end
+
+	-- True = an AI call is in flight (or completed cleanly); false = the
+	-- batch was held or requeued without a live run (quiet hours, empty
+	-- buffer, cloudai down, serialization failure, a refused call, or an
+	-- error the callback already reported synchronously). The scan loop only
+	-- fast-forwards its timer after a live attempt; everything else retries
+	-- at scan cadence instead of spinning per tick.
+	return not call_errored
 end
 
 chat_lib.register_on_chat_message(4, function(name, msg)
@@ -1095,7 +1231,6 @@ chat_lib.register_on_chat_send_all(function(msg, source)
 	end
 end)
 
-local time_acc, cleanup_acc = 0, 0
 core.register_globalstep(function(dtime)
 	if WATCHER_MODE == ai_filter_watcher.MODES.DISABLED then return end
 	time_acc = time_acc + dtime
@@ -1103,11 +1238,41 @@ core.register_globalstep(function(dtime)
 
 	if time_acc >= SCAN_INTERVAL then
 		if #message_buffer >= MIN_BATCH_SIZE and not is_processing then
-			time_acc = 0
-			process_batch()
+			if quiet_hours_active() then
+				-- Quiet hours: hold the scan WITHOUT resetting time_acc, so
+				-- this branch re-runs every tick and process_batch fires on
+				-- the first tick after the schedule stops matching. Messages
+				-- keep accumulating in the buffer meanwhile. Entry and exit
+				-- are routine daily events: server log only, never the
+				-- action channel.
+				if not quiet_hold_reported then
+					quiet_hold_reported = true
+					core.log("action", ("[ai_filter_watcher] Quiet hours active (%s UTC): holding %d buffered messages"):format(SLEEP_SCHEDULE_RAW, #message_buffer))
+				end
+			else
+				if quiet_hold_reported then
+					quiet_hold_reported = false
+					core.log("action", ("[ai_filter_watcher] Quiet hours ended: processing %d buffered messages"):format(#message_buffer))
+				end
+				time_acc = 0
+				local dispatched = process_batch()
+				-- Drain: when a backlog survives a live AI attempt (it
+				-- outgrew MAX_BATCH_SIZE or accumulated during a quiet
+				-- window), fire the next chunk as soon as the current run
+				-- completes instead of waiting out a full interval. Only
+				-- after a live attempt: holds and attempts with no live run
+				-- (pre-call failures, refused calls, synchronous errors)
+				-- keep the scan cadence, and an asynchronous failure undoes
+				-- the pre-charge itself by resetting the timer.
+				if dispatched and #message_buffer >= MIN_BATCH_SIZE then
+					time_acc = SCAN_INTERVAL
+				end
+			end
 		elseif not is_processing then
-			-- Buffer too small: restart the interval.
+			-- Buffer too small (or quiet with nothing worth holding yet):
+			-- restart the interval.
 			time_acc = 0
+			quiet_hold_reported = false
 			core.log("verbose", ("[ai_filter_watcher] Buffer too small (%d/%d), skipping scan"):format(#message_buffer, MIN_BATCH_SIZE))
 		end
 		-- else: a scan is in flight. Leave time_acc running so the scan fires
@@ -1137,6 +1302,13 @@ core.register_chatcommand("ai_watcher", {
 
 		if cmd == "status" then
 			local players, entries = 0, 0
+			local quiet_desc = "none"
+			if SLEEP_SCHEDULE_RAW then
+				quiet_desc = SLEEP_SCHEDULE_RAW .. " (UTC)"
+				if SLEEP_SCHEDULE:contains() then quiet_desc = quiet_desc .. " - ACTIVE, holding" end
+			end
+			local max_batch_desc = MAX_BATCH_SIZE and ("%d messages per scan"):format(MAX_BATCH_SIZE)
+				or "no limit (whole buffer per scan)"
 			if player_history_loaded then
 				for _, h in pairs(player_history) do
 					players = players + 1
@@ -1149,10 +1321,12 @@ AI Watcher Status:
 - System prompt: %s
 - Scan interval: %d seconds
 - Min batch size: %d messages
+- Max batch size: %s
 - History size: %d messages (stored: %d)
 - History tracking time: %d seconds (%.1f hours)
 - Currently processing: %s
 - Message buffer: %d messages
+- Quiet hours: %s
 - Moderation history: %d players, %d total entries
 - AI parameters:
   • Temperature: %s
@@ -1171,11 +1345,13 @@ AI Watcher Status:
 				PROMPT_READY and "Loaded" or "Missing/Invalid",
 				SCAN_INTERVAL,
 				MIN_BATCH_SIZE,
+				max_batch_desc,
 				HISTORY_SIZE,
 				#chat_history,
 				HISTORY_TRACKING_TIME, HISTORY_TRACKING_TIME/3600,
 				is_processing and ("Yes (call_id: "..active_call_id..")") or "No",
 				#message_buffer,
+				quiet_desc,
 				players,
 				entries,
 				val_or_def(TEMPERATURE),
@@ -1225,6 +1401,26 @@ AI Watcher Status:
 			save_setting("min_batch_size", s, "batch size")
 			MIN_BATCH_SIZE = s
 			return true, ("Minimum batch size set to: %d messages"):format(s)
+
+		elseif cmd == "max_batch" then
+			local v = param:match("%s+(%S+)")
+			if not v then
+				if MAX_BATCH_SIZE then
+					return true, ("Maximum batch size: %d messages per scan (oversized buffers drain over consecutive scans)"):format(MAX_BATCH_SIZE)
+				end
+				return true, "No maximum batch size set - each scan sends the whole buffer in one payload"
+			end
+			local n = tonumber(v)
+			if v == "off" or v == "none" or v == "0" then n = 0 end
+			if not n or n < 0 or n > 100000 then
+				return false, "Usage: /ai_watcher max_batch <count> (1-100000) or '0'/'off' for no cap"
+			end
+			save_setting("max_batch", n, "maximum batch size")
+			MAX_BATCH_SIZE = (n >= 1) and math.floor(n) or nil
+			if MAX_BATCH_SIZE then
+				return true, ("Maximum batch size set to: %d messages per scan"):format(MAX_BATCH_SIZE)
+			end
+			return true, "Maximum batch size removed - whole buffer per scan again"
 
 		elseif cmd == "temperature" then
 			local v = param:match("%s+(%S+)")
@@ -1343,6 +1539,42 @@ AI Watcher Status:
 			ACTION_RATE_LIMIT = limit
 			return true, ("Action report rate limit set to: %s (max %d messages per %d seconds)"):format(v, limit.count, limit.seconds)
 
+		elseif cmd == "sleep" then
+			local spec = param:match("%s+(.+)")
+			if spec then spec = spec:match("^%s*(.-)%s*$") end
+			if not spec or spec == "" then
+				if not SLEEP_SCHEDULE then
+					return true, "No quiet hours set. Usage: /ai_watcher sleep <timespec> - times are UTC, e.g. 'weekdays,02:00-08:00'. Overnight windows need two ranges, e.g. 'everyday,00:00-08:00; everyday,22:00-23:59'. 'off' disables."
+				end
+				local active, interval = SLEEP_SCHEDULE:contains()
+				local state = "inactive"
+				if active then
+					state = ("ACTIVE - processing held until just after %02d:%02d UTC"):format(
+						math.floor(interval.ending / 60), interval.ending % 60)
+				end
+				return true, ("Quiet hours: %s (UTC). Currently %s. UTC now: %s"):format(
+					SLEEP_SCHEDULE_RAW, state, os.date("!%H:%M"))
+			end
+			if spec == "off" or spec == "clear" or spec == "none" then
+				save_setting("sleep_schedule", "", "quiet hours")
+				set_sleep_schedule("")
+				report("Quiet hours disabled by %s", name)
+				return true, "Quiet hours disabled"
+			end
+			local sched, err = algorithms.parse_complex_time(spec)
+			if not sched then
+				return false, "Invalid sleep schedule: " .. tostring(err or "unable to parse")
+			end
+			save_setting("sleep_schedule", spec, "quiet hours")
+			set_sleep_schedule(spec)
+			report("Quiet hours set to %s by %s (UTC)", spec, name)
+			local active, interval = sched:contains()
+			if active then
+				return true, ("Quiet hours set to: %s (UTC). Active now - processing held until just after %02d:%02d UTC"):format(
+					spec, math.floor(interval.ending / 60), interval.ending % 60)
+			end
+			return true, ("Quiet hours set to: %s (UTC). Inactive now - takes effect per the schedule."):format(spec)
+
 		elseif cmd == "process" then
 			local force = param:match("%s+force")
 			if #message_buffer < MIN_BATCH_SIZE and not force then
@@ -1351,9 +1583,23 @@ AI Watcher Status:
 			if is_processing then
 				return false, "A scan is already in progress; it will pick up the buffered messages when it finishes"
 			end
-			local cnt = #message_buffer
-			process_batch()
-			return true, ("Processing batch of %d messages"):format(cnt)
+			local quiet, interval
+			if SLEEP_SCHEDULE then quiet, interval = SLEEP_SCHEDULE:contains() end
+			if quiet and not force then
+				return false, ("Quiet hours are active (%s UTC): processing held until just after %02d:%02d UTC. Use '/ai_watcher process force' to override."):format(
+					SLEEP_SCHEDULE_RAW, math.floor(interval.ending / 60), interval.ending % 60)
+			end
+			local before = #message_buffer
+			process_batch(force ~= nil)
+			local taken = before - #message_buffer
+			if taken == 0 then
+				return false, "No messages to process"
+			end
+			local remaining = #message_buffer
+			if remaining > 0 then
+				return true, ("Processing batch of %d messages (%d remain, drained over consecutive scans)"):format(taken, remaining)
+			end
+			return true, ("Processing batch of %d messages"):format(taken)
 
 		elseif cmd == "dump" then
 			local out = ("Current message buffer (%d messages):\n"):format(#message_buffer)
@@ -1429,13 +1675,15 @@ AI Watcher Status:
   mode <mode>           - Set mode: enabled, permissive, disabled
   interval <seconds>    - Set scan interval (1-3600)
   batch <size>          - Set minimum batch size (1-100)
+  max_batch [count]     - Get/set max messages per scan payload (1-100000, '0'/'off' = no cap)
   temperature [value]   - Get/set temperature (0-2)
   frequency_penalty [value] - Get/set frequency penalty (-2 to 2)
   presence_penalty [value]  - Get/set presence penalty (-2 to 2)
   debug [on|off]        - Get/set debug logging
   history_time [time]   - Get/set history retention (seconds or e.g. '10h')
   action_rate_limit [value] - Get/set action report rate limit (e.g. '10/1m', unlimited if unset)
-  process [force]       - Process current batch immediately
+  sleep [timespec|off]  - Get/set quiet hours (UTC timespec, e.g. weekdays,02:00-08:00). Batches are held, never lost, and drain when the window ends. 'off' disables
+  process [force]       - Process buffered messages now (force overrides min batch size and quiet hours)
   dump                  - Show messages in buffer
   abort                 - Abort ongoing processing
   clear <what>          - Clear: buffer, stats, history, or player_history
@@ -1455,8 +1703,10 @@ core.after(0, function()
 	load_system_prompt()
 	load_player_history()
 	cleanup_player_history()
-	local init_msg = ("Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, debug: %s, hide_usernames: %s)"):format(
-		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE, DEBUG_ENABLED and "enabled" or "disabled", HIDE_USERNAMES and "enabled" or "disabled")
+	local init_msg = ("Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, max_batch: %s, sleep: %s, debug: %s, hide_usernames: %s)"):format(
+		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE,
+		MAX_BATCH_SIZE and tostring(MAX_BATCH_SIZE) or "none", SLEEP_SCHEDULE_RAW or "none",
+		DEBUG_ENABLED and "enabled" or "disabled", HIDE_USERNAMES and "enabled" or "disabled")
 	core.log("action", "[ai_filter_watcher] " .. init_msg)
 	report("%s", init_msg)
 end)

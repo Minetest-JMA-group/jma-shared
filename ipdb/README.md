@@ -58,6 +58,7 @@ Requires `ban` privilege.
 | `/ipdb newentries [yes\|no]` | Show or change whether new entries are allowed. |
 | `/ipdb list <IP\|username>` | List all IPs and usernames linked with the given one. |
 | `/ipdb log_merges [yes\|no]` | Show or change whether entry merge events are logged. |
+| `/ipdb log_retention [<time>]` | Show or change how long merge events are kept before they are pruned (default 15 days; e.g. `15D`, `48h`, `1800`). The new value is applied immediately. |
 | `/ipdb move <what> <where>` | Move the name/IP given in `what` to the entry that name/IP given in `where` belongs to. |
 | `/ipdb merges [N]` | List the last N merge events (default 15). |
 | `/ipdb merge <id>` | Show the details of a merge event and whether it can be rolled back. |

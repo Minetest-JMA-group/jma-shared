@@ -50,7 +50,17 @@ _G.core = core
 local algorithms = {
 	require = function(name) return require(name) end,
 	is_ip = function(s) return s:match("^%d+%.%d+%.%d+%.%d+$") ~= nil end,
-	parse_time = function() return 100 end,
+	-- same grammar as the real algorithms.parse_time: number followed by an
+	-- optional unit (s/m/h/d/w/M/y; bare numbers are seconds)
+	parse_time = function(t)
+		if type(t) ~= "string" then return 0 end
+		local unit_to_secs = { s = 1, m = 60, h = 3600, d = 86400, D = 86400, w = 604800, W = 604800, M = 2592000, y = 31536000, Y = 31536000 }
+		local secs = 0
+		for num, unit in t:gmatch("(%d+)([smhdDwWMYy]?)") do
+			secs = secs + (tonumber(num) * (unit_to_secs[unit] or 1))
+		end
+		return secs
+	end,
 	is_trusted = function() return true end,
 }
 _G.algorithms = algorithms
@@ -113,6 +123,14 @@ expect("unmerge 1 keep", true, "rolled back")
 expect("unmerge 1", false, "already been rolled back")
 expect("merge 1", true, "rolled back on")
 expect("tree alice 3", true, "current")
+expect("log_retention", true, "kept for 1296000")
+expect("log_retention 2D", true, "2D (172800 seconds)")
+expect("log_retention", true, "kept for 172800")
+expect("log_retention 0", false, "Usage")
+expect("log_retention nonsense", false, "Usage")
+-- the value must actually land in Metadata (it is re-read on server restart)
+local stored_retention = dbmanager.get_meta("merge_log_retention")
+assert(stored_retention == "172800", "log_retention persists to Metadata, got " .. tostring(stored_retention))
 expect("merge_gui", true, "GUI opened")
 
 -- seed a fresh merge for the GUI flow (the CLI section rolled the first one back)
@@ -138,11 +156,22 @@ local function gui(fields)
 	return formspecs[#formspecs]
 end
 
+-- every scrollbar[] element in a formspec must carry its required value field
+-- (5 semicolon-separated parts) - the engine drops the element otherwise
+local function assert_valid_scrollbars(fs, ctx)
+	local total = 0
+	for _ in fs:gmatch("scrollbar%[") do total = total + 1 end
+	local valid = 0
+	for _ in fs:gmatch("scrollbar%[[^]]*;[^]]*;[^]]*;[^]]*;[%d]+%]") do valid = valid + 1 end
+	assert(valid == total, ctx .. ": " .. total .. " scrollbar element(s), only " .. valid .. " have all 5 fields")
+	return total
+end
+
 gui({ go = true, root = "dave", depth = "3" })
 local tree_fs = formspecs[#formspecs]
-assert(tree_fs:find("scroll_container"), "tree formspec has a scroll container")
 assert(tree_fs:find("node_"), "tree formspec has node buttons")
 assert(tree_fs:find("box%["), "tree formspec draws edges")
+assert_valid_scrollbars(tree_fs, "single-merge tree")
 print("PASS: gui tree renders with nodes and edges")
 assert(tree_fs:find("node_%d+_2"), "a node carries the merge id")
 local eid = tree_fs:match("node_(%d+)_2")
@@ -170,6 +199,76 @@ print("PASS: gui rollback actually reverted the merge")
 local ok3, tree_out = cmd.func("tester", "tree alice 3")
 assert(not tree_out:find("absorbed"), "tree is a leaf after rollback")
 print("PASS: tree is a leaf after rollback")
+
+-- ── deep chain: the canvas overflows and gets working scrollbars ──────────
+-- eight sequential merges into one entry, all within the same wall-clock
+-- second: the history walk orders merges by event id, so the whole chain
+-- must still be visible (a timestamp-based walk would stop after the first)
+local base_entry = dbmanager.new_entry()
+dbmanager.add_name(base_entry, "target")
+dbmanager.add_ip(base_entry, "10.0.0.1")
+for i = 1, 8 do
+	local p = dbmanager.new_entry()
+	dbmanager.add_name(p, "p" .. i)
+	dbmanager.add_ip(p, "10.0.0." .. (i + 1))
+	db:exec("BEGIN")
+	dbmanager.new_merge_event(p, base_entry, "target", "10.0.0." .. (i + 1))
+	dbmanager.reassociate_entry(p, base_entry)
+	db:exec("COMMIT")
+end
+
+gui({ go = true, root = "target", depth = "8" })
+local deep_fs = formspecs[#formspecs]
+assert(deep_fs:find("merge_scroll_h"), "deep tree gets a horizontal scrollbar")
+assert(deep_fs:find("scroll_container%["), "deep tree content is inside a scroll container")
+assert_valid_scrollbars(deep_fs, "deep tree")
+-- the oldest chain merge and the newest one both have nodes: the whole
+-- same-second chain was walked, not just its last event
+assert(deep_fs:find("node_%d+_10"), "newest chain merge is in the tree")
+assert(deep_fs:find("node_%d+_3"), "oldest same-second chain merge is in the tree")
+print("PASS: gui deep tree renders with a valid horizontal scrollbar")
+-- clicking a deep node (carrying merge id 8) opens its detail; the scroll
+-- position sent along with the click is remembered
+gui({ merge_scroll_h = "33", ["node_" .. (deep_fs:match("node_(%d+)_8") or "") .. "_8"] = true })
+assert(formspecs[#formspecs]:find("Merge #8", 1, true), "clicking a deep node opens its merge detail")
+print("PASS: gui deep node click works")
+gui({ back = true })
+assert(formspecs[#formspecs]:find(";merge_scroll_h;33]"), "scroll position survives re-renders")
+print("PASS: gui scroll position is kept across re-renders")
+
+-- ── the production merge path (register_new_ids): identifier timestamps ───
+-- must survive the move, so that created_at keeps meaning "first seen"
+local zoe = dbmanager.new_entry()
+dbmanager.add_name(zoe, "zoe")
+dbmanager.add_ip(zoe, "9.9.9.9")
+local ghost = dbmanager.new_entry()
+dbmanager.add_name(ghost, "ghost")
+dbmanager.add_ip(ghost, "8.8.8.8")
+db:exec("UPDATE Usernames SET created_at = datetime('now', '-30 days'), last_seen = datetime('now', '-30 days') WHERE name = 'ghost'")
+db:exec("UPDATE IPs SET created_at = datetime('now', '-30 days'), last_seen = datetime('now', '-30 days') WHERE ip = '8.8.8.8'")
+local g_name_before = dbmanager.user_exists("ghost")
+local g_ip_before = dbmanager.ip_exists("8.8.8.8")
+local month_ago = os.date("!%Y-%m-%d %H:%M:%S", os.time() - 25 * 86400)
+assert(g_name_before.created_at < month_ago, "ghost's identifiers are backdated")
+-- zoe logs in from ghost's IP: ghost's entry is absorbed into zoe's entry
+assert(not ipdb.register_new_ids("zoe", "8.8.8.8"), "register_new_ids performs the merge")
+local g_name = dbmanager.user_exists("ghost")
+local g_ip = dbmanager.ip_exists("8.8.8.8")
+assert(g_name and g_name.userentry_id == zoe, "ghost now lives on zoe's entry")
+assert(g_ip and g_ip.userentry_id == zoe, "8.8.8.8 now lives on zoe's entry")
+assert(dbmanager.get_userentry(ghost) == nil, "the emptied source entry was removed by the cleanup triggers")
+assert(g_name.created_at == g_name_before.created_at, "name created_at preserved through the merge")
+assert(g_name.last_seen == g_name_before.last_seen, "name last_seen preserved through the merge")
+assert(g_ip.created_at == g_ip_before.created_at, "ip created_at preserved through the merge")
+assert(g_ip.last_seen ~= g_ip_before.last_seen, "the triggering ip's last_seen was bumped")
+print("PASS: production merge preserves identifier timestamps")
+-- the tree's "before the merge" node must not list what arrived in the merge
+local ok_t, troot = pcall(dbmanager.get_merge_tree, zoe, 4)
+assert(ok_t and troot and troot.children and troot.children[1].kind == "src"
+       and troot.children[1].entry_id == ghost, "absorbed entry is the src child")
+assert(#troot.children[2].names == 1 and troot.children[2].names[1] == "zoe",
+       "before-node lists only identifiers that predate the merge")
+print("PASS: before-node excludes identifiers that arrived in the merge")
 
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then os.exit(1) end

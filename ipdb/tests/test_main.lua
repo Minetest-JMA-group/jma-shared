@@ -100,11 +100,12 @@ db:exec("UPDATE Usernames SET created_at = datetime('now', '+1 minute') WHERE na
 -- ── 3. History queries ==================================================
 local ok_t, tree, terr = pcall(dbmanager.get_merge_tree, A, 4)
 check(ok_t and tree ~= nil, "get_merge_tree on live entry succeeds")
-check(tree.root.children ~= nil and #tree.root.children == 2, "root has two children (src + continuation)")
-check(tree.root.children[1].kind == "src" and tree.root.children[1].entry_id == B, "src child is the absorbed entry")
-check(tree.root.children[2].kind == "cont" and tree.root.children[2].entry_id == A, "cont child is the same entry before the merge")
-check(#tree.root.children[1].names == 1 and tree.root.children[1].names[1] == "bob", "src child shows the logged identifiers")
-check(tree.root.children[2].names[1] == "alice", "cont child shows identifiers as of the merge")
+check(tree.children ~= nil and #tree.children == 2, "root has two children (src + continuation)")
+check(tree.children[1].kind == "src" and tree.children[1].entry_id == B, "src child is the absorbed entry")
+check(tree.children[2].kind == "cont" and tree.children[2].entry_id == A, "cont child is the same entry before the merge")
+check(#tree.children[1].names == 1 and tree.children[1].names[1] == "bob", "src child shows the logged identifiers")
+check(#tree.children[2].names == 1 and tree.children[2].names[1] == "alice",
+      "cont child shows only identifiers that predate the merge")
 local ok_t2, tree2 = pcall(dbmanager.get_merge_tree, B, 4)
 check(not ok_t2 or tree2 == nil, "tree of a dead entry id is refused")
 
@@ -137,7 +138,7 @@ check(ok_r2 and rep2 == nil and reason2:find("already been rolled back", 1, true
 
 -- ── 5. Tree after rollback ==============================================
 local ok_t3, tree3 = pcall(dbmanager.get_merge_tree, A, 4)
-check(ok_t3 and tree3.root.children == nil, "tree from A is a leaf after rollback (reverted merges skipped)")
+check(ok_t3 and tree3.children == nil, "tree from A is a leaf after rollback (reverted merges skipped)")
 
 -- ── 6. AUTOINCREMENT: ids are never reused ===============================
 local max_before = 0

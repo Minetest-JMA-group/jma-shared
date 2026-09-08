@@ -91,13 +91,6 @@ if mode == "build-v4" then
 		dbmanager.delete_entry(B4)
 	end)
 	check(okm2, "build-v4: merge M2 logged")
-	-- simulate id reuse on v4 (no AUTOINCREMENT yet): with only entry 1 left,
-	-- the first insert takes id 2 and the second reuses the freed max id 3.
-	-- Wait a second first: a reuse in the same second as the merge is
-	-- indistinguishable from the merge itself by timestamps
-	os.execute("sleep 1")
-	dbmanager.new_entry()
-	dbmanager.new_entry()
 	local n = 0
 	for r in db:nrows("SELECT COUNT(*) AS c FROM MergeEvent") do n = r.c end
 	check(n == 2, "build-v4: two merge events logged")
@@ -114,17 +107,19 @@ elseif mode == "upgrade" then
 	      and dbmanager.user_exists("carol") ~= nil, "upgrade: data preserved")
 	local evs = dbmanager.get_merge_events(10)
 	check(#evs == 2, "upgrade: merge history preserved")
-	check(evs[1] and evs[1].entry_src == 3 and evs[1].entry_dst == 1, "upgrade: M2 references intact")
-	check(dbmanager.get_merge_event(1).reverted_at == nil, "upgrade: reverted_at column readable")
-	-- the reused id is held by a live entry created after both merges
-	local holder = dbmanager.get_userentry(3)
-	check(holder ~= nil, "upgrade: reused id 3 held by a live entry")
-	local older = dbmanager.count_older_merges(3, holder.created_at)
-	check(older == 1, "upgrade: the merge predating the reuser is counted as foreign")
-	-- the tree of the reuser must not show the previous entry's history
-	local ok_t, tree = pcall(dbmanager.get_merge_tree, 3, 4)
-	check(ok_t and tree.root.children == nil, "upgrade: reuser's tree is a leaf")
-	check(tree.notes.older_merges[3] == 1, "upgrade: tree notes the hidden older merge")
+	local m1, m2 = dbmanager.get_merge_event(1), dbmanager.get_merge_event(2)
+	check(m1 and m1.entry_src == 2 and m1.entry_dst == 3, "upgrade: M1 (2 into 3) references intact")
+	check(m2 and m2.entry_src == 3 and m2.entry_dst == 1, "upgrade: M2 (3 into 1) references intact")
+	check(m1.reverted_at == nil and m2.reverted_at == nil, "upgrade: reverted_at column readable")
+	-- Entry ids are unambiguous (AUTOINCREMENT): rolling M2 back restores id 3,
+	-- and entry 3's own older history (M1) stays visible in its tree instead of
+	-- being mistaken for a foreign entry's history
+	local ok_r, report = pcall(dbmanager.rollback_merge, 2, {})
+	check(ok_r and report ~= nil, "upgrade: rollback of M2 succeeds")
+	local tree = dbmanager.get_merge_tree(3, 4)
+	check(tree ~= nil and tree.children ~= nil, "upgrade: recreated entry #3 has a history")
+	check(tree.children[1].kind == "src" and tree.children[1].entry_id == 2,
+	      "upgrade: tree of #3 shows M1 (entry 2 absorbed into 3)")
 	-- AUTOINCREMENT active after the upgrade
 	local maxid = 0
 	for r in dbconn.db:nrows("SELECT MAX(id) AS m FROM UserEntry") do maxid = r.m end

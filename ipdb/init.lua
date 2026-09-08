@@ -52,8 +52,9 @@ local dbmanager = dofile(modpath .. "/dbmanager.lua")
 local dbconn = dbmanager.init_ipdb(sqlite)
 local no_newentries
 local log_merges
+local log_retention_time
 local LOG_PRUNING_INTERVAL = algorithms.parse_time("3h")
-local LOG_RETENTION_TIME = algorithms.parse_time("15D")
+local LOG_RETENTION_DEFAULT = algorithms.parse_time("15D")
 local mergers = {}
 local entryid_mergers = {}
 if not dbconn then
@@ -77,24 +78,44 @@ do
 	local ok, err = pcall(function()
 		no_newentries = dbmanager.get_meta("no_new_entries") == "true"
 		log_merges = dbmanager.get_meta("log_merges") == "true"
+		local retention = tonumber(dbmanager.get_meta("merge_log_retention"))
+		log_retention_time = (retention and retention > 0) and retention or LOG_RETENTION_DEFAULT
 	end)
 	if not ok then
 		log(err)
 		no_newentries = true
 		log_merges = true
+		log_retention_time = LOG_RETENTION_DEFAULT
 	end
 end
 
-local function start_mergelog_cleanup()
-	if not log_merges then
-		return
-	end
-	local ok, err = pcall(dbmanager.prune_merge_events, LOG_RETENTION_TIME)
+-- Prune merge events older than the retention period (no-op while logging is off)
+local function prune_merge_log()
+	if not log_merges then return end
+	local ok, err = pcall(dbmanager.prune_merge_events, log_retention_time)
 	if not ok then
 		log(err)
 		core.log("error", "[ipdb]: Failed to prune merge log")
 	end
-	core.after(LOG_PRUNING_INTERVAL, start_mergelog_cleanup)
+end
+
+-- Run the prune immediately, then keep re-arming itself every pruning
+-- interval while merge logging is enabled
+local cleanup_running = false
+local function run_cleanup_loop()
+	prune_merge_log()
+	if log_merges then
+		core.after(LOG_PRUNING_INTERVAL, run_cleanup_loop)
+	else
+		cleanup_running = false
+	end
+end
+
+local function start_mergelog_cleanup()
+	if log_merges and not cleanup_running then
+		cleanup_running = true
+		run_cleanup_loop()
+	end
 end
 start_mergelog_cleanup()
 
@@ -184,21 +205,13 @@ local function register_new_ids(name, ip)
 					dbmanager.new_merge_event(ipent.userentry_id, user.userentry_id, name, ip)
 				end
 				merge_modstorage(ipent.userentry_id, user.userentry_id)
-				local ids = dbmanager.get_all_identifiers(ipent.userentry_id)
-				-- We removed the entry that came from the IP address, now we need to insert its ids into
-				-- the entry that came from the username
-				dbmanager.delete_entry(ipent.userentry_id)
-				local newipent_id
-				for _, old_ip in ipairs(ids.ips) do
-					local newid = dbmanager.add_ip(user.userentry_id, old_ip)
-					if old_ip == ip then
-						newipent_id = newid
-					end
-				end
-				for _, old_name in ipairs(ids.names) do
-					dbmanager.add_name(user.userentry_id, old_name)
-				end
-				dbmanager.update_last_seen(user.userentry_id, user.id, newipent_id)
+				-- Move the absorbed entry's identifiers to the entry of the
+				-- logged-in user. The identifier rows (and with them their
+				-- created_at and last_seen) are preserved; the cleanup triggers
+				-- delete the emptied source entry on their own. Only the
+				-- triggering identifier's last_seen is bumped below.
+				dbmanager.reassociate_entry(ipent.userentry_id, user.userentry_id)
+				dbmanager.update_last_seen(user.userentry_id, user.id, ipent.id)
 			else
 				dbmanager.update_last_seen(user.userentry_id, user.id, ipent.id)
 			end
@@ -320,6 +333,7 @@ isolate name|ip <identifier>: Create an isolated entry (no_merging flag set) and
 newentries [yes|no]: If the argument is given, change whether new user entries are allowed or not. Otherwise print current value.
 list <IP|username>: List all IPs and usernames linked with the given one
 log_merges [yes|no]: If the argument is given, change whether entry merge events are logged. Otherwise print the current value.
+log_retention [<time>]: Show or change how long merge events are kept before they are pruned (e.g. 15D, 48h, 1800 seconds)
 move <what> <where>: Move the name/IP given in `what` to the entry that name/IP given in `where` belongs to
 merges [N]: List the last N merge events
 merge <id>: Show the details of a merge event
@@ -445,6 +459,29 @@ core.register_chatcommand("ipdb", {
 				local state = log_merges and "logged" or "not logged"
 				return true, "Entry merges are currently " .. state .. "."
 			end
+		end
+
+		if cmd == "log_retention" then
+			local arg = iter()
+			if arg then
+				local secs = algorithms.parse_time(arg)
+				if secs <= 0 then
+					return false, "Usage: /ipdb log_retention <time>  (e.g. 15D, 48h, 1800)"
+				end
+				local ok, err = pcall(dbmanager.set_meta, "merge_log_retention", tostring(secs))
+				if not ok then
+					log(err)
+					return false, "Internal error"
+				end
+				log_retention_time = secs
+				local msg = string.format("Merge events will now be kept for %s (%d seconds).", arg, secs)
+				if log_merges then
+					prune_merge_log()
+					msg = msg .. " Older events were pruned."
+				end
+				return true, msg
+			end
+			return true, "Merge events are currently kept for "..log_retention_time.." seconds."
 		end
 
 		if cmd == "list" then
@@ -683,7 +720,10 @@ core.register_chatcommand("ipdb", {
 				if not entryid then
 					return "The given identifier is unknown to ipdb"
 				end
-				local tree = dbmanager.get_merge_tree(entryid, depth)
+				local root = dbmanager.get_merge_tree(entryid, depth)
+				if not root then
+					return "The given identifier is unknown to ipdb"
+				end
 				local lines = {}
 				local function render(node, prefix, is_root, is_last)
 					table.insert(lines, prefix .. (is_root and "" or (is_last and "└─ " or "├─ ")) .. tree_label(node, is_root))
@@ -693,13 +733,7 @@ core.register_chatcommand("ipdb", {
 						render(node.children[2], child_prefix, false, true)
 					end
 				end
-				render(tree.root, "", true, false)
-				for _, r in ipairs(tree.notes.reused) do
-					table.insert(lines, "note: entry id #"..r.id.." is currently held by a different entry (created "..r.created_at..")")
-				end
-				for entryid, n in pairs(tree.notes.older_merges) do
-					table.insert(lines, "note: "..n.." merge event(s) belong to a previous entry that had id #"..entryid)
-				end
+				render(root, "", true, false)
 				return table.concat(lines, "\n")
 			end)
 			if not ok then

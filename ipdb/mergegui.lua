@@ -94,12 +94,12 @@ local function layout_tree(root)
 	return { nodes = nodes, edges = edges, height = height }
 end
 
----@param tree table
+---@param root MergeTreeNode
 ---@param entry_id integer
 ---@param merge_id integer
 ---@return MergeTreeNode?
-local function find_node(tree, entry_id, merge_id)
-	local stack = { tree.root }
+local function find_node(root, entry_id, merge_id)
+	local stack = { root }
 	while #stack > 0 do
 		local n = table.remove(stack)
 		local nid = n.merge and n.merge.id or 0
@@ -115,6 +115,25 @@ end
 
 -- ═══════════════ Screens ═══════════════
 
+-- The canvas is a rectangular viewport below the input row. The tree is drawn
+-- in canvas coordinates (origin at the viewport's top left). When the tree
+-- does not fit, scrollbars are added and the content is wrapped in matching
+-- scroll_containers; containers are nested when both axes overflow. Since
+-- Luanti 5.14 the 6th scroll_container argument is a content padding for the
+-- automatic max/thumbsize calculation, and scrollbar[] always takes a value
+-- argument - both are satisfied below.
+local VIEW_X, VIEW_Y = 0.2, 1.15
+local VIEW_W, VIEW_H = 11.3, 6.3
+local VBAR_X = 11.5
+local VBAR_H = VIEW_H
+local HBAR_Y = 7.55
+local HBAR_H = 0.4
+
+local function scrollbar(x, y, w, h, orientation, name, value)
+	return string.format("scrollbar[%.2f,%.2f;%.2f,%.2f;%s;%s;%d]",
+		x, y, w, h, orientation, name, value or 0)
+end
+
 local function tree_formspec(state)
 	local fs = "formspec_version[6]" ..
 		"size[12,8]" ..
@@ -128,8 +147,9 @@ local function tree_formspec(state)
 	if not state.tree then
 		return fs .. "label[0.4,1.3;Enter a name, an IP address or an entry id above and press Show tree.]"
 	end
-	local layout = layout_tree(state.tree.root)
+	local layout = layout_tree(state.tree)
 	local content = {}
+	local canvas_w, canvas_h = 0, 0
 	for _, e in ipairs(layout.edges) do
 		content[#content+1] = string.format("box[%.2f,%.2f;%.2f,%.2f;" .. EDGE_COLOR .. "]", e.x, e.y, e.w, e.h)
 	end
@@ -137,26 +157,38 @@ local function tree_formspec(state)
 		local mid = n.node.merge and n.node.merge.id or 0
 		content[#content+1] = string.format("button[%.2f,%.2f;%.2f,%.2f;node_%d_%d;%s]",
 			n.x, n.y, NODE_W, NODE_H, n.node.entry_id, mid, esc(node_label(n.node, n.node.kind == "root")))
+		canvas_w = math.max(canvas_w, n.x + NODE_W)
+		canvas_h = math.max(canvas_h, n.y + NODE_H)
 	end
-	-- notes about id reuse found along the walk
-	local notes = {}
-	for _, r in ipairs(state.tree.notes.reused) do
-		table.insert(notes, "id #"..r.id.." is held by a different entry (created "..r.created_at..")")
+	canvas_h = canvas_h + 0.2
+	local body = table.concat(content)
+	local needs_v = canvas_h > VIEW_H - 0.1
+	local needs_h = canvas_w > VIEW_W - 0.1
+	if needs_v then
+		fs = fs .. scrollbar(VBAR_X, VIEW_Y, 0.4, VBAR_H, "vertical", "merge_scroll", state.sv)
+		fs = fs .. string.format("scroll_container[%.2f,%.2f;%.2f,%.2f;merge_scroll;vertical;0.1;0]",
+			VIEW_X, VIEW_Y, VIEW_W, VIEW_H)
+		if needs_h then
+			-- the horizontal container is the vertical container's only child,
+			-- sized to the full canvas; its own scrollbar sits below the canvas
+			fs = fs .. string.format("scroll_container[0,0;%.2f,%.2f;merge_scroll_h;horizontal;0.1;0]",
+				canvas_w, canvas_h) .. body .. "scroll_container_end[]"
+		else
+			fs = fs .. body
+		end
+		fs = fs .. "scroll_container_end[]"
+		if needs_h then
+			fs = fs .. scrollbar(VIEW_X, HBAR_Y, VIEW_W, HBAR_H, "horizontal", "merge_scroll_h", state.sh)
+		end
+	elseif needs_h then
+		fs = fs .. scrollbar(VIEW_X, HBAR_Y, VIEW_W, HBAR_H, "horizontal", "merge_scroll_h", state.sh)
+		fs = fs .. string.format("scroll_container[%.2f,%.2f;%.2f,%.2f;merge_scroll_h;horizontal;0.1;0]",
+			VIEW_X, VIEW_Y, VIEW_W, VIEW_H) .. body .. "scroll_container_end[]"
+	else
+		-- everything fits: draw the canvas plainly
+		fs = fs .. "container[" .. string.format("%.2f,%.2f", VIEW_X, VIEW_Y) .. "]" .. body .. "container_end[]"
 	end
-	for entryid, n in pairs(state.tree.notes.older_merges) do
-		table.insert(notes, n.." merge(s) belong to a previous entry that had id #"..entryid)
-	end
-	local ny = layout.height + 0.35
-	for _, note in ipairs(notes) do
-		content[#content+1] = string.format("label[0.2,%.2f;%s]", ny, esc(note))
-		ny = ny + 0.4
-	end
-	local content_h = math.max(ny, 1.5)
-	return fs ..
-		"scrollbar[11.5,1.15;0.4,6.45;vertical;merge_scroll]" ..
-		"scroll_container[0.2,1.15;11.3,6.45;merge_scroll;vertical;0.1;" .. string.format("%.2f]", content_h) ..
-		table.concat(content) ..
-		"scroll_container_end[]"
+	return fs
 end
 
 local function detail_formspec(state)
@@ -335,11 +367,19 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	local name = player:get_player_name()
 	local state = gui_states[name]
 	if not state then return end
+	-- Remember where the user had scrolled to, so a re-render keeps the position
+	if fields.merge_scroll then
+		state.sv = tonumber(fields.merge_scroll) or state.sv or 0
+	end
+	if fields.merge_scroll_h then
+		state.sh = tonumber(fields.merge_scroll_h) or state.sh or 0
+	end
 	if fields.quit or fields.close then
 		gui_states[name] = nil
 		return
 	end
 	if fields.go then
+		state.sv, state.sh = 0, 0
 		state.root = fields.root
 		local depth = tonumber(fields.depth) or 4
 		if depth < 1 or depth > 8 then
@@ -442,6 +482,8 @@ M.show = function(name)
 		reason = nil,
 		decisions = {},
 		report = nil,
+		sv = 0,
+		sh = 0,
 	}
 	show(gui_states[name], name)
 end

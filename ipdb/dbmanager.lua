@@ -1424,6 +1424,31 @@ dbmanager.rollback_merge = function(merge_id, plan)
 	}
 end
 
+local hidden_merges_stmt
+-- Count the unreverted merges of the given entry that predate the given
+-- merge event (all of them, when the bound is nil): the history that a depth
+-- limit has hidden behind a capped node
+---@param entryid integer
+---@param max_merge_id integer?
+---@return integer
+local function count_hidden_merges(entryid, max_merge_id)
+	if not hidden_merges_stmt then
+		hidden_merges_stmt = ipdb:prepare("SELECT COUNT(*) FROM MergeEvent WHERE entry_dst = ? "..
+		                                  "AND reverted_at IS NULL AND (? IS NULL OR id < ?)")
+		if not hidden_merges_stmt then error(ipdb:errmsg()) end
+	else
+		hidden_merges_stmt:reset()
+	end
+	local ret = hidden_merges_stmt:bind_values(entryid, max_merge_id, max_merge_id)
+	if ret ~= sqlite.OK then error(ret) end
+	ret = hidden_merges_stmt:step()
+	if ret ~= sqlite.ROW then error(ret) end
+	local count = hidden_merges_stmt:get_value(0)
+	ret = hidden_merges_stmt:step()
+	if ret ~= sqlite.DONE then error(ret) end
+	return count
+end
+
 ---@class MergeTreeNode
 ---@field entry_id integer
 ---@field live boolean
@@ -1432,6 +1457,7 @@ end
 ---@field names string[]
 ---@field ips string[]
 ---@field children MergeTreeNode[]?
+---@field hidden_merges integer?  -- older merges cut off by the depth limit behind this leaf
 
 -- Build a node of the merge history tree for an entry: the node is the entry
 -- at a point in time, its children are the absorbed entry and the entry
@@ -1477,6 +1503,12 @@ local function build_tree_node(entryid, max_merge_id, live, kind, edge_merge, ed
 		end
 	end
 	if depth >= max_depth then
+		-- the depth limit cut this branch short: report how much older
+		-- history of this entry is hidden behind the leaf
+		local hidden = count_hidden_merges(entryid, max_merge_id)
+		if hidden > 0 then
+			node.hidden_merges = hidden
+		end
 		return node
 	end
 	local m

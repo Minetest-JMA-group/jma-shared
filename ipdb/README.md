@@ -62,7 +62,7 @@ Requires `ban` privilege.
 | `/ipdb move <what> <where>` | Move the name/IP given in `what` to the entry that name/IP given in `where` belongs to. |
 | `/ipdb merges [N]` | List the last N merge events (default 15). |
 | `/ipdb merge <id>` | Show the details of a merge event and whether it can be rolled back. |
-| `/ipdb tree <name\|IP\|entryid> [depth]` | Show the merge history of an entry as a binary tree (default depth 4, max 8). |
+| `/ipdb tree <name\|IP\|entryid> [depth]` | Show the merge history of an entry as a binary tree (default depth 4, max 20). |
 | `/ipdb unmerge <id> [keep\|forget]` | Roll back a merge event. Identifiers created after the merge are kept unless `forget` is given. |
 | `/ipdb merge_gui` | Open the merge history GUI (tree view, detail view, rollback with per-identifier decisions). |
 

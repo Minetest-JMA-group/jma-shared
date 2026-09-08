@@ -148,5 +148,49 @@ local fresh = dbmanager.new_entry()
 check(fresh > max_before, "new entry id is greater than the deleted max (no reuse)")
 dbmanager.delete_entry(fresh)
 
+-- ── 7. Branched history: an absorbed entry with its own earlier merge ──────
+local T = dbmanager.new_entry()
+dbmanager.add_name(T, "tina")
+dbmanager.add_ip(T, "7.7.7.7")
+local U = dbmanager.new_entry()
+dbmanager.add_name(U, "uma")
+dbmanager.add_ip(U, "6.6.6.6")
+local V = dbmanager.new_entry()
+dbmanager.add_name(V, "vlad")
+dbmanager.add_ip(V, "5.5.5.5")
+local ok_b1 = pcall(function()
+	dbmanager.new_merge_event(V, U, "uma", "5.5.5.5")
+	dbmanager.reassociate_entry(V, U)
+end)
+check(ok_b1, "branch: vlad absorbed into uma")
+local ok_b2 = pcall(function()
+	dbmanager.new_merge_event(U, T, "tina", "6.6.6.6")
+	dbmanager.reassociate_entry(U, T)
+end)
+check(ok_b2, "branch: uma (with vlad) absorbed into tina")
+local ok_b, btree = pcall(dbmanager.get_merge_tree, T, 4)
+check(ok_b and btree ~= nil, "branch: tree of the final entry builds")
+check(btree.children and btree.children[1].kind == "src" and btree.children[1].entry_id == U,
+      "branch: the absorbed entry hangs off the root")
+check(btree.children[1].children and btree.children[1].children[1].kind == "src"
+      and btree.children[1].children[1].entry_id == V,
+      "branch: the absorbed entry's own absorbed entry is shown deeper")
+check(btree.children[1].children[2].kind == "cont" and btree.children[1].children[2].entry_id == U,
+      "branch: the continuation under the absorbed entry is its pre-merge state")
+check(#btree.children[1].children[1].names == 1 and btree.children[1].children[1].names[1] == "vlad",
+      "branch: the deepest src node shows the logged identifiers")
+-- the deepest visible leaves are real leaves, not depth-capped ones
+local function leaves_are_plain(node)
+	if node.children then
+		return leaves_are_plain(node.children[1]) and leaves_are_plain(node.children[2])
+	end
+	return node.hidden_merges == nil
+end
+check(leaves_are_plain(btree), "branch: no depth truncation at depth 4")
+-- truncation: the same tree at depth 1 must report the hidden merges
+local ok_t1, ttree1 = pcall(dbmanager.get_merge_tree, T, 1)
+check(ok_t1 and ttree1.children and ttree1.children[1].hidden_merges == 1,
+      "branch: depth-capped leaf reports the hidden older merge")
+
 print(string.format("\n%d passed, %d failed", ok, fail))
 if fail > 0 then os.exit(1) end

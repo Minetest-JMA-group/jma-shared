@@ -713,7 +713,7 @@ core.register_chatcommand("ipdb", {
 			end
 			local depth = tonumber(iter() or "4") or 4
 			if depth < 1 or depth > 8 then
-				return false, "Depth must be between 1 and 8"
+				return false, "Depth must be between 1 and 20"
 			end
 			local ok, ret = pcall(function()
 				local entryid = resolve_entry(arg)
@@ -725,8 +725,13 @@ core.register_chatcommand("ipdb", {
 					return "The given identifier is unknown to ipdb"
 				end
 				local lines = {}
+				local notes = {}
 				local function render(node, prefix, is_root, is_last)
 					table.insert(lines, prefix .. (is_root and "" or (is_last and "└─ " or "├─ ")) .. tree_label(node, is_root))
+					if node.hidden_merges then
+						table.insert(notes, string.format("note: entry #%d has %d older merge(s) not shown; increase the depth to see them",
+							node.entry_id, node.hidden_merges))
+					end
 					if node.children then
 						local child_prefix = prefix .. (is_root and "" or (is_last and "   " or "│  "))
 						render(node.children[1], child_prefix, false, false)
@@ -734,6 +739,9 @@ core.register_chatcommand("ipdb", {
 					end
 				end
 				render(root, "", true, false)
+				for _, note in ipairs(notes) do
+					table.insert(lines, note)
+				end
 				return table.concat(lines, "\n")
 			end)
 			if not ok then

@@ -161,6 +161,16 @@ local function tree_formspec(state)
 		canvas_h = math.max(canvas_h, n.y + NODE_H)
 	end
 	canvas_h = canvas_h + 0.2
+	-- notes about history cut off by the depth limit, drawn below the canvas
+	for _, n in ipairs(layout.nodes) do
+		if n.node.hidden_merges then
+			content[#content+1] = string.format("label[0,%.2f;%s]",
+				canvas_h, esc(string.format("entry #%d has %d older merge(s) - increase the depth to see them",
+					n.node.entry_id, n.node.hidden_merges)))
+			canvas_h = canvas_h + 0.4
+		end
+	end
+	canvas_h = canvas_h + 0.1
 	local body = table.concat(content)
 	local needs_v = canvas_h > VIEW_H - 0.1
 	local needs_h = canvas_w > VIEW_W - 0.1
@@ -383,7 +393,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		state.root = fields.root
 		local depth = tonumber(fields.depth) or 4
 		if depth < 1 or depth > 8 then
-			state.error = "Depth must be between 1 and 8"
+			state.error = "Depth must be between 1 and 20"
 			show(state, name)
 			return
 		end

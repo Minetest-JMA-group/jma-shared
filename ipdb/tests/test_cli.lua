@@ -262,6 +262,31 @@ assert(g_name.last_seen == g_name_before.last_seen, "name last_seen preserved th
 assert(g_ip.created_at == g_ip_before.created_at, "ip created_at preserved through the merge")
 assert(g_ip.last_seen ~= g_ip_before.last_seen, "the triggering ip's last_seen was bumped")
 print("PASS: production merge preserves identifier timestamps")
+
+-- ── depth truncation: the tree reports history cut off by the limit ───────
+local tr = dbmanager.new_entry()
+dbmanager.add_name(tr, "trunc")
+dbmanager.add_ip(tr, "11.0.0.1")
+for i = 1, 5 do
+	local p = dbmanager.new_entry()
+	dbmanager.add_name(p, "q" .. i)
+	dbmanager.add_ip(p, "11.0.0." .. (i + 1))
+	db:exec("BEGIN")
+	dbmanager.new_merge_event(p, tr, "trunc", "11.0.0." .. (i + 1))
+	dbmanager.reassociate_entry(p, tr)
+	db:exec("COMMIT")
+end
+local ok_tn, trunc_ret = cmd.func("tester", "tree trunc 2")
+assert(ok_tn and trunc_ret:find("3 older merge", 1, true),
+       "shallow tree reports the hidden history: " .. tostring(trunc_ret))
+print("PASS: shallow tree reports hidden older merges")
+local ok_tn2, full_ret = cmd.func("tester", "tree trunc 8")
+assert(ok_tn2 and not full_ret:find("older merge", 1, true), "full-depth tree has no truncation note")
+print("PASS: full-depth tree has no truncation note")
+-- the GUI shows the same note below the canvas
+gui({ go = true, root = "trunc", depth = "2" })
+assert(formspecs[#formspecs]:find("older merge", 1, true), "gui tree shows the truncation note")
+print("PASS: gui tree shows the truncation note")
 -- the tree's "before the merge" node must not list what arrived in the merge
 local ok_t, troot = pcall(dbmanager.get_merge_tree, zoe, 4)
 assert(ok_t and troot and troot.children and troot.children[1].kind == "src"

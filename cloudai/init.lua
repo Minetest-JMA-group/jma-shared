@@ -16,7 +16,7 @@ if has_shareddb then
 end
 local base_url = core.settings:get("cloudai.url") or "https://api.deepseek.com"
 base_url = base_url:gsub("/$", "")
-local default_model = "deepseek-v4-flash"
+local default_model = "deepseek-flash"
 local model = core.settings:get("cloudai.model") or default_model
 local timeout = core.settings:get("cloudai.timeout") or 10
 local api_key = core.settings:get("cloudai.api_key")

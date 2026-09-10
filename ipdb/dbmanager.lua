@@ -1513,8 +1513,9 @@ end
 ---@param edge_log table?
 ---@param depth integer
 ---@param max_depth integer
+---@param self_log table?  -- the last surviving record of this entry's own identifiers
 ---@return MergeTreeNode
-local function build_tree_node(entryid, max_merge_id, live, kind, edge_merge, edge_log, depth, max_depth)
+local function build_tree_node(entryid, max_merge_id, live, kind, edge_merge, edge_log, depth, max_depth, self_log)
 	local node = {
 		entry_id = entryid,
 		live = live,
@@ -1534,19 +1535,31 @@ local function build_tree_node(entryid, max_merge_id, live, kind, edge_merge, ed
 	elseif kind == "src" then
 		node.name_rows = edge_log.names
 		node.ip_rows = edge_log.ips
-	elseif live and edge_merge then
+	elseif edge_merge then
 		-- "as it was just before the merge": exclude the identifiers that
 		-- arrived in this very merge (they belong on the src side, and their
 		-- created_at says nothing about when they joined this entry)
 		local arrived_names, arrived_ips = {}, {}
 		for _, row in ipairs(edge_log.names) do arrived_names[row.name] = true end
 		for _, row in ipairs(edge_log.ips) do arrived_ips[row.ip] = true end
-		local ids = dbmanager.get_identifiers_at(entryid, os.date("!%Y-%m-%d %H:%M:%S", edge_merge.timestamp))
-		for _, row in ipairs(ids.names) do
-			if not arrived_names[row.name] then table.insert(node.name_rows, row) end
+		-- Where this entry's identifiers are read from. While the entry still
+		-- exists that is the live tables. Once it has been absorbed it does not
+		-- exist to ask, and its rows belong to its absorber, so the log of the
+		-- merge that absorbed it is used instead - that recorded them, with
+		-- their timestamps, and is the only surviving record of an entry that
+		-- is gone. Without it every "before the merge" node below an absorbed
+		-- entry came out empty.
+		local before = self_log or dbmanager.get_identifiers_at(entryid)
+		local merge_ts = os.date("!%Y-%m-%d %H:%M:%S", edge_merge.timestamp)
+		for _, row in ipairs(before.names) do
+			if not arrived_names[row.name] and row.created_at <= merge_ts then
+				table.insert(node.name_rows, row)
+			end
 		end
-		for _, row in ipairs(ids.ips) do
-			if not arrived_ips[row.ip] then table.insert(node.ip_rows, row) end
+		for _, row in ipairs(before.ips) do
+			if not arrived_ips[row.ip] and row.created_at <= merge_ts then
+				table.insert(node.ip_rows, row)
+			end
 		end
 	end
 	for _, row in ipairs(node.name_rows) do table.insert(node.names, row.name) end
@@ -1570,8 +1583,11 @@ local function build_tree_node(entryid, max_merge_id, live, kind, edge_merge, ed
 		return node
 	end
 	local log = dbmanager.get_merge_log(m.id)
-	local src_node = build_tree_node(m.entry_src, m.id, false, "src", m, log, depth + 1, max_depth)
-	local cont_node = build_tree_node(entryid, m.id, live, "cont", m, log, depth + 1, max_depth)
+	-- The absorbed entry's own identifiers are exactly what this merge logged;
+	-- the entry as it was before the merge keeps whatever record of its own
+	-- identifiers its parent was working from
+	local src_node = build_tree_node(m.entry_src, m.id, false, "src", m, log, depth + 1, max_depth, log)
+	local cont_node = build_tree_node(entryid, m.id, live, "cont", m, log, depth + 1, max_depth, self_log)
 	node.children = { src_node, cont_node }
 	return node
 end

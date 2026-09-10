@@ -929,7 +929,11 @@ core.register_chatcommand("ipdb", {
 			end
 			local plan = {}
 			if flag then
-				for _, a in ipairs(info.additions) do plan[a.value] = flag end
+				-- rollback_merge knows "keep", "delete" and "move"; this
+				-- command says "forget" for the second, which reads better
+				-- next to "keep" but has to be translated to be acted on
+				local action = (flag == "forget") and "delete" or "keep"
+				for _, a in ipairs(info.additions) do plan[a.value] = action end
 			end
 			local err = db:exec("BEGIN")
 			if err ~= sqlite.OK then log(err); return false, "Internal error" end

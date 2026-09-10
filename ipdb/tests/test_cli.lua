@@ -803,6 +803,77 @@ do
 	print("PASS: a long refusal wraps instead of being cut off")
 end
 
+-- ── merge history survives an entry being absorbed later ─────────────────
+do
+	-- chain-inner is absorbed by chain-mid, which is then absorbed by
+	-- chain-outer: the middle entry no longer exists, so its own past has to
+	-- come from the log of the merge that absorbed it
+	local ch_d = dbmanager.new_entry()
+	dbmanager.add_name(ch_d, "chain-inner")
+	dbmanager.add_ip(ch_d, "198.51.100.61")
+	local ch_e = dbmanager.new_entry()
+	dbmanager.add_name(ch_e, "chain-mid")
+	dbmanager.add_ip(ch_e, "198.51.100.62")
+	dbmanager.new_merge_event(ch_d, ch_e, "chain-mid", "198.51.100.62")
+	dbmanager.reassociate_ids(ch_e, dbmanager.user_exists("chain-inner").id, dbmanager.ip_exists("198.51.100.61").id)
+	dbmanager.delete_entry(ch_d)
+	local ch_f = dbmanager.new_entry()
+	dbmanager.add_name(ch_f, "chain-outer")
+	dbmanager.add_ip(ch_f, "198.51.100.63")
+	dbmanager.new_merge_event(ch_e, ch_f, "chain-outer", "198.51.100.63")
+	dbmanager.reassociate_ids(ch_f, dbmanager.user_exists("chain-mid").id, dbmanager.ip_exists("198.51.100.62").id)
+	dbmanager.reassociate_ids(ch_f, dbmanager.user_exists("chain-inner").id, dbmanager.ip_exists("198.51.100.61").id)
+	dbmanager.delete_entry(ch_e)
+
+	local root = dbmanager.get_merge_tree(ch_f, 4)
+	local mid = root.children[1]
+	assert(mid.entry_id == ch_e and mid.kind == "src", "the absorbed entry is the src child")
+	assert(#mid.names == 2, "it is shown holding both identifiers, got " .. #mid.names)
+	local past = mid.children[2]
+	assert(past.entry_id == ch_e and past.kind == "cont", "its earlier state is the cont child")
+	assert(#past.names == 1 and past.names[1] == "chain-mid",
+		"its own past is reconstructed without what arrived later, got: " .. table.concat(past.names, ","))
+	assert(#past.ips == 1 and past.ips[1] == "198.51.100.62", "and likewise for its addresses")
+	print("PASS: an absorbed entry's own past is still shown")
+
+	-- and the screen that showed nothing now lists it
+	cmd.func("tester", "merge_gui")
+	gui({ go = true, root = "#"..ch_f, depth = "4" })
+	local chfs = formspecs[#formspecs]
+	local e_node = chfs:match("node_"..ch_e.."_(%d+)")
+	assert(e_node, "the middle entry is in the tree")
+	gui({ ["node_"..ch_e.."_"..e_node] = true })
+	assert(formspecs[#formspecs]:find("chain%-mid"), "the entry's identifiers are listed on its node")
+	print("PASS: the GUI lists them too")
+end
+
+-- ── unmerge forget actually deletes ──────────────────────────────────────
+do
+	local fsrc = dbmanager.new_entry()
+	dbmanager.add_name(fsrc, "forget-src")
+	dbmanager.add_ip(fsrc, "198.51.100.71")
+	local fdst = dbmanager.new_entry()
+	dbmanager.add_name(fdst, "forget-dst")
+	dbmanager.add_ip(fdst, "198.51.100.72")
+	dbmanager.new_merge_event(fsrc, fdst, "forget-dst", "198.51.100.72")
+	local fmid = dbmanager.get_merge_events(1)[1].id
+	dbmanager.reassociate_ids(fdst, dbmanager.user_exists("forget-src").id, dbmanager.ip_exists("198.51.100.71").id)
+	dbmanager.delete_entry(fsrc)
+	-- created after the merge, so it is what the decision is about
+	dbmanager.add_name(fdst, "forget-later")
+	db:exec("UPDATE Usernames SET created_at = datetime('now','+1 minute') WHERE name = 'forget-later'")
+
+	-- undecided, it refuses and says what the choices are
+	expect("unmerge "..fmid, false, "were created after this merge")
+	assert(dbmanager.user_exists("forget-later"), "nothing happens while it is undecided")
+
+	expect("unmerge "..fmid.." forget", true, "rolled back")
+	assert(dbmanager.user_exists("forget-later") == nil, "forget deletes the post-merge identifier")
+	local _, ev = pcall(dbmanager.get_merge_event, fmid)
+	assert(ev and ev.reverted_at, "the merge is marked reverted")
+	print("PASS: unmerge forget drops the post-merge identifiers")
+end
+
 -- the depth cap is 20 in the CLI too, not just in the message
 do
 	expect("tree alice 20", true, "current")

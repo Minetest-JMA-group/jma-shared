@@ -23,21 +23,41 @@ local function esc(s)
 	return core.formspec_escape(tostring(s or ""))
 end
 
--- Join a list of identifiers for display, capping the visible amount
+-- Width of one character in form units, measured from the client's formspec
+-- font, and the width of a line of text allowing for the left margin
+local CHAR_W = 0.15
+local TEXT_W = 11.4
+
+-- A label[] does not wrap: whatever runs past the right edge is simply gone.
+-- Split a list into lines that fit instead, indenting the continuation lines
+-- under the prefix so it still reads as one list. At most `limit` items are
+-- named; the rest are counted.
+---@param lines string[] # the lines are appended here
+---@param prefix string
 ---@param items string[]
 ---@param limit integer?
----@return string
-local function format_names(items, limit)
+local function append_list(lines, prefix, items, limit)
 	limit = limit or 6
-	local out = {}
+	local budget = math.floor(TEXT_W / CHAR_W)
+	local parts = {}
 	for i = 1, math.min(limit, #items) do
-		table.insert(out, items[i])
+		parts[#parts + 1] = items[i]
 	end
-	local s = table.concat(out, ", ")
 	if #items > limit then
-		s = s .. " … +" .. (#items - limit) .. " more"
+		parts[#parts + 1] = "… +" .. (#items - limit) .. " more"
 	end
-	return s
+	local indent = string.rep(" ", #prefix)
+	local cur = prefix
+	for i, part in ipairs(parts) do
+		local piece = (i == 1) and part or (", " .. part)
+		if i > 1 and #cur + #piece > budget then
+			table.insert(lines, cur .. ",")
+			cur = indent .. part
+		else
+			cur = cur .. piece
+		end
+	end
+	table.insert(lines, cur)
 end
 
 -- Label of an entry node, kept short enough to fit its button
@@ -59,39 +79,58 @@ end
 
 -- Lay out the tree: the x coordinate is the depth column, the y coordinate
 -- centers each node on its subtree. Returns positioned nodes, edge
--- rectangles and the total content height
-local XSTEP = 2.7
-local NODE_W = 2.3
+-- rectangles, the total content height, and the node width they were laid
+-- out for.
+local MIN_NODE_W = 2.3
+local MAX_NODE_W = 6.5
+local NODE_PAD = 0.3
+local NODE_GAP = 0.45
 local NODE_H = 0.35
 local LEAF_H = 0.7
 local EDGE_COLOR = "#4a6a9a"
 
 ---@param root MergeTreeNode
----@return { nodes: { node: MergeTreeNode, x: number, y: number }[], edges: { x: number, y: number, w: number, h: number }[], height: number }
+---@return { nodes: { node: MergeTreeNode, x: number, y: number }[], edges: { x: number, y: number, w: number, h: number }[], height: number, node_w: number }
 local function layout_tree(root)
+	-- Every node is sized to the widest label in this tree: the engine cuts
+	-- off a label wider than its button, which would hide exactly the
+	-- identifiers the tree exists to show
+	local widest = MIN_NODE_W
+	local function scan(node)
+		local w = #node_label(node, node.kind == "root") * CHAR_W + NODE_PAD
+		if w > widest then widest = w end
+		if node.children then
+			scan(node.children[1])
+			scan(node.children[2])
+		end
+	end
+	scan(root)
+	local node_w = math.min(widest, MAX_NODE_W)
+	local xstep = node_w + NODE_GAP
+
 	local nodes = {}
 	local edges = {}
 	local function rec(node, depth, yoffset)
 		if not node.children then
-			table.insert(nodes, { node = node, x = depth * XSTEP, y = yoffset + LEAF_H / 2 - NODE_H / 2 })
+			table.insert(nodes, { node = node, x = depth * xstep, y = yoffset + LEAF_H / 2 - NODE_H / 2 })
 			return LEAF_H
 		end
 		local h1 = rec(node.children[1], depth + 1, yoffset)
 		local h2 = rec(node.children[2], depth + 1, yoffset + h1)
 		local cy = yoffset + (h1 + h2) / 2
 		local py = cy - NODE_H / 2
-		local px = depth * XSTEP
+		local px = depth * xstep
 		table.insert(nodes, { node = node, x = px, y = py })
 		-- edges from the parent to both children
 		local child_centers = { yoffset + h1 / 2, yoffset + h1 + h2 / 2 }
 		for _, ccy in ipairs(child_centers) do
-			table.insert(edges, { x = px + NODE_W, y = cy - 0.02, w = XSTEP - NODE_W, h = 0.04 })
-			table.insert(edges, { x = px + NODE_W + (XSTEP - NODE_W) / 2 - 0.02, y = math.min(cy, ccy), w = 0.04, h = math.abs(cy - ccy) })
+			table.insert(edges, { x = px + node_w, y = cy - 0.02, w = xstep - node_w, h = 0.04 })
+			table.insert(edges, { x = px + node_w + (xstep - node_w) / 2 - 0.02, y = math.min(cy, ccy), w = 0.04, h = math.abs(cy - ccy) })
 		end
 		return h1 + h2
 	end
 	local height = rec(root, 0, 0.2)
-	return { nodes = nodes, edges = edges, height = height }
+	return { nodes = nodes, edges = edges, height = height, node_w = node_w }
 end
 
 ---@param root MergeTreeNode
@@ -160,8 +199,8 @@ local function tree_formspec(state)
 	for _, n in ipairs(layout.nodes) do
 		local mid = n.node.merge and n.node.merge.id or 0
 		content[#content+1] = string.format("button[%.2f,%.2f;%.2f,%.2f;node_%d_%d;%s]",
-			n.x, n.y, NODE_W, NODE_H, n.node.entry_id, mid, esc(node_label(n.node, n.node.kind == "root")))
-		canvas_w = math.max(canvas_w, n.x + NODE_W)
+			n.x, n.y, layout.node_w, NODE_H, n.node.entry_id, mid, esc(node_label(n.node, n.node.kind == "root")))
+		canvas_w = math.max(canvas_w, n.x + layout.node_w)
 		canvas_h = math.max(canvas_h, n.y + NODE_H)
 	end
 	canvas_h = canvas_h + 0.2
@@ -210,8 +249,8 @@ local function detail_formspec(state)
 	local m = node.merge
 	local lines = {}
 	table.insert(lines, "Entry #"..node.entry_id.." · "..(node.live and "live" or "pre-merge state"))
-	if #node.names > 0 then table.insert(lines, "names: "..format_names(node.names)) end
-	if #node.ips > 0 then table.insert(lines, "IPs: "..format_names(node.ips)) end
+	if #node.names > 0 then append_list(lines, "names: ", node.names) end
+	if #node.ips > 0 then append_list(lines, "IPs: ", node.ips) end
 	if m then
 		table.insert(lines, "")
 		table.insert(lines, "Merge #"..m.id.." · "..os.date("!%Y-%m-%d %H:%M:%S", m.timestamp))
@@ -274,9 +313,9 @@ local function confirm_formspec(state)
 		elseif act == "move" then table.insert(moves, a.value)
 		else table.insert(keeps, a.value) end
 	end
-	if #dels > 0 then table.insert(lines, "  deleted: "..format_names(dels, 4)) end
-	if #moves > 0 then table.insert(lines, "  moved to the recreated entry: "..format_names(moves, 4)) end
-	if #keeps > 0 then table.insert(lines, "  kept at the destination: "..format_names(keeps, 4)) end
+	if #dels > 0 then append_list(lines, "  deleted: ", dels, 4) end
+	if #moves > 0 then append_list(lines, "  moved to the recreated entry: ", moves, 4) end
+	if #keeps > 0 then append_list(lines, "  kept at the destination: ", keeps, 4) end
 	table.insert(lines, "The merge event will be marked as reverted.")
 	local fs = "formspec_version[6]size[12,8]"
 	local y = 0.3

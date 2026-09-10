@@ -482,6 +482,69 @@ do
 	print("PASS: escape and the Close button still close the window")
 end
 
+-- ── the GUI must not hand the engine text that does not fit ───────────────
+-- The engine clips a button label wider than its button and runs a label[]
+-- past the right edge with nothing to mark the loss, so every string the GUI
+-- emits has to fit. These mirror mergegui's own measure of the form font.
+do
+	local CHAR_W, TEXT_W = 0.15, 11.4
+	local BUDGET = math.floor(TEXT_W / CHAR_W)
+
+	local function labels(fs)
+		local out = {}
+		for w, h, text in fs:gmatch("button%[[%d%.]+,[%d%.]+;([%d%.]+),([%d%.]+);node_%d+_%d+;([^%]]*)%]") do
+			table.insert(out, { w = tonumber(w), h = tonumber(h), text = text })
+		end
+		return out
+	end
+
+	local function longest_label(fs)
+		local max, worst = 0, ""
+		for text in fs:gmatch("label%[[%d%.]+,[%d%.]+;([^%]]*)%]") do
+			if #text > max then max, worst = #text, text end
+		end
+		return max, worst
+	end
+
+	-- two names and a pile of addresses, as in the report that found this
+	local wide = dbmanager.new_entry()
+	dbmanager.add_name(wide, "novaosoba")
+	dbmanager.add_name(wide, "mpplayer")
+	for i, ip in ipairs({ "89.142.200.97", "109.245.36.102", "89.142.163.253",
+	                      "46.122.68.13", "212.200.181.53", "81.10.11.12" }) do
+		dbmanager.add_ip(wide, ip)
+	end
+
+	cmd.func("tester", "merge_gui")
+	gui({ go = true, root = "#"..wide, depth = "2" })
+	local tfs = formspecs[#formspecs]
+
+	local buttons = labels(tfs)
+	assert(#buttons > 0, "the tree drew a node button")
+	for _, b in ipairs(buttons) do
+		local needed = #b.text * CHAR_W + 0.3
+		assert(needed <= b.w + 0.001, string.format(
+			"node label '%s' needs %.2f but the button is %.2f wide", b.text, needed, b.w))
+	end
+	print("PASS: node labels fit their buttons")
+
+	-- clicking it opens the detail, whose lists must wrap rather than run off
+	local eid = tfs:match("node_(%d+)_0")
+	assert(eid == tostring(wide), "the node carries the entry id")
+	gui({ ["node_" .. eid .. "_0"] = true })
+	local dfs = formspecs[#formspecs]
+	assert(dfs:find("Entry #"..wide), "the detail screen is shown")
+	assert(dfs:find("novaosoba", 1, true) and dfs:find("mpplayer", 1, true), "both names are listed")
+	local max, worst = longest_label(dfs)
+	assert(max <= BUDGET, string.format("detail line is %d chars, budget is %d: %s", max, BUDGET, worst))
+	local ip_lines = 0
+	for text in dfs:gmatch("label%[[%d%.]+,[%d%.]+;([^%]]*)%]") do
+		if text:find("^IPs: ") or text:find("^%s+%d") then ip_lines = ip_lines + 1 end
+	end
+	assert(ip_lines >= 2, "the IP list wrapped onto a second line instead of running off the edge")
+	print("PASS: detail lists wrap to fit the window")
+end
+
 -- the depth cap is 20 in the CLI too, not just in the message
 do
 	expect("tree alice 20", true, "current")

@@ -297,8 +297,6 @@ cloudai.get_context = function()
 		_max_steps = nil,	-- How many tool calls may the AI make before giving a response
 		_max_steps_now = nil,	-- How many steps are left available for the current prompt
 		_temperature = nil,
-		_frequency_penalty = nil,
-		_presence_penalty = nil,
 		_debug = false,
 		_current_request_id = nil,
 		_model = model,
@@ -318,12 +316,6 @@ cloudai.get_context = function()
 			end
 			if self._temperature ~= nil then
 				payload.temperature = self._temperature
-			end
-			if self._frequency_penalty ~= nil then
-				payload.frequency_penalty = self._frequency_penalty
-			end
-			if self._presence_penalty ~= nil then
-				payload.presence_penalty = self._presence_penalty
 			end
 			if #self._formatted_tools > 0 then
 				payload.tools = self._formatted_tools
@@ -476,30 +468,6 @@ cloudai.get_context = function()
 				end
 			end
 			self._temperature = temp
-			return true
-		end,
-		set_frequency_penalty = function(self, fp)
-			if self._callback then
-				return false, "You cannot change the frequency penalty while a call is in progress"
-			end
-			if fp ~= nil then
-				if type(fp) ~= "number" or fp < -2 or fp > 2 then
-					return false, "Frequency penalty must be a number between -2 and 2"
-				end
-			end
-			self._frequency_penalty = fp
-			return true
-		end,
-		set_presence_penalty = function(self, pp)
-			if self._callback then
-				return false, "You cannot change the presence penalty while a call is in progress"
-			end
-			if pp ~= nil then
-				if type(pp) ~= "number" or pp < -2 or pp > 2 then
-					return false, "Presence penalty must be a number between -2 and 2"
-				end
-			end
-			self._presence_penalty = pp
 			return true
 		end,
 		set_debug = function(self, enable)

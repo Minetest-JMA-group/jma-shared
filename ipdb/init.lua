@@ -261,23 +261,77 @@ end
 
 local is_in_transaction = false
 local merge_gui
+-- A dot or a colon can appear in an address but never in a playername, so an
+-- argument of this shape that resolves to nothing was meant as an address and
+-- is a mistyped one. Callers check this only after the username lookup fails,
+-- so a name of this shape that really is in the database still wins.
 ---@param arg string
----@return integer?
+---@return boolean
+local function looks_like_address(arg)
+	return arg:find("[.:]") ~= nil
+end
+
+-- Resolve an argument that names an entry: "#<id>" for the entry id itself,
+-- an IP address, or a username. The '#' is what marks an id, and it never
+-- needs to be guessed at: no playername can contain one, so every spelling
+-- is unambiguous and bare digits always mean a username.
+---@param arg string
+---@return integer? entryid
+---@return string? err
 local function resolve_entry(arg)
+	local id = arg:match("^#(%d+)$")
+	if id then
+		local entry = dbmanager.get_userentry(tonumber(id))
+		if not entry then
+			return nil, "Entry #"..id.." does not exist"
+		end
+		return entry.id
+	end
+	if arg:sub(1, 1) == "#" then
+		return nil, "Malformed entry id: "..arg
+	end
 	if algorithms.is_ip(arg) then
 		local ipent = dbmanager.ip_exists(arg)
-		return ipent and ipent.userentry_id
+		if not ipent then
+			return nil, "The IP address "..arg.." is unknown to ipdb"
+		end
+		return ipent.userentry_id
 	end
 	local user = dbmanager.user_exists(arg)
-	if user then
-		return user.userentry_id
+	if not user then
+		if looks_like_address(arg) then
+			return nil, "Invalid IP address format: "..arg
+		end
+		return nil, "The username "..arg.." is unknown to ipdb"
 	end
-	local id = tonumber(arg)
-	if id then
-		local entry = dbmanager.get_userentry(id)
-		return entry and entry.id
+	return user.userentry_id
+end
+
+-- Look up the single name or IP row an argument refers to. Unlike
+-- resolve_entry this never takes an entry id: an id names an entry, not one
+-- of its identifiers, so there is no row here for "#N" to select.
+---@param arg string
+---@return { id: integer, kind: "name"|"ip" }? ident
+---@return string? err
+local function resolve_identifier(arg)
+	if arg:sub(1, 1) == "#" then
+		return nil, "Expected a name or an IP address, not an entry id ("..arg..")"
 	end
-	return nil
+	if algorithms.is_ip(arg) then
+		local ipent = dbmanager.ip_exists(arg)
+		if not ipent then
+			return nil, "The IP address "..arg.." is unknown to ipdb"
+		end
+		return { id = ipent.id, kind = "ip" }
+	end
+	local user = dbmanager.user_exists(arg)
+	if not user then
+		if looks_like_address(arg) then
+			return nil, "Invalid IP address format: "..arg
+		end
+		return nil, "The username "..arg.." is unknown to ipdb"
+	end
+	return { id = user.id, kind = "name" }
 end
 
 -- Join a list of identifiers for display, capping the visible amount
@@ -324,20 +378,22 @@ end
 
 local help_string = [[
   • ipdb console:
+  • Entry ids are written #<id>, e.g. "#12". A bare number is always a username.
 help: Print this text
 add_name <username>: Record the given username in the database
 add_ip <IP Address>: Record the given IP address in the database
 rm_name <username>: Remove the given username from the database
 rm_ip <IP Address>: Remove the given IP address from the database
-isolate name|ip <identifier>: Create an isolated entry (no_merging flag set) and move or add the specified name/IP to it
+isolate <name|IP>: Create an isolated entry (no_merging flag set) and move or add the specified name/IP to it
+unisolate <name|IP|#entryid>: Clear the no_merging flag, so the entry may be merged again
 newentries [yes|no]: If the argument is given, change whether new user entries are allowed or not. Otherwise print current value.
-list <IP|username>: List all IPs and usernames linked with the given one
+list <name|IP|#entryid>: List all IPs and usernames linked with the given one
 log_merges [yes|no]: If the argument is given, change whether entry merge events are logged. Otherwise print the current value.
 log_retention [<time>]: Show or change how long merge events are kept before they are pruned (e.g. 15D, 48h, 1800 seconds)
-move <what> <where>: Move the name/IP given in `what` to the entry that name/IP given in `where` belongs to
+move <name|IP> <name|IP|#entryid>: Move a name/IP to the entry that the second given name/IP belongs to, or to the entry with the given id
 merges [N]: List the last N merge events
 merge <id>: Show the details of a merge event
-tree <name|IP|id> [depth]: Show the merge history of an entry as a binary tree
+tree <name|IP|#entryid> [depth]: Show the merge history of an entry as a binary tree
 unmerge <id> [keep|forget]: Roll back a merge event; identifiers created after the merge are kept unless `forget` is given
 merge_gui: Open the merge history GUI
 ]]
@@ -358,29 +414,27 @@ core.register_chatcommand("ipdb", {
 			local what = iter()
 			local where  = iter()
 			if not what or not where then
-				return false, "Usage: /ipdb move <what> <where>"
+				return false, "Usage: /ipdb move <name|IP> <name|IP|#entryid>"
 			end
 			local err = db:exec("BEGIN")
 			if err ~= sqlite.OK then log(err); return false, "Internal error" end
-			local ok, err = pcall(function()
-				local is_ipwhat = algorithms.is_ip(what)
-				local is_ipwhere = algorithms.is_ip(where)
-				local what_entry = is_ipwhat and dbmanager.ip_exists(what) or dbmanager.user_exists(what)
-				local where_entry = is_ipwhere and dbmanager.ip_exists(where) or dbmanager.user_exists(where)
-				if not what_entry then
-					return what.." is unknown to ipdb"
+			local ok, res = pcall(function()
+				local ident, identerr = resolve_identifier(what)
+				if not ident then
+					return identerr
 				end
-				if not where_entry then
-					return where.." is unknown to ipdb"
+				local where_entryid, whereerr = resolve_entry(where)
+				if not where_entryid then
+					return whereerr
 				end
-				if is_ipwhat then
-					dbmanager.reassociate_ids(where_entry.userentry_id, nil, what_entry.id)
+				if ident.kind == "ip" then
+					dbmanager.reassociate_ids(where_entryid, nil, ident.id)
 				else
-					dbmanager.reassociate_ids(where_entry.userentry_id, what_entry.id, nil)
+					dbmanager.reassociate_ids(where_entryid, ident.id, nil)
 				end
 			end)
 			if not ok then
-				log(err)
+				log(res)
 				db:exec("ROLLBACK")
 				return false, "Internal error"
 			end
@@ -390,8 +444,8 @@ core.register_chatcommand("ipdb", {
 				db:exec("ROLLBACK")
 				return false, "Internal error"
 			end
-			if err then
-				return true, err
+			if res then
+				return true, res
 			end
 			return true, "Move successful"
 		end
@@ -407,8 +461,11 @@ core.register_chatcommand("ipdb", {
 
 		if cmd == "add_ip" then
 			local newip = iter()
-			if not newip or not algorithms.is_ip(newip) then
-				return false, "Usage: /ipdb add_name <IP Address>"
+			if not newip then
+				return false, "Usage: /ipdb add_ip <IP Address>"
+			end
+			if not algorithms.is_ip(newip) then
+				return false, "Invalid IP address format: "..newip
 			end
 			ipdb.register_new_ids(nil, newip)
 			return true, "IP recorded"
@@ -487,7 +544,7 @@ core.register_chatcommand("ipdb", {
 		if cmd == "list" then
 			local arg = iter()
 			if not arg then
-				return false, "Usage: /ipdb list <name|IP>"
+				return false, "Usage: /ipdb list <name|IP|#entryid>"
 			end
 			if is_in_transaction then
 				return true, "Some mod is holding the context open. Cannot lock the database."
@@ -498,20 +555,11 @@ core.register_chatcommand("ipdb", {
 				return true, "Internal error"
 			end
 			local ok, ret = pcall(function()
-				local ident
-				local idtype
-				if algorithms.is_ip(arg) then
-					ident = dbmanager.ip_exists(arg)
-					idtype = "IP"
-				else
-					ident = dbmanager.user_exists(arg)
-					idtype = "username"
+				local entryid, resolveerr = resolve_entry(arg)
+				if not entryid then
+					return resolveerr
 				end
-				if not ident then
-					return "The given "..idtype.." is not known to ipdb."
-				end
-				local allids = dbmanager.get_all_identifiers(ident.userentry_id)
-				return allids
+				return dbmanager.get_all_identifiers(entryid)
 			end)
 			if not ok then
 				log(ret)
@@ -554,8 +602,11 @@ core.register_chatcommand("ipdb", {
 
 		if cmd == "rm_ip" then
 			local delip = iter()
-			if not delip or not algorithms.is_ip(delip) then
+			if not delip then
 				return false, "Usage: /ipdb rm_ip <IP Address>"
+			end
+			if not algorithms.is_ip(delip) then
+				return false, "Invalid IP address format: "..delip
 			end
 			local err = db:exec("BEGIN")
 			if err ~= sqlite.OK then log(err); return false, "Internal error" end
@@ -577,16 +628,27 @@ core.register_chatcommand("ipdb", {
 		end
 
 		if cmd == "isolate" then
-			local subtype = iter()
 			local identifier = iter()
-			if not subtype or not identifier then
-				return false, "Usage: /ipdb isolate name|ip <identifier>"
+			if not identifier then
+				return false, "Usage: /ipdb isolate <name|IP>"
 			end
-			if subtype ~= "name" and subtype ~= "ip" then
-				return false, "Type must be 'name' or 'ip'"
-			end
-			if subtype == "ip" and not algorithms.is_ip(identifier) then
-				return false, "Invalid IP address format"
+
+			-- Resolved before the transaction opens, so a rejected identifier
+			-- cannot leave an empty isolated entry behind
+			local is_address = algorithms.is_ip(identifier)
+			local user
+			if not is_address then
+				local ok, found = pcall(dbmanager.user_exists, identifier)
+				if not ok then
+					log(found)
+					return false, "Internal error"
+				end
+				user = found
+				-- A name of this shape that really is in the database was
+				-- added deliberately, so it still wins
+				if not user and looks_like_address(identifier) then
+					return false, "Invalid IP address format: "..identifier
+				end
 			end
 
 			local err = db:exec("BEGIN")
@@ -596,20 +658,17 @@ core.register_chatcommand("ipdb", {
 				local entryid = dbmanager.new_entry()
 				dbmanager.set_merge_allowance(entryid, false)
 
-				if subtype == "name" then
-					local user = dbmanager.user_exists(identifier)
-					if user then
-						dbmanager.reassociate_ids(entryid, user.id)
-					else
-						dbmanager.add_name(entryid, identifier)
-					end
-				else
+				if is_address then
 					local ipent = dbmanager.ip_exists(identifier)
 					if ipent then
 						dbmanager.reassociate_ids(entryid, nil, ipent.id)
 					else
 						dbmanager.add_ip(entryid, identifier)
 					end
+				elseif user then
+					dbmanager.reassociate_ids(entryid, user.id)
+				else
+					dbmanager.add_name(entryid, identifier)
 				end
 			end)
 
@@ -623,6 +682,30 @@ core.register_chatcommand("ipdb", {
 				return true, "Isolated entry created"
 			end
 		end
+
+		if cmd == "unisolate" then
+			local arg = iter()
+			if not arg then
+				return false, "Usage: /ipdb unisolate <name|IP|#entryid>"
+			end
+			local ok, ret = pcall(function()
+				local entryid, resolveerr = resolve_entry(arg)
+				if not entryid then
+					return resolveerr
+				end
+				if not dbmanager.get_userentry(entryid).no_merging then
+					return "Entry #"..entryid.." is not isolated"
+				end
+				dbmanager.set_merge_allowance(entryid, true)
+				return "Entry #"..entryid.." is no longer isolated"
+			end)
+			if not ok then
+				log(ret)
+				return false, "Internal error"
+			end
+			return true, ret
+		end
+
 		if cmd == "merges" then
 			local count = tonumber(iter() or "15") or 15
 			if count < 1 or count > 100 then
@@ -709,20 +792,20 @@ core.register_chatcommand("ipdb", {
 		if cmd == "tree" then
 			local arg = iter()
 			if not arg then
-				return false, "Usage: /ipdb tree <name|IP|entryid> [depth]"
+				return false, "Usage: /ipdb tree <name|IP|#entryid> [depth]"
 			end
 			local depth = tonumber(iter() or "4") or 4
-			if depth < 1 or depth > 8 then
+			if depth < 1 or depth > 20 then
 				return false, "Depth must be between 1 and 20"
 			end
 			local ok, ret = pcall(function()
-				local entryid = resolve_entry(arg)
+				local entryid, resolveerr = resolve_entry(arg)
 				if not entryid then
-					return "The given identifier is unknown to ipdb"
+					return resolveerr
 				end
 				local root = dbmanager.get_merge_tree(entryid, depth)
 				if not root then
-					return "The given identifier is unknown to ipdb"
+					return "No merge history for entry #"..entryid
 				end
 				local lines = {}
 				local notes = {}

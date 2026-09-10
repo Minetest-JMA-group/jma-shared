@@ -137,7 +137,7 @@ end
 local function tree_formspec(state)
 	local fs = "formspec_version[6]" ..
 		"size[12,8]" ..
-		"field[0.4,0.35;4.6,0.8;root;" .. esc("Entry (name, IP or id)") .. ";" .. esc(state.root or "") .. "]" ..
+		"field[0.4,0.35;4.6,0.8;root;" .. esc("Entry (name, IP or #id)") .. ";" .. esc(state.root or "") .. "]" ..
 		"field[5.2,0.35;1.4,0.8;depth;Depth;" .. esc(state.depth or "4") .. "]" ..
 		"button[6.8,0.3;2.2,0.9;go;" .. esc("Show tree") .. "]" ..
 		"button[9.2,0.3;2.4,0.9;close;" .. esc("Close") .. "]"
@@ -145,7 +145,7 @@ local function tree_formspec(state)
 		fs = fs .. "label[0.4,0.75;" .. esc(state.error) .. "]"
 	end
 	if not state.tree then
-		return fs .. "label[0.4,1.3;Enter a name, an IP address or an entry id above and press Show tree.]"
+		return fs .. "label[0.4,1.3;Enter a name, an IP address or an entry id as #12 above and press Show tree.]"
 	end
 	local layout = layout_tree(state.tree)
 	local content = {}
@@ -339,7 +339,8 @@ local function perform_rollback(state, name)
 	end
 	local ok, report, reason = pcall(dbmanager.rollback_merge, state.merge_id, state.decisions)
 	if not ok then
-		log(reason)
+		-- on a throw pcall puts the error object in `report`
+		log(report)
 		db:exec("ROLLBACK")
 		state.error = "Internal error"
 		state.screen = "detail"
@@ -392,22 +393,30 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		state.sv, state.sh = 0, 0
 		state.root = fields.root
 		local depth = tonumber(fields.depth) or 4
-		if depth < 1 or depth > 8 then
+		if depth < 1 or depth > 20 then
 			state.error = "Depth must be between 1 and 20"
 			show(state, name)
 			return
 		end
 		state.depth = depth
-		local entryid = resolve_entry(fields.root)
+		local ok_res, entryid, resolveerr = pcall(resolve_entry, fields.root)
+		if not ok_res then
+			-- on a throw pcall puts the error object in `entryid`
+			log(entryid)
+			state.error = "Internal error"
+			show(state, name)
+			return
+		end
 		if not entryid then
-			state.error = "Unknown identifier: "..fields.root
+			state.error = resolveerr
 			show(state, name)
 			return
 		end
 		state.error = nil
 		local ok, tree, treeerr = pcall(dbmanager.get_merge_tree, entryid, depth)
 		if not ok then
-			log(treeerr)
+			-- on a throw pcall puts the error object in `tree`
+			log(tree)
 			state.error = "Internal error"
 			show(state, name)
 			return
@@ -440,7 +449,8 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 				if mid ~= "0" then
 					local ok, info, reason = pcall(dbmanager.get_merge_rollback_info, tonumber(mid))
 					if not ok then
-						log(reason)
+						-- on a throw pcall puts the error object in `info`
+						log(info)
 						state.reason = "Internal error"
 					elseif info then
 						state.info = info

@@ -20,6 +20,7 @@ local world = tmpbase .. "/ipdb_tests/world_cli"
 local chatcommands = {}
 local formspecs = {}
 local receive_fields_handler
+local chat_output  -- last message sent to a player, for commands that print
 
 local core = {
 	get_current_modname = function() return "ipdb" end,
@@ -28,7 +29,8 @@ local core = {
 	log = function() end,
 	get_dir_list = function(path)
 		local out = {}
-		local p = io.popen("ls -p " .. path .. " 2>/dev/null")
+		-- %q quotes it: a modpath with a space would break 'ls' and hide the migrations
+		local p = io.popen(string.format("ls -p %q 2>/dev/null", path))
 		for f in p:lines() do
 			if not f:find("/$") then table.insert(out, f) end
 		end
@@ -39,7 +41,7 @@ local core = {
 	register_chatcommand = function(cmd, def) chatcommands[cmd] = def end,
 	register_on_player_receive_fields = function(handler) receive_fields_handler = handler end,
 	after = function() end,
-	chat_send_player = function() end,
+	chat_send_player = function(_, msg) chat_output = msg end,
 	formspec_escape = function(s)
 		return (tostring(s):gsub("[\\%]]", {["\\"] = "\\\\", ["]"] = "%]"}))
 	end,
@@ -65,7 +67,20 @@ local algorithms = {
 }
 _G.algorithms = algorithms
 
-os.execute("mkdir -p " .. world)
+-- the engine ships a global dump() for printing tables; `list` prints with it
+_G.dump = function(t)
+	local out = {}
+	for k, v in pairs(t) do
+		if type(v) == "table" then
+			out[#out + 1] = k .. "={" .. table.concat(v, ",") .. "}"
+		else
+			out[#out + 1] = k .. "=" .. tostring(v)
+		end
+	end
+	return table.concat(out, " ")
+end
+
+os.execute(string.format("mkdir -p %q", world))
 os.remove(world .. "/ipdb.sqlite")
 
 assert(loadfile(modpath .. "/init.lua"))()
@@ -294,6 +309,148 @@ assert(ok_t and troot and troot.children and troot.children[1].kind == "src"
 assert(#troot.children[2].names == 1 and troot.children[2].names[1] == "zoe",
        "before-node lists only identifiers that predate the merge")
 print("PASS: before-node excludes identifiers that arrived in the merge")
+
+-- ── '#' entry ids: an id is spelled #N, a bare number is a username ───────
+-- An all-digit username is legal, so a bare number must always be read as a
+-- username - otherwise entry #N and the username "N" could never coexist.
+do
+	local numentry = dbmanager.new_entry()
+	dbmanager.add_name(numentry, "1234")
+	dbmanager.add_ip(numentry, "12.0.0.1")
+
+	expect("tree "..numentry, true, "unknown to ipdb")
+	expect("tree 1234", true, "current")
+	expect("tree #"..numentry, true, "current")
+	expect("tree #999", true, "does not exist")
+	expect("tree #abc", true, "Malformed entry id")
+	expect("tree #", true, "Malformed entry id")
+
+	gui({ go = true, root = "#"..numentry, depth = "3" })
+	assert(formspecs[#formspecs]:find("node_"..numentry.."_0", 1, true),
+		"gui accepts an #id root")
+	print("PASS: gui accepts an #id root")
+
+	gui({ go = true, root = "#999", depth = "3" })
+	assert(formspecs[#formspecs]:find("does not exist", 1, true),
+		"gui reports a missing #id")
+	gui({ go = true, root = "#abc", depth = "3" })
+	assert(formspecs[#formspecs]:find("Malformed entry id", 1, true),
+		"gui rejects a malformed #id")
+	print("PASS: gui reports bad #ids the same way the CLI does")
+end
+
+-- ── /ipdb move: the destination may be an #id, the source may not ─────────
+do
+	local src = dbmanager.new_entry()
+	dbmanager.add_name(src, "mvasrc")
+	dbmanager.add_ip(src, "13.0.0.1")
+	local dst = dbmanager.new_entry()
+	dbmanager.add_name(dst, "mvdst")
+	dbmanager.add_ip(dst, "13.0.0.2")
+
+	expect("move", false, "Usage")
+	-- An entry id names an entry, not one of its identifiers, so it cannot
+	-- say what would move - only the destination side can take one.
+	expect("move #"..src.." mvdst", true, "not an entry id")
+	assert(dbmanager.user_exists("mvasrc").userentry_id == src, "a refused move changes nothing")
+
+	expect("move mvasrc mvdst", true, "Move successful")
+	assert(dbmanager.user_exists("mvasrc").userentry_id == dst, "the name moved to the destination entry")
+	assert(dbmanager.get_userentry(src) ~= nil, "source entry survives while an identifier is still on it")
+
+	expect("move 13.0.0.1 #"..dst, true, "Move successful")
+	assert(dbmanager.ip_exists("13.0.0.1").userentry_id == dst, "the IP moved to the entry named as #id")
+	assert(dbmanager.get_userentry(src) == nil, "the emptied source entry was removed by the cleanup triggers")
+
+	expect("move mvasrc #999", true, "does not exist")
+	expect("move nosuchname mvdst", true, "unknown to ipdb")
+	expect("move 13.0.0.1 #notanumber", true, "Malformed entry id")
+end
+
+-- ── isolate / unisolate: the no_merging flag ──────────────────────────────
+do
+	expect("isolate iso", true, "Isolated entry created")
+	local iso = dbmanager.user_exists("iso")
+	assert(iso and dbmanager.get_userentry(iso.userentry_id).no_merging, "isolate sets no_merging")
+
+	-- the type is inferred from the identifier, as in list/move/tree
+	expect("isolate 10.9.9.7", true, "Isolated entry created")
+	local newip = dbmanager.ip_exists("10.9.9.7")
+	assert(newip and dbmanager.get_userentry(newip.userentry_id).no_merging, "an IP alone creates an isolated entry")
+	-- a mistyped address is neither a name nor an address
+	expect("isolate 10.9.9", false, "Invalid IP address format")
+	expect("isolate 10.9.9.7.8", false, "Invalid IP address format")
+	-- ...but nothing rejects a plain name
+	expect("isolate 10", true, "Isolated entry created")
+
+	-- an isolated entry is what register_new_ids refuses to absorb
+	assert(not dbmanager.can_merge(iso.userentry_id, zoe), "an isolated entry cannot be merged")
+
+	expect("unisolate iso", true, "is no longer isolated")
+	assert(not dbmanager.get_userentry(iso.userentry_id).no_merging, "unisolate clears no_merging")
+	assert(dbmanager.can_merge(iso.userentry_id, zoe), "the entry can be merged again")
+
+	expect("unisolate iso", true, "is not isolated")
+	expect("unisolate 12.0.0.1", true, "is not isolated")
+	expect("unisolate #999", true, "does not exist")
+	expect("unisolate nosuchname", true, "unknown to ipdb")
+	expect("unisolate", false, "Usage")
+
+	-- unisolate takes an #id too, and is the only way to clear a flag
+	-- on an entry that sits on an identifier you would rather not name
+	expect("isolate 12.0.0.1", true, "Isolated entry created")
+	local isoip = dbmanager.ip_exists("12.0.0.1")
+	expect("unisolate #"..isoip.userentry_id, true, "is no longer isolated")
+	assert(not dbmanager.get_userentry(isoip.userentry_id).no_merging, "unisolate by #id clears no_merging")
+end
+
+-- ── a mistyped address is reported as one, not as an unknown name ─────────
+do
+	local function entry_count()
+		local n = 0
+		for _ in db:nrows("SELECT id FROM UserEntry") do n = n + 1 end
+		return n
+	end
+	local before = entry_count()
+
+	-- These shapes can never be a playername: a dot or a colon is an address.
+	-- Commands that only look things up report it like any other miss (ok, as
+	-- they already did for an unknown name); isolate creates a row, so a bad
+	-- argument there is a command failure like it is for add_ip/rm_ip.
+	expect("tree 1.2.3", true, "Invalid IP address format")
+	expect("list 1.2.3", true, "Invalid IP address format")
+	expect("unisolate 1.2.3", true, "Invalid IP address format")
+	expect("move 1.2.3 mvdst", true, "Invalid IP address format")
+	expect("isolate 1.2.3", false, "Invalid IP address format")
+	assert(entry_count() == before, "a rejected isolate leaves no empty entry behind")
+
+	-- add_ip/rm_ip name themselves and say what is actually wrong
+	expect("add_ip 1.2.3", false, "Invalid IP address format")
+	expect("add_ip", false, "Usage: /ipdb add_ip")
+	expect("rm_ip 1.2.3", false, "Invalid IP address format")
+	expect("rm_ip", false, "Usage: /ipdb rm_ip")
+
+	-- ...but a name of that shape that really is in the database still wins
+	local dotted = dbmanager.new_entry()
+	dbmanager.add_name(dotted, "dotted.name")
+	expect("tree dotted.name", true, "current")
+	expect("isolate dotted.name", true, "Isolated entry created")
+	assert(dbmanager.user_exists("dotted.name").userentry_id ~= dotted, "isolate moved the dotted name")
+	assert(dbmanager.get_userentry(dotted) == nil, "the entry it left behind was cleaned up")
+
+	-- list resolves like everything else now, so it takes an #id too
+	local dstentry = dbmanager.user_exists("mvdst").userentry_id
+	chat_output = nil
+	expect("list #"..dstentry, true)
+	assert(chat_output and chat_output:find("mvdst", 1, true), "list accepts an #id")
+	assert(chat_output:find("mvasrc", 1, true), "list #id dumps the whole entry, not just one identifier")
+end
+
+-- the depth cap is 20 in the CLI too, not just in the message
+do
+	expect("tree alice 20", true, "current")
+	expect("tree alice 21", false, "between 1 and 20")
+end
 
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then os.exit(1) end

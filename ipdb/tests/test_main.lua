@@ -24,7 +24,8 @@ local core = {
 	log = function(level, msg) print("[log]", level or "", msg or "") end,
 	get_dir_list = function(path)
 		local out = {}
-		local p = io.popen("ls -p " .. path .. " 2>/dev/null")
+		-- %q quotes it: a modpath with a space would break 'ls' and hide the migrations
+		local p = io.popen(string.format("ls -p %q 2>/dev/null", path))
 		for f in p:lines() do
 			if not f:find("/$") then table.insert(out, f) end
 		end
@@ -40,7 +41,7 @@ local function check(cond, name)
 	else fail = fail + 1 print("FAIL:", name) end
 end
 
-os.execute("mkdir -p " .. world)
+os.execute(string.format("mkdir -p %q", world))
 os.remove(world .. "/ipdb.sqlite")
 
 local dbmanager = dofile(modpath .. "/dbmanager.lua")

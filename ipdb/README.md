@@ -47,6 +47,10 @@ Use `/ipdb newentries [yes|no]` to toggle.
 ## Chat Commands
 Requires `ban` privilege.
 
+Commands that take an entry write it as `#<id>` (e.g. `#12`); a bare number is
+always read as a username, never as an id. `#` cannot appear in a playername,
+so the two spellings never collide.
+
 | Command | Description |
 |--------|-------------|
 | `/ipdb help` | Show help text. |
@@ -54,15 +58,16 @@ Requires `ban` privilege.
 | `/ipdb add_ip <IPv4>` | Record an IP address. |
 | `/ipdb rm_name <username>` | Remove a username from the database. |
 | `/ipdb rm_ip <IPv4>` | Remove an IP address from the database. |
-| `/ipdb isolate name\|ip <identifier>` | Create an isolated entry (cannot be merged) and move/add the identifier to it. |
+| `/ipdb isolate <name\|IP>` | Create an isolated entry (cannot be merged) and move/add the identifier to it. |
+| `/ipdb unisolate <name\|IP\|#entryid>` | Clear an entry's `no_merging` flag, so it can be merged again. |
 | `/ipdb newentries [yes\|no]` | Show or change whether new entries are allowed. |
-| `/ipdb list <IP\|username>` | List all IPs and usernames linked with the given one. |
+| `/ipdb list <name\|IP\|#entryid>` | List all IPs and usernames linked with the given one. |
 | `/ipdb log_merges [yes\|no]` | Show or change whether entry merge events are logged. |
 | `/ipdb log_retention [<time>]` | Show or change how long merge events are kept before they are pruned (default 15 days; e.g. `15D`, `48h`, `1800`). The new value is applied immediately. |
-| `/ipdb move <what> <where>` | Move the name/IP given in `what` to the entry that name/IP given in `where` belongs to. |
+| `/ipdb move <name\|IP> <name\|IP\|#entryid>` | Move the name/IP in the first argument to the entry that the second argument belongs to (or names with `#id`). |
 | `/ipdb merges [N]` | List the last N merge events (default 15). |
 | `/ipdb merge <id>` | Show the details of a merge event and whether it can be rolled back. |
-| `/ipdb tree <name\|IP\|entryid> [depth]` | Show the merge history of an entry as a binary tree (default depth 4, max 20). |
+| `/ipdb tree <name\|IP\|#entryid> [depth]` | Show the merge history of an entry as a binary tree (default depth 4, max 20). |
 | `/ipdb unmerge <id> [keep\|forget]` | Roll back a merge event. Identifiers created after the merge are kept unless `forget` is given. |
 | `/ipdb merge_gui` | Open the merge history GUI (tree view, detail view, rollback with per-identifier decisions). |
 

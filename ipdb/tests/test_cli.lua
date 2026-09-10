@@ -660,6 +660,48 @@ do
 	print("PASS: list caps what it prints and says how much it left out")
 end
 
+-- ── a message must not be drawn over the input row ───────────────────────
+-- The Show tree and Close buttons start at x=6.8 and span y 0.3-1.2, and a
+-- label[] is painted wherever it is put, text and all. Anything on that band
+-- runs across them.
+do
+	local function y_values(fs)
+		local ys = {}
+		for y in fs:gmatch("label%[[%d%.]+,([%d%.]+);") do
+			ys[#ys + 1] = tonumber(y)
+		end
+		return ys
+	end
+	local function assert_clear(fs, ctx)
+		for _, y in ipairs(y_values(fs)) do
+			assert(y >= 1.25, string.format("%s: a label sits at y=%.2f, inside the input row", ctx, y))
+		end
+	end
+
+	cmd.func("tester", "merge_gui")
+	gui({ go = true, root = "no-such-entry", depth = "3" })
+	local efs = formspecs[#formspecs]
+	assert(efs:find("unknown to ipdb", 1, true), "the error is shown at all")
+	assert_clear(efs, "error on the empty screen")
+	print("PASS: an error is not drawn across the buttons")
+
+	-- and with a tree already loaded, where the message shares the screen
+	-- with the canvas
+	gui({ go = true, root = "trunc", depth = "2" })
+	assert(formspecs[#formspecs]:find("node_"), "the tree rendered")
+	gui({ go = true, root = "no-such-entry", depth = "3" })
+	local efs2 = formspecs[#formspecs]
+	assert(efs2:find("unknown to ipdb", 1, true), "the error is shown over a loaded tree")
+	assert_clear(efs2, "error over a loaded tree")
+	print("PASS: an error still clears the buttons with a tree loaded")
+
+	-- the empty-state hint shares that line and must be clear of it too
+	cmd.func("tester", "merge_gui")
+	local hfs = formspecs[#formspecs]
+	assert(hfs:find("Enter a name", 1, true), "the hint is shown")
+	assert_clear(hfs, "empty-state hint")
+end
+
 -- the depth cap is 20 in the CLI too, not just in the message
 do
 	expect("tree alice 20", true, "current")

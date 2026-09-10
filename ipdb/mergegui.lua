@@ -184,11 +184,15 @@ local function tree_formspec(state)
 		"field_close_on_enter[depth;false]" ..
 		"button[6.8,0.3;2.2,0.9;go;" .. esc("Show tree") .. "]" ..
 		"button[9.2,0.3;2.4,0.9;close;" .. esc("Close") .. "]"
-	if state.error then
-		fs = fs .. "label[0.4,0.75;" .. esc(state.error) .. "]"
-	end
+	-- The one free line is the one below the input row. An error drawn level
+	-- with the fields runs under the Show tree and Close buttons, which start
+	-- at x=6.8, and the engine paints the text over them.
 	if not state.tree then
-		return fs .. "label[0.4,1.3;Enter a name, an IP address or an entry id as #12 above and press Show tree.]"
+		return fs .. string.format("label[0.4,1.3;%s]", esc(
+			state.error or "Enter a name, an IP address or an entry id as #12 above and press Show tree."))
+	end
+	if state.error then
+		fs = fs .. string.format("label[0.4,1.3;%s]", esc(state.error))
 	end
 	local layout = layout_tree(state.tree)
 	local content = {}

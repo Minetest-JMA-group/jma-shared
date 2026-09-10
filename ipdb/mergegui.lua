@@ -60,6 +60,47 @@ local function append_list(lines, prefix, items, limit)
 	table.insert(lines, cur)
 end
 
+-- Shorten a single line of data to what the window can hold. Used as a last
+-- resort on lines whose content is not bounded by the code that builds them:
+-- a label[] neither wraps nor clips, so anything past the right edge is gone.
+---@param text string
+---@return string
+local function fit_line(text)
+	local budget = math.floor(TEXT_W / CHAR_W)
+	if #text > budget then
+		return text:sub(1, budget - 1) .. "…"
+	end
+	return text
+end
+
+-- Split prose across lines that fit, on word boundaries. Truncating a
+-- sentence would lose its end, which is usually the part that says what to do
+-- about it; wrapping keeps all of it readable.
+---@param lines string[] # the lines are appended here
+---@param text string
+---@param indent string? # prefix for the continuation lines
+local function append_wrapped(lines, text, indent)
+	local budget = math.floor(TEXT_W / CHAR_W)
+	local pad = indent or ""
+	local cur = ""
+	for word in text:gmatch("%S+") do
+		if #word > budget then
+			word = word:sub(1, budget - 1) .. "…"
+		end
+		if cur == "" then
+			cur = word
+		elseif #cur + 1 + #word <= budget then
+			cur = cur .. " " .. word
+		else
+			table.insert(lines, cur)
+			cur = pad .. word
+		end
+	end
+	if cur ~= "" then
+		table.insert(lines, cur)
+	end
+end
+
 -- Label of an entry node, kept short enough to fit its button
 ---@param node MergeTreeNode
 ---@param is_root boolean
@@ -211,9 +252,12 @@ local function tree_formspec(state)
 	-- notes about history cut off by the depth limit, drawn below the canvas
 	for _, n in ipairs(layout.nodes) do
 		if n.node.hidden_merges then
-			content[#content+1] = string.format("label[0,%.2f;%s]",
-				canvas_h, esc(string.format("entry #%d has %d older merge(s) - increase the depth to see them",
-					n.node.entry_id, n.node.hidden_merges)))
+			local note = string.format("entry #%d has %d older merge(s) - increase the depth to see them",
+				n.node.entry_id, n.node.hidden_merges)
+			content[#content+1] = string.format("label[0,%.2f;%s]", canvas_h, esc(note))
+			-- the note is wider than a narrow tree: widen the canvas to it, or
+			-- a scroll container would clip the note away
+			canvas_w = math.max(canvas_w, #note * CHAR_W)
 			canvas_h = canvas_h + 0.4
 		end
 	end
@@ -246,6 +290,31 @@ local function tree_formspec(state)
 		fs = fs .. "container[" .. string.format("%.2f,%.2f", VIEW_X, VIEW_Y) .. "]" .. body .. "container_end[]"
 	end
 	return fs
+end
+
+-- Where the keep/delete/move buttons of a decision row start. The row's label
+-- stops before this: a label[] is painted wherever it is put, so a value long
+-- enough to reach the buttons would be drawn underneath them.
+local DECISION_X = 7.3
+
+-- One decision row: the identifier and the decision made about it so far,
+-- shortened if it would otherwise reach the buttons. The value is what
+-- identifies the row, so only its very end is ever given up, and the full
+-- name or address with both timestamps is in the table above.
+---@param a table  -- an addition from get_merge_rollback_info
+---@param action string
+---@return string
+local function decision_label(a, action)
+	local head = a.type.." "
+	-- the date is enough here: the rows are post-merge by construction, and
+	-- the whole time is on the merge line above
+	local tail = string.format(" (%s) -> %s", a.created_at:sub(1, 10), action)
+	local room = math.floor((DECISION_X - 0.4) / CHAR_W) - #head - #tail
+	local value = a.value
+	if #value > room then
+		value = value:sub(1, math.max(1, room - 1)) .. "…"
+	end
+	return head..value..tail
 end
 
 -- Sort keys the detail screen offers, in the order its buttons are drawn.
@@ -333,11 +402,11 @@ local function detail_formspec(state)
 			esc("Merge #"..m.id.." · "..os.date("!%Y-%m-%d %H:%M:%S", m.timestamp)))
 		y = y + 0.45
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y,
-			esc("  "..m.name.." / "..m.ip.." · #"..m.entry_src.." absorbed into #"..m.entry_dst))
+			esc(fit_line("  "..m.name.." / "..m.ip.." · #"..m.entry_src.." absorbed into #"..m.entry_dst)))
 		y = y + 0.45
 		if m.reverted_at then
 			fs = fs .. string.format("label[0.4,%.2f;%s]", y,
-				esc("  rolled back on "..os.date("!%Y-%m-%d %H:%M", m.reverted_at)))
+				esc(fit_line("  rolled back on "..os.date("!%Y-%m-%d %H:%M", m.reverted_at))))
 			y = y + 0.45
 		end
 	end
@@ -359,16 +428,23 @@ local function detail_formspec(state)
 				for i = 1, math.min(#adds, room) do
 					local a = adds[i]
 					local act = state.decisions[a.value] or "keep"
-					fs = fs .. string.format("label[0.4,%.2f;%s '%s' (%s) -> %s]", ay, a.type, esc(a.value), a.created_at, act) ..
-						string.format("button[6.4,%.2f;1.3,0.4;ad_%d_keep;keep]", ay, i) ..
-						string.format("button[7.8,%.2f;1.5,0.4;ad_%d_delete;delete]", ay, i) ..
-						string.format("button[9.4,%.2f;1.3,0.4;ad_%d_move;move]", ay, i)
+					fs = fs .. string.format("label[0.4,%.2f;%s]", ay, esc(decision_label(a, act))) ..
+						string.format("button[%.2f,%.2f;1.3,0.4;ad_%d_keep;keep]", DECISION_X, ay, i) ..
+						string.format("button[%.2f,%.2f;1.5,0.4;ad_%d_delete;delete]", DECISION_X + 1.4, ay, i) ..
+						string.format("button[%.2f,%.2f;1.3,0.4;ad_%d_move;move]", DECISION_X + 3.0, ay, i)
 					ay = ay + 0.5
 				end
 			end
 			fs = fs .. string.format("button[8.6,7.3;3.0,0.8;rb;Roll back merge #%d]", state.merge_id)
 		else
-			fs = fs .. string.format("label[0.4,%.2f;Rollback unavailable: %s]", y + 0.15, esc(state.reason or "?"))
+			-- these reasons run to a sentence, and the end of one says which
+			-- merges to roll back first, so it is wrapped rather than cut
+			local wrapped = {}
+			append_wrapped(wrapped, "Rollback unavailable: "..(state.reason or "?"), "  ")
+			for _, line in ipairs(wrapped) do
+				fs = fs .. string.format("label[0.4,%.2f;%s]", y + 0.15, esc(line))
+				y = y + 0.4
+			end
 		end
 	end
 	fs = fs .. "button[0.4,7.3;3.0,0.8;back;Back to tree]"
@@ -398,7 +474,7 @@ local function confirm_formspec(state)
 	local fs = "formspec_version[6]size[12,8]"
 	local y = 0.3
 	for i = 1, math.min(#lines, 10) do
-		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(lines[i]))
+		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(lines[i])))
 		y = y + 0.45
 	end
 	fs = fs .. "button[3.2,7.3;3.4,0.8;rb_confirm;Confirm rollback]" ..
@@ -428,7 +504,7 @@ local function report_formspec(state)
 	local fs = "formspec_version[6]size[12,8]"
 	local y = 0.3
 	for i = 1, math.min(#lines, 10) do
-		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(lines[i]))
+		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(lines[i])))
 		y = y + 0.45
 	end
 	fs = fs .. "button[0.4,7.3;3.0,0.8;back;Back to tree]"

@@ -702,6 +702,107 @@ do
 	assert_clear(hfs, "empty-state hint")
 end
 
+-- ── every label stays inside the window and off its neighbours ───────────
+-- A label[] is painted wherever it is put: text reaching an element to its
+-- right is drawn over it, and text past the right edge is simply gone. These
+-- mirror mergegui's own measure of the form font.
+do
+	local CHAR_W, TEXT_W = 0.15, 11.4
+	local BUDGET = math.floor(TEXT_W / CHAR_W)
+	local function unesc(s) return (s:gsub("\\(.)", "%1")) end
+
+	-- a merge whose post-merge identifiers have awkwardly long values, and a
+	-- separate merge with nothing left to roll back to
+	local dec_src = dbmanager.new_entry()
+	dbmanager.add_name(dec_src, "dectest-src")
+	dbmanager.add_ip(dec_src, "192.0.2.31")
+	local dec_dst = dbmanager.new_entry()
+	dbmanager.add_name(dec_dst, "dectest-dst")
+	dbmanager.add_ip(dec_dst, "192.0.2.32")
+	dbmanager.new_merge_event(dec_src, dec_dst, "dectest-dst", "192.0.2.32")
+	local dec_mid = dbmanager.get_merge_events(1)[1].id
+	dbmanager.reassociate_ids(dec_dst, dbmanager.user_exists("dectest-src").id,
+		dbmanager.ip_exists("192.0.2.31").id)
+	dbmanager.delete_entry(dec_src)
+	-- created after the merge, so they become the decisions to be made: a
+	-- 20 character name is the longest a playername can be, and the IP is
+	-- longer than a name would be
+	dbmanager.add_name(dec_dst, "abcdefghijklmnopqrst")
+	dbmanager.add_ip(dec_dst, "203.0.113.255")
+	db:exec("UPDATE Usernames SET created_at = datetime('now', '+1 minute') WHERE name = 'abcdefghijklmnopqrst'")
+	db:exec("UPDATE IPs SET created_at = datetime('now', '+1 minute') WHERE ip = '203.0.113.255'")
+
+	cmd.func("tester", "merge_gui")
+	gui({ go = true, root = "#"..dec_dst, depth = "2" })
+	local tfs = formspecs[#formspecs]
+	local node = tfs:match("node_(%d+)_"..dec_mid)
+	assert(node, "the merge is in the tree")
+	gui({ ["node_"..node.."_"..dec_mid] = true })
+	local dfs = formspecs[#formspecs]
+	assert(dfs:find("Identifiers created after the merge", 1, true), "the decision list is shown")
+
+	-- the right edge of each row's label, and the left edge of its buttons
+	local label_right = {}
+	for x, y, text in dfs:gmatch("label%[([%d%.]+),([%d%.]+);([^%]]*)%]") do
+		label_right[tonumber(y)] = tonumber(x) + #unesc(text) * CHAR_W
+	end
+	local checked = 0
+	for x, y, name in dfs:gmatch("button%[([%d%.]+),([%d%.]+);[%d%.]+,[%d%.]+;(ad_%d+_%w+);") do
+		local right = label_right[tonumber(y)]
+		if right then
+			assert(right <= tonumber(x) + 0.001, string.format(
+				"%s: the row label reaches %.2f but its button starts at %.2f", name, right, tonumber(x)))
+			checked = checked + 1
+		end
+	end
+	assert(checked >= 6, "expected a decision row per addition, saw " .. checked)
+	print("PASS: decision rows stop before their buttons")
+
+	-- nothing anywhere on the screen runs past the right edge either
+	for x, label in dfs:gmatch("label%[([%d%.]+),[%d%.]+;([^%]]*)%]") do
+		local right = tonumber(x) + #unesc(label) * CHAR_W
+		assert(right <= 11.85, string.format("a label reaches %.2f, past the window: %s", right, unesc(label)))
+	end
+	print("PASS: no label runs past the right edge")
+
+	-- a refusal is a whole sentence; it must survive onto the screen
+	local vsrc = dbmanager.new_entry()
+	dbmanager.add_name(vsrc, "vanish-src")
+	dbmanager.add_ip(vsrc, "192.0.2.41")
+	local vdst = dbmanager.new_entry()
+	dbmanager.add_name(vdst, "vanish-dst")
+	dbmanager.add_ip(vdst, "192.0.2.42")
+	dbmanager.new_merge_event(vsrc, vdst, "vanish-dst", "192.0.2.42")
+	local vmid = dbmanager.get_merge_events(1)[1].id
+	-- drop what the merge logged, so its rollback has nothing to restore
+	dbmanager.remove_name(dbmanager.user_exists("vanish-src").id)
+	dbmanager.remove_ip(dbmanager.ip_exists("192.0.2.41").id)
+	local info, reason = dbmanager.get_merge_rollback_info(vmid)
+	assert(info == nil and reason, "the fixture refuses a rollback")
+	assert(#reason > BUDGET, "the fixture's refusal is longer than one line: " .. #reason)
+
+	cmd.func("tester", "merge_gui")
+	gui({ go = true, root = "#"..vdst, depth = "2" })
+	local vfs = formspecs[#formspecs]
+	local vnode = vfs:match("node_(%d+)_"..vmid)
+	assert(vnode, "the merge is in the tree")
+	gui({ ["node_"..vnode.."_"..vmid] = true })
+	local rfs = formspecs[#formspecs]
+	local shown = {}
+	for label in rfs:gmatch("label%[[%d%.]+,[%d%.]+;([^%]]*)%]") do
+		local text = unesc(label)
+		-- every line has to fit: one long label would be cut off in the
+		-- window, however complete the string looks here
+		assert(#text <= BUDGET, string.format("a line is %d chars, the budget is %d: %s", #text, BUDGET, text))
+		shown[#shown + 1] = text
+	end
+	local joined = table.concat(shown, " ")
+	for word in reason:gmatch("%S+") do
+		assert(joined:find(word, 1, true), "the refusal lost the word '"..word.."'")
+	end
+	print("PASS: a long refusal wraps instead of being cut off")
+end
+
 -- the depth cap is 20 in the CLI too, not just in the message
 do
 	expect("tree alice 20", true, "current")

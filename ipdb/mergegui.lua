@@ -139,6 +139,10 @@ local function tree_formspec(state)
 		"size[12,8]" ..
 		"field[0.4,0.35;4.6,0.8;root;" .. esc("Entry (name, IP or #id)") .. ";" .. esc(state.root or "") .. "]" ..
 		"field[5.2,0.35;1.4,0.8;depth;Depth;" .. esc(state.depth or "4") .. "]" ..
+		-- Enter submits the tree rather than closing the window, which is
+		-- what a text field does by default; the handler reads key_enter
+		"field_close_on_enter[root;false]" ..
+		"field_close_on_enter[depth;false]" ..
 		"button[6.8,0.3;2.2,0.9;go;" .. esc("Show tree") .. "]" ..
 		"button[9.2,0.3;2.4,0.9;close;" .. esc("Close") .. "]"
 	if state.error then
@@ -385,11 +389,19 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	if fields.merge_scroll_h then
 		state.sh = tonumber(fields.merge_scroll_h) or state.sh or 0
 	end
+	-- Enter in a text field submits the form. A client that still has the
+	-- default close-on-enter reports quit along with it, so this has to be
+	-- claimed before the close check reads it. key_enter_field is only sent
+	-- when a text field had the focus - with the focus nowhere or on a
+	-- button, Enter really is a close and key_enter_field is absent.
+	local enter_in_field = fields.key_enter and fields.key_enter_field
 	if fields.quit or fields.close then
-		gui_states[name] = nil
-		return
+		if not enter_in_field then
+			gui_states[name] = nil
+			return
+		end
 	end
-	if fields.go then
+	if fields.go or enter_in_field then
 		state.sv, state.sh = 0, 0
 		state.root = fields.root
 		local depth = tonumber(fields.depth) or 4

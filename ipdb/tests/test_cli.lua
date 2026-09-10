@@ -446,6 +446,42 @@ do
 	assert(chat_output:find("mvasrc", 1, true), "list #id dumps the whole entry, not just one identifier")
 end
 
+-- ── Enter in a text field shows the tree; it does not close the window ───
+do
+	-- a client with the default close-on-enter sends quit along with the
+	-- key_enter that names the focused field
+	cmd.func("tester", "merge_gui")
+	local n = #formspecs
+	gui({ key_enter = "true", key_enter_field = "root", quit = "true", root = "trunc", depth = "2" })
+	assert(#formspecs > n, "Enter in the entry field is handled, not treated as a close")
+	assert(formspecs[#formspecs]:find("node_"), "Enter shows the tree, like the Show tree button")
+	print("PASS: Enter in a text field shows the tree")
+
+	-- the same for the depth field
+	local n2 = #formspecs
+	gui({ key_enter = "true", key_enter_field = "depth", quit = "true", root = "trunc", depth = "2" })
+	assert(#formspecs > n2 and formspecs[#formspecs]:find("node_"), "Enter in the depth field shows the tree")
+	print("PASS: Enter in the depth field shows the tree")
+
+	-- with the focus nowhere or on a button, Enter really does close it
+	cmd.func("tester", "merge_gui")
+	local n3 = #formspecs
+	gui({ key_enter = "true", quit = "true" })
+	assert(#formspecs == n3, "Enter with no field focused closes the window")
+	print("PASS: Enter with no field focused still closes")
+
+	-- and so do Escape / the window button, and the Close button itself
+	cmd.func("tester", "merge_gui")
+	local n4 = #formspecs
+	gui({ quit = "true" })
+	assert(#formspecs == n4, "escape closes the window")
+	cmd.func("tester", "merge_gui")
+	local n5 = #formspecs
+	gui({ close = "true" })
+	assert(#formspecs == n5, "the Close button closes the window")
+	print("PASS: escape and the Close button still close the window")
+end
+
 -- the depth cap is 20 in the CLI too, not just in the message
 do
 	expect("tree alice 20", true, "current")

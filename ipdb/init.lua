@@ -351,6 +351,49 @@ local function format_list(items, limit)
 	return s
 end
 
+-- The sort keys /ipdb list takes, the same three the merge GUI offers
+local LIST_SORT_KEYS = { created = true, seen = true, value = true }
+
+-- Rows /ipdb list prints, matching the merge GUI's table. The output is a
+-- single chat message the client has to print, so an entry that accumulated
+-- thousands of identifiers would be a wall of text. Sorting happens first,
+-- so the cap never hides both ends of the list: sorting the other way and
+-- reading it backwards reaches the same identifiers.
+local LIST_MAX_ROWS = 200
+
+-- Render identifier rows as aligned columns. SQLite always writes
+-- created_at/last_seen as "YYYY-MM-DD HH:MM:SS", so those two columns have a
+-- fixed width while the value column grows to the longest name or address.
+---@param rows IdentifierRow[]
+---@param order string
+---@param descending boolean
+---@return string
+local function format_identifier_rows(rows, order, descending)
+	if #rows == 0 then
+		return "The entry has no identifiers."
+	end
+	local shown = math.min(#rows, LIST_MAX_ROWS)
+	local width = #"value"
+	for i = 1, shown do
+		if #rows[i].value > width then width = #rows[i].value end
+	end
+	local fmt = "%-5s %-"..width.."s  %-19s  %-19s"
+	local out = {
+		string.format("%d identifier(s), by %s, %s", #rows, order,
+			descending and "descending" or "ascending"),
+		string.format(fmt, "kind", "value", "created", "last seen"),
+	}
+	for i = 1, shown do
+		local r = rows[i]
+		out[#out + 1] = string.format(fmt, r.kind, r.value, r.created_at, r.last_seen)
+	end
+	if #rows > shown then
+		out[#out + 1] = string.format("… and %d more (showing %d - sort the other way to see the far end)",
+			#rows - shown, shown)
+	end
+	return table.concat(out, "\n")
+end
+
 -- Label of a tree node for the CLI output
 ---@param node MergeTreeNode
 ---@param is_root boolean
@@ -387,7 +430,7 @@ rm_ip <IP Address>: Remove the given IP address from the database
 isolate <name|IP>: Create an isolated entry (no_merging flag set) and move or add the specified name/IP to it
 unisolate <name|IP|#entryid>: Clear the no_merging flag, so the entry may be merged again
 newentries [yes|no]: If the argument is given, change whether new user entries are allowed or not. Otherwise print current value.
-list <name|IP|#entryid>: List all IPs and usernames linked with the given one
+list <name|IP|#entryid> [created|seen|value] [asc|desc]: List an entry's names and IPs with their first-seen and last-seen times (default: last seen, newest first)
 log_merges [yes|no]: If the argument is given, change whether entry merge events are logged. Otherwise print the current value.
 log_retention [<time>]: Show or change how long merge events are kept before they are pruned (e.g. 15D, 48h, 1800 seconds)
 move <name|IP> <name|IP|#entryid>: Move a name/IP to the entry that the second given name/IP belongs to, or to the entry with the given id
@@ -544,7 +587,31 @@ core.register_chatcommand("ipdb", {
 		if cmd == "list" then
 			local arg = iter()
 			if not arg then
-				return false, "Usage: /ipdb list <name|IP|#entryid>"
+				return false, "Usage: /ipdb list <name|IP|#entryid> [created|seen|value] [asc|desc]"
+			end
+			-- The most recently seen identifier first is what an admin is
+			-- usually after, so both arguments are optional. A direction on
+			-- its own keeps that key: "list #12 asc" is what a user reaches
+			-- for, and rejecting it over an omitted sort key would be unkind.
+			local order, descending = "seen", true
+			local word = iter()
+			if word then
+				word = word:lower()
+				if word == "asc" or word == "desc" then
+					descending = (word == "desc")
+				elseif not LIST_SORT_KEYS[word] then
+					return false, "Sort by 'created', 'seen' or 'value', not '"..word.."'"
+				else
+					order = word
+					local dir = iter()
+					if dir then
+						dir = dir:lower()
+						if dir ~= "asc" and dir ~= "desc" then
+							return false, "Direction must be 'asc' or 'desc', not '"..dir.."'"
+						end
+						descending = (dir == "desc")
+					end
+				end
 			end
 			if is_in_transaction then
 				return true, "Some mod is holding the context open. Cannot lock the database."
@@ -559,7 +626,10 @@ core.register_chatcommand("ipdb", {
 				if not entryid then
 					return resolveerr
 				end
-				return dbmanager.get_all_identifiers(entryid)
+				-- get_identifiers_at with no timestamp is every identifier of
+				-- the entry, each with the timestamps the GUI also shows
+				local ids = dbmanager.get_identifiers_at(entryid)
+				return dbmanager.order_identifiers(ids.names, ids.ips, order, descending)
 			end)
 			if not ok then
 				log(ret)
@@ -572,7 +642,7 @@ core.register_chatcommand("ipdb", {
 			if type(ret) == "string" then
 				return true, ret
 			end
-			core.chat_send_player(name, dump(ret))
+			core.chat_send_player(name, format_identifier_rows(ret, order, descending))
 			return true
 		end
 

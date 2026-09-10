@@ -1459,6 +1459,49 @@ end
 ---@field children MergeTreeNode[]?
 ---@field hidden_merges integer?  -- older merges cut off by the depth limit behind this leaf
 
+---@class IdentifierRow
+---@field kind "name"|"ip"
+---@field value string
+---@field created_at string
+---@field last_seen string
+
+-- One ordered list from an entry's name and IP rows, tagged with which table
+-- each came from. The two tables are read separately, so sorting happens here
+-- in Lua rather than in SQL - which also lets the GUI re-sort on a button
+-- press without going back to the database. `order` is the column to sort on:
+-- "value" (the name or address), "created" or "seen"; it defaults to "seen",
+-- newest first.
+---@param name_rows table[]  -- rows carrying name/created_at/last_seen
+---@param ip_rows table[]    -- rows carrying ip/created_at/last_seen
+---@param order "value"|"created"|"seen"|nil
+---@param descending boolean?
+---@return IdentifierRow[]
+dbmanager.order_identifiers = function(name_rows, ip_rows, order, descending)
+	local key = order or "seen"
+	local rows = {}
+	for _, r in ipairs(name_rows) do
+		table.insert(rows, { kind = "name", value = r.name, created_at = r.created_at, last_seen = r.last_seen })
+	end
+	for _, r in ipairs(ip_rows) do
+		table.insert(rows, { kind = "ip", value = r.ip, created_at = r.created_at, last_seen = r.last_seen })
+	end
+	local function sort_key(r)
+		if key == "value" then return r.value end
+		if key == "created" then return r.created_at end
+		return r.last_seen
+	end
+	table.sort(rows, function(a, b)
+		local ka, kb = sort_key(a), sort_key(b)
+		if ka == kb then
+			-- equal keys would otherwise come out in an arbitrary order
+			return a.value < b.value
+		end
+		if descending then return ka > kb end
+		return ka < kb
+	end)
+	return rows
+end
+
 -- Build a node of the merge history tree for an entry: the node is the entry
 -- at a point in time, its children are the absorbed entry and the entry
 -- itself as it was just before the merge
@@ -1479,14 +1522,18 @@ local function build_tree_node(entryid, max_merge_id, live, kind, edge_merge, ed
 		merge = edge_merge,
 		names = {},
 		ips = {},
+		name_rows = {},
+		ip_rows = {},
 	}
 	if kind == "root" then
-		local ids = dbmanager.get_all_identifiers(entryid)
-		node.names = ids.names
-		node.ips = ids.ips
+		-- Rows rather than plain names, so that the GUI can show each
+		-- identifier with its created_at and last_seen alongside it
+		local ids = dbmanager.get_identifiers_at(entryid)
+		node.name_rows = ids.names
+		node.ip_rows = ids.ips
 	elseif kind == "src" then
-		for _, row in ipairs(edge_log.names) do table.insert(node.names, row.name) end
-		for _, row in ipairs(edge_log.ips) do table.insert(node.ips, row.ip) end
+		node.name_rows = edge_log.names
+		node.ip_rows = edge_log.ips
 	elseif live and edge_merge then
 		-- "as it was just before the merge": exclude the identifiers that
 		-- arrived in this very merge (they belong on the src side, and their
@@ -1496,12 +1543,14 @@ local function build_tree_node(entryid, max_merge_id, live, kind, edge_merge, ed
 		for _, row in ipairs(edge_log.ips) do arrived_ips[row.ip] = true end
 		local ids = dbmanager.get_identifiers_at(entryid, os.date("!%Y-%m-%d %H:%M:%S", edge_merge.timestamp))
 		for _, row in ipairs(ids.names) do
-			if not arrived_names[row.name] then table.insert(node.names, row.name) end
+			if not arrived_names[row.name] then table.insert(node.name_rows, row) end
 		end
 		for _, row in ipairs(ids.ips) do
-			if not arrived_ips[row.ip] then table.insert(node.ips, row.ip) end
+			if not arrived_ips[row.ip] then table.insert(node.ip_rows, row) end
 		end
 	end
+	for _, row in ipairs(node.name_rows) do table.insert(node.names, row.name) end
+	for _, row in ipairs(node.ip_rows) do table.insert(node.ips, row.ip) end
 	if depth >= max_depth then
 		-- the depth limit cut this branch short: report how much older
 		-- history of this entry is hidden behind the leaf

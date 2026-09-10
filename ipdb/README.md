@@ -61,7 +61,7 @@ so the two spellings never collide.
 | `/ipdb isolate <name\|IP>` | Create an isolated entry (cannot be merged) and move/add the identifier to it. |
 | `/ipdb unisolate <name\|IP\|#entryid>` | Clear an entry's `no_merging` flag, so it can be merged again. |
 | `/ipdb newentries [yes\|no]` | Show or change whether new entries are allowed. |
-| `/ipdb list <name\|IP\|#entryid>` | List all IPs and usernames linked with the given one. |
+| `/ipdb list <name\|IP\|#entryid> [created\|seen\|value] [asc\|desc]` | List an entry's names and IPs with their first-seen and last-seen times, one per row (default: last seen, newest first). |
 | `/ipdb log_merges [yes\|no]` | Show or change whether entry merge events are logged. |
 | `/ipdb log_retention [<time>]` | Show or change how long merge events are kept before they are pruned (default 15 days; e.g. `15D`, `48h`, `1800`). The new value is applied immediately. |
 | `/ipdb move <name\|IP> <name\|IP\|#entryid>` | Move the name/IP in the first argument to the entry that the second argument belongs to (or names with `#id`). |

@@ -244,37 +244,115 @@ local function tree_formspec(state)
 	return fs
 end
 
+-- Sort keys the detail screen offers, in the order its buttons are drawn.
+-- "seen" is the default, so the most recently active identifier leads.
+local SORT_KEYS = { "created", "seen", "value" }
+local SORT_LABELS = { created = "Created", seen = "Last seen", value = "Value" }
+
+-- Rows drawn at once. The table scrolls, but its cell data is one string that
+-- the client re-parses on every interaction, so an entry with thousands of
+-- identifiers would be slow to open. Far above any entry seen in practice.
+local MAX_ROWS = 200
+
+-- Cell contents for table[]. Every cell is escaped on its own: formspec_escape
+-- turns a comma into "\," while the engine reads a bare comma as the separator
+-- between cells, so escaping the joined string would collapse the whole table
+-- into a single column.
+---@param rows IdentifierRow[]
+---@return string
+local function identifier_cells(rows)
+	local cells = { "kind", "value", "created", "last seen" }
+	for _, row in ipairs(rows) do
+		cells[#cells + 1] = esc(row.kind)
+		cells[#cells + 1] = esc(row.value)
+		cells[#cells + 1] = esc(row.created_at)
+		cells[#cells + 1] = esc(row.last_seen)
+	end
+	return table.concat(cells, ",")
+end
+
+-- Re-derive the rows on display from the node being shown. The node carries
+-- the identifier rows, with their timestamps, for whichever point in the
+-- entry's history it represents - so sorting again costs no query.
+---@param state table
+local function refresh_rows(state)
+	local node = state.node
+	if not node then
+		state.rows = {}
+		return
+	end
+	state.rows = dbmanager.order_identifiers(node.name_rows or {}, node.ip_rows or {}, state.sort, state.desc)
+end
+
 local function detail_formspec(state)
 	local node = state.node
 	local m = node.merge
-	local lines = {}
-	table.insert(lines, "Entry #"..node.entry_id.." · "..(node.live and "live" or "pre-merge state"))
-	if #node.names > 0 then append_list(lines, "names: ", node.names) end
-	if #node.ips > 0 then append_list(lines, "IPs: ", node.ips) end
-	if m then
-		table.insert(lines, "")
-		table.insert(lines, "Merge #"..m.id.." · "..os.date("!%Y-%m-%d %H:%M:%S", m.timestamp))
-		table.insert(lines, "  "..m.name.." / "..m.ip.." · #"..m.entry_src.." absorbed into #"..m.entry_dst)
-		if m.reverted_at then
-			table.insert(lines, "  rolled back on "..os.date("!%Y-%m-%d %H:%M", m.reverted_at))
+	local rows = state.rows or {}
+	local shown = math.min(#rows, MAX_ROWS)
+	local visible = {}
+	for i = 1, shown do visible[i] = rows[i] end
+
+	local fs = "formspec_version[6]size[12,8]" ..
+		string.format("label[0.4,0.25;%s]",
+			esc("Entry #"..node.entry_id.." · "..(node.live and "live" or "pre-merge state")))
+
+	-- Sorting controls: the active key carries an arrow. Pressing it flips the
+	-- direction, pressing a different one switches the key.
+	fs = fs .. "label[0.4,0.72;Sort by:]"
+	for i, key in ipairs(SORT_KEYS) do
+		local label = SORT_LABELS[key]
+		if state.sort == key then
+			label = label .. (state.desc and " ▼" or " ▲")
 		end
+		fs = fs .. string.format("button[%.2f,0.65;2.1,0.6;sort_%s;%s]",
+			1.5 + (i - 1) * 2.2, key, esc(label))
 	end
-	local fs = "formspec_version[6]size[12,8]"
-	local y = 0.3
-	for i = 1, math.min(#lines, 9) do
-		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(lines[i]))
+
+	-- The identifiers themselves: one per row, each with both timestamps. The
+	-- table is taller when there is no merge to talk about below it.
+	local table_h = m and 2.2 or 4.4
+	fs = fs .. "tableoptions[color=#dddddd;background=#1b1b1b;border=true;highlight=#466432]" ..
+		"tablecolumns[text,width=1.2;text,width=4.2;text,width=3.4;text,width=3.4]" ..
+		string.format("table[0.4,1.3;11.2,%.2f;ids;%s;]", table_h, identifier_cells(visible))
+
+	local y = 1.3 + table_h + 0.2
+	if #rows > shown then
+		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(string.format(
+			"showing %d of %d - the rest are listed by /ipdb list", shown, #rows)))
+		y = y + 0.4
+	elseif #rows == 0 then
+		fs = fs .. string.format("label[0.4,%.2f;No identifiers at this point in the entry's history.]", y)
+		y = y + 0.4
+	end
+	if m then
+		fs = fs .. string.format("label[0.4,%.2f;%s]", y,
+			esc("Merge #"..m.id.." · "..os.date("!%Y-%m-%d %H:%M:%S", m.timestamp)))
 		y = y + 0.45
+		fs = fs .. string.format("label[0.4,%.2f;%s]", y,
+			esc("  "..m.name.." / "..m.ip.." · #"..m.entry_src.." absorbed into #"..m.entry_dst))
+		y = y + 0.45
+		if m.reverted_at then
+			fs = fs .. string.format("label[0.4,%.2f;%s]", y,
+				esc("  rolled back on "..os.date("!%Y-%m-%d %H:%M", m.reverted_at)))
+			y = y + 0.45
+		end
 	end
 	if m and not m.reverted_at then
 		if state.info then
 			local adds = state.info.additions
-			local ay = y + 0.2
+			local ay = y + 0.15
 			if #adds == 0 then
 				fs = fs .. string.format("label[0.4,%.2f;Rollback is possible.]", ay)
 			else
 				fs = fs .. string.format("label[0.4,%.2f;Identifiers created after the merge - choose what happens to each:]", ay)
 				ay = ay + 0.45
-				for i = 1, math.min(#adds, 12) do
+				-- only as many decision rows as fit above the button at 7.3
+				local room = math.max(0, math.floor((7.15 - ay) / 0.5))
+				if room < #adds then
+					fs = fs .. string.format("label[0.4,%.2f;%d more - they will be kept; use /ipdb unmerge %d to handle them]",
+						ay + room * 0.5, #adds - room, state.merge_id)
+				end
+				for i = 1, math.min(#adds, room) do
 					local a = adds[i]
 					local act = state.decisions[a.value] or "keep"
 					fs = fs .. string.format("label[0.4,%.2f;%s '%s' (%s) -> %s]", ay, a.type, esc(a.value), a.created_at, act) ..
@@ -283,14 +361,10 @@ local function detail_formspec(state)
 						string.format("button[9.4,%.2f;1.3,0.4;ad_%d_move;move]", ay, i)
 					ay = ay + 0.5
 				end
-				if #adds > 12 then
-					fs = fs .. string.format("label[0.4,%.2f;%d more - they will be kept; use /ipdb unmerge %d to handle them]",
-						ay, #adds - 12, state.merge_id)
-				end
 			end
 			fs = fs .. string.format("button[8.6,7.3;3.0,0.8;rb;Roll back merge #%d]", state.merge_id)
 		else
-			fs = fs .. string.format("label[0.4,%.2f;Rollback unavailable: %s]", y + 0.2, esc(state.reason or "?"))
+			fs = fs .. string.format("label[0.4,%.2f;Rollback unavailable: %s]", y + 0.15, esc(state.reason or "?"))
 		end
 	end
 	fs = fs .. "button[0.4,7.3;3.0,0.8;back;Back to tree]"
@@ -488,6 +562,20 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		show(state, name)
 		return
 	end
+	-- Pressing the active sort key flips the direction; pressing another one
+	-- switches the key and keeps the direction.
+	for _, key in ipairs(SORT_KEYS) do
+		if fields["sort_"..key] then
+			if state.sort == key then
+				state.desc = not state.desc
+			else
+				state.sort = key
+			end
+			refresh_rows(state)
+			show(state, name)
+			return
+		end
+	end
 	for fieldname, _ in pairs(fields) do
 		local eid, mid = fieldname:match("^node_(%d+)_(%d+)$")
 		if eid then
@@ -497,6 +585,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 				state.entry_id = tonumber(eid)
 				state.merge_id = tonumber(mid)
 				state.info, state.reason, state.decisions = nil, nil, {}
+				refresh_rows(state)
 				if mid ~= "0" then
 					local ok, info, reason = pcall(dbmanager.get_merge_rollback_info, tonumber(mid))
 					if not ok then
@@ -555,6 +644,10 @@ M.show = function(name)
 		report = nil,
 		sv = 0,
 		sh = 0,
+		-- identifier list: how it is ordered and the rows currently shown
+		sort = "seen",
+		desc = true,
+		rows = {},
 	}
 	show(gui_states[name], name)
 end

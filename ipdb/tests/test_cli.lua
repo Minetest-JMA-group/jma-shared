@@ -42,8 +42,14 @@ local core = {
 	register_on_player_receive_fields = function(handler) receive_fields_handler = handler end,
 	after = function() end,
 	chat_send_player = function(_, msg) chat_output = msg end,
+	-- the same character set the engine escapes (builtin/common/misc_helpers.lua);
+	-- getting this wrong hides real bugs, e.g. an escaped comma in a table[]
+	-- collapses every cell into one column
 	formspec_escape = function(s)
-		return (tostring(s):gsub("[\\%]]", {["\\"] = "\\\\", ["]"] = "%]"}))
+		return (tostring(s):gsub("[\\%[%];,$]", {
+			["\\"] = "\\\\", ["["] = "\\[", ["]"] = "\\]",
+			[";"] = "\\;", [","] = "\\,", ["$"] = "\\$",
+		}))
 	end,
 	show_formspec = function(name, formname, fs) formspecs[#formspecs + 1] = fs end,
 }
@@ -67,18 +73,6 @@ local algorithms = {
 }
 _G.algorithms = algorithms
 
--- the engine ships a global dump() for printing tables; `list` prints with it
-_G.dump = function(t)
-	local out = {}
-	for k, v in pairs(t) do
-		if type(v) == "table" then
-			out[#out + 1] = k .. "={" .. table.concat(v, ",") .. "}"
-		else
-			out[#out + 1] = k .. "=" .. tostring(v)
-		end
-	end
-	return table.concat(out, " ")
-end
 
 os.execute(string.format("mkdir -p %q", world))
 os.remove(world .. "/ipdb.sqlite")
@@ -490,10 +484,16 @@ do
 	local CHAR_W, TEXT_W = 0.15, 11.4
 	local BUDGET = math.floor(TEXT_W / CHAR_W)
 
+	-- the client renders an escape like "\," as a single comma, so what has
+	-- to fit is the unescaped text
+	local function unesc(s)
+		return (s:gsub("\\(.)", "%1"))
+	end
+
 	local function labels(fs)
 		local out = {}
 		for w, h, text in fs:gmatch("button%[[%d%.]+,[%d%.]+;([%d%.]+),([%d%.]+);node_%d+_%d+;([^%]]*)%]") do
-			table.insert(out, { w = tonumber(w), h = tonumber(h), text = text })
+			table.insert(out, { w = tonumber(w), h = tonumber(h), text = unesc(text) })
 		end
 		return out
 	end
@@ -501,6 +501,7 @@ do
 	local function longest_label(fs)
 		local max, worst = 0, ""
 		for text in fs:gmatch("label%[[%d%.]+,[%d%.]+;([^%]]*)%]") do
+			text = unesc(text)
 			if #text > max then max, worst = #text, text end
 		end
 		return max, worst
@@ -515,6 +516,17 @@ do
 		dbmanager.add_ip(wide, ip)
 	end
 
+	-- Space the timestamps out before the tree is built - the tree caches each
+	-- node's identifier rows as it is built, so ordering assertions below
+	-- would otherwise see the same second for every row
+	for i, ip in ipairs({ "89.142.200.97", "109.245.36.102", "89.142.163.253",
+	                      "46.122.68.13", "212.200.181.53", "81.10.11.12" }) do
+		db:exec(string.format("UPDATE IPs SET created_at = '2025-03-%02d 00:00:00', " ..
+			"last_seen = '2026-07-%02d 00:00:00' WHERE ip = '%s'", i, i, ip))
+	end
+	db:exec("UPDATE Usernames SET created_at = '2025-01-01 00:00:00', last_seen = '2026-09-01 00:00:00' WHERE name = 'novaosoba'")
+	db:exec("UPDATE Usernames SET created_at = '2025-02-01 00:00:00', last_seen = '2026-08-01 00:00:00' WHERE name = 'mpplayer'")
+
 	cmd.func("tester", "merge_gui")
 	gui({ go = true, root = "#"..wide, depth = "2" })
 	local tfs = formspecs[#formspecs]
@@ -528,21 +540,124 @@ do
 	end
 	print("PASS: node labels fit their buttons")
 
-	-- clicking it opens the detail, whose lists must wrap rather than run off
 	local eid = tfs:match("node_(%d+)_0")
 	assert(eid == tostring(wide), "the node carries the entry id")
 	gui({ ["node_" .. eid .. "_0"] = true })
 	local dfs = formspecs[#formspecs]
 	assert(dfs:find("Entry #"..wide), "the detail screen is shown")
-	assert(dfs:find("novaosoba", 1, true) and dfs:find("mpplayer", 1, true), "both names are listed")
+	assert(dfs:find("Last seen ▼", 1, true), "the default sort is last seen, newest first")
+
+	-- the identifiers are one table, and its cells must be separated by raw
+	-- commas - formspec_escape turns a comma into "\," (one literal comma
+	-- inside a cell), so escaping the joined string would collapse the table
+	-- into a single column
+	local cells = select(4, dfs:match("table%[([^;]*);([^;]*);([^;]*);([^;]*);"))
+	assert(cells, "the detail screen carries table cell data")
+	assert(not cells:find("\\,", 1, true), "cell separators must not be escaped")
+	local function split(s)
+		local out = {}
+		for piece in (s .. ","):gmatch("(.-),") do out[#out + 1] = piece end
+		return out
+	end
+	local c = split(cells)
+	-- 4 header cells + (2 names + 6 ips) * 4
+	assert(#c == 4 + 8 * 4, "expected 4 header cells plus 8 rows of 4, got " .. #c)
+	-- the row after the header is the most recently seen identifier
+	assert(c[6] == "novaosoba", "newest last_seen leads by default, got " .. tostring(c[6]))
+	assert(c[5] == "name" and c[7] == "2025-01-01 00:00:00" and c[8] == "2026-09-01 00:00:00",
+		"a row carries kind, value, created and last seen")
+	print("PASS: the detail list is a table, newest first by default")
+
+	-- same key again flips the direction; a different key switches the column
+	gui({ sort_seen = true })
+	local asc = select(4, formspecs[#formspecs]:match("table%[([^;]*);([^;]*);([^;]*);([^;]*);"))
+	assert(formspecs[#formspecs]:find("Last seen ▲", 1, true), "pressing the active key flips the arrow")
+	assert(split(asc)[6] == "89.142.200.97", "oldest last_seen leads once ascending, got " .. tostring(split(asc)[6]))
+	gui({ sort_created = true })
+	local oldest = select(4, formspecs[#formspecs]:match("table%[([^;]*);([^;]*);([^;]*);([^;]*);"))
+	assert(formspecs[#formspecs]:find("Created ▲", 1, true), "switching key keeps the direction")
+	assert(split(oldest)[6] == "novaosoba", "oldest created_at leads, got " .. tostring(split(oldest)[6]))
+	gui({ sort_created = true })
+	local newestfirst = select(4, formspecs[#formspecs]:match("table%[([^;]*);([^;]*);([^;]*);([^;]*);"))
+	assert(split(newestfirst)[6] == "81.10.11.12", "newest created_at leads once flipped, got " .. tostring(split(newestfirst)[6]))
+	print("PASS: the sort buttons reorder and flip direction")
+
+	-- the labels that remain around the table must still fit the window
 	local max, worst = longest_label(dfs)
 	assert(max <= BUDGET, string.format("detail line is %d chars, budget is %d: %s", max, BUDGET, worst))
-	local ip_lines = 0
-	for text in dfs:gmatch("label%[[%d%.]+,[%d%.]+;([^%]]*)%]") do
-		if text:find("^IPs: ") or text:find("^%s+%d") then ip_lines = ip_lines + 1 end
+end
+
+-- ── /ipdb list: sorted, one identifier per row, both timestamps ──────────
+do
+	local le = dbmanager.new_entry()
+	dbmanager.add_name(le, "listold")
+	dbmanager.add_name(le, "listnew")
+	dbmanager.add_ip(le, "172.16.0.1")
+	dbmanager.add_ip(le, "172.16.0.2")
+	db:exec("UPDATE Usernames SET created_at='2024-01-01 00:00:00', last_seen='2024-06-01 00:00:00' WHERE name='listold'")
+	db:exec("UPDATE Usernames SET created_at='2025-01-01 00:00:00', last_seen='2026-06-01 00:00:00' WHERE name='listnew'")
+	db:exec("UPDATE IPs SET created_at='2024-03-01 00:00:00', last_seen='2025-06-01 00:00:00' WHERE ip='172.16.0.1'")
+	db:exec("UPDATE IPs SET created_at='2024-02-01 00:00:00', last_seen='2026-01-01 00:00:00' WHERE ip='172.16.0.2'")
+
+	-- list prints through chat_send_player rather than returning its rows
+	local function lines_of(s)
+		local t = {}
+		for l in (s .. "\n"):gmatch("(.-)\n") do t[#t + 1] = l end
+		return t
 	end
-	assert(ip_lines >= 2, "the IP list wrapped onto a second line instead of running off the edge")
-	print("PASS: detail lists wrap to fit the window")
+	local function listed(params)
+		chat_output = nil
+		local ok, ret = cmd.func("tester", params)
+		if not ok or ret then return ok, ret end
+		return true, chat_output
+	end
+	-- the summary line is first, the column headers second, so the first
+	-- identifier sits on the third line
+	local function first_row(params)
+		local ok, out = listed(params)
+		assert(ok and out, params .. " produced no output")
+		local l = lines_of(out)
+		assert(l[3], params .. " produced no data row")
+		return l[3], out
+	end
+
+	local row, out = first_row("list #"..le)
+	assert(row:find("listnew", 1, true), "newest last_seen leads by default, got: " .. row)
+	assert(out:find("2026-06-01 00:00:00", 1, true), "the row carries last_seen")
+	assert(out:find("2025-01-01 00:00:00", 1, true), "the row carries created_at")
+	assert(out:find("kind", 1, true) and out:find("last seen", 1, true), "the output has headers")
+	print("PASS: list is sorted by last seen, newest first, with both timestamps")
+
+	assert(select(1, first_row("list #"..le.." seen asc")):find("listold", 1, true),
+		"oldest last_seen leads when ascending")
+	assert(select(1, first_row("list #"..le.." asc")):find("listold", 1, true),
+		"a direction on its own keeps the default key")
+	assert(select(1, first_row("list #"..le.." created desc")):find("listnew", 1, true),
+		"newest created_at leads")
+	assert(select(1, first_row("list #"..le.." created asc")):find("listold", 1, true),
+		"oldest created_at leads")
+	assert(select(1, first_row("list #"..le.." value asc")):find("172.16.0.1", 1, true),
+		"value sorts by the name or address itself")
+	print("PASS: list takes a sort key and a direction")
+
+	expect("list #"..le.." nonsense", false, "Sort by 'created', 'seen' or 'value'")
+	expect("list #"..le.." seen sideways", false, "Direction must be 'asc' or 'desc'")
+	expect("list", false, "Usage: /ipdb list")
+
+	-- an entry far past the display cap still prints a bounded number of rows
+	local big = dbmanager.new_entry()
+	dbmanager.add_name(big, "bigentry")
+	for i = 1, 210 do
+		dbmanager.add_ip(big, string.format("10.%d.%d.%d", math.floor(i / 256) % 256, i % 256, (i * 7) % 256))
+	end
+	local ok_big, out_big = listed("list #"..big)
+	assert(ok_big and out_big, "list produced no output for a large entry")
+	assert(out_big:find("211 identifier(s)", 1, true), "the count reports every identifier, not just the shown ones")
+	assert(out_big:find("and 11 more", 1, true), "the overflow is reported")
+	-- summary + header + 200 rows + the overflow note
+	local nlines = #lines_of(out_big)
+	assert(nlines == 203, "expected 203 lines for a capped listing, got " .. nlines)
+	print("PASS: list caps what it prints and says how much it left out")
 end
 
 -- the depth cap is 20 in the CLI too, not just in the message

@@ -15,8 +15,6 @@ local MIN_BATCH_SIZE = 5
 local HISTORY_SIZE = 100
 local HISTORY_TRACKING_TIME = 86400		-- 24 hours
 local TEMPERATURE = nil		-- use API default
-local FREQUENCY_PENALTY = nil
-local PRESENCE_PENALTY = nil
 local DEBUG_ENABLED = false
 local ACTION_RATE_LIMIT = nil		-- nil = unlimited
 local HIDE_USERNAMES = false
@@ -141,20 +139,6 @@ local settings_appliers = {
 		apply = function(v)
 			local n = tonumber(v)
 			if not n or (n >= 0 and n <= 2) then TEMPERATURE = n end   -- allow nil
-		end,
-	},
-	frequency_penalty = {
-		default = nil,
-		apply = function(v)
-			local n = tonumber(v)
-			if not n or (n >= -2 and n <= 2) then FREQUENCY_PENALTY = n end
-		end,
-	},
-	presence_penalty = {
-		default = nil,
-		apply = function(v)
-			local n = tonumber(v)
-			if not n or (n >= -2 and n <= 2) then PRESENCE_PENALTY = n end
 		end,
 	},
 	debug_enabled = {
@@ -782,9 +766,9 @@ local function wrap_comm_command(command_name, def)
 	end
 	-- Only CTF's email mod has a chat-argument /mail; the mt-mods mail command
 	-- (Mineclone2/Creative) just opens a compose GUI, its content arrives via
-	-- ai_filter_watcher.add_message instead. Checked at wrap time, after all
-	-- mods have loaded.
-	if command_name == "mail" and not core.global_exists("email") then
+	-- ai_filter_watcher.add_message instead. core.get_modpath checks mod
+	-- existence regardless of what globals the mod has registered.
+	if command_name == "mail" and not core.get_modpath("email") then
 		return
 	end
 	wrapped_funcs[func] = true
@@ -936,13 +920,6 @@ local function process_batch(override_quiet)
 	if TEMPERATURE then
 		context:set_temperature(TEMPERATURE)
 	end
-	if FREQUENCY_PENALTY then
-		context:set_frequency_penalty(FREQUENCY_PENALTY)
-	end
-	if PRESENCE_PENALTY then
-		context:set_presence_penalty(PRESENCE_PENALTY)
-	end
-
 	active_context = context
 	context:set_system_prompt(system_prompt)
 	context:set_max_steps(10)
@@ -1330,8 +1307,6 @@ AI Watcher Status:
 - Moderation history: %d players, %d total entries
 - AI parameters:
   • Temperature: %s
-  • Frequency penalty: %s
-  • Presence penalty: %s
 - Debug logging: %s
 - Username hiding: %s
 - Statistics:
@@ -1355,8 +1330,6 @@ AI Watcher Status:
 				players,
 				entries,
 				val_or_def(TEMPERATURE),
-				val_or_def(FREQUENCY_PENALTY),
-				val_or_def(PRESENCE_PENALTY),
 				DEBUG_ENABLED and "Enabled" or "Disabled",
 				HIDE_USERNAMES and "Enabled" or "Disabled",
 				watcher_stats.scans_performed,
@@ -1434,32 +1407,6 @@ AI Watcher Status:
 			save_setting("temperature", v, "temperature")
 			TEMPERATURE = n
 			return true, ("Temperature set to: %s"):format(v)
-
-		elseif cmd == "frequency_penalty" then
-			local v = param:match("%s+(%S+)")
-			if not v then
-				return true, "Current frequency_penalty: " .. (FREQUENCY_PENALTY and tostring(FREQUENCY_PENALTY) or "not set")
-			end
-			local n = tonumber(v)
-			if not n or n < -2 or n > 2 then
-				return false, "Frequency penalty must be -2..2"
-			end
-			save_setting("frequency_penalty", v, "frequency penalty")
-			FREQUENCY_PENALTY = n
-			return true, ("Frequency penalty set to: %s"):format(v)
-
-		elseif cmd == "presence_penalty" then
-			local v = param:match("%s+(%S+)")
-			if not v then
-				return true, "Current presence_penalty: " .. (PRESENCE_PENALTY and tostring(PRESENCE_PENALTY) or "not set")
-			end
-			local n = tonumber(v)
-			if not n or n < -2 or n > 2 then
-				return false, "Presence penalty must be -2..2"
-			end
-			save_setting("presence_penalty", v, "presence penalty")
-			PRESENCE_PENALTY = n
-			return true, ("Presence penalty set to: %s"):format(v)
 
 		elseif cmd == "debug" then
 			local v = param:match("%s+(%S+)")
@@ -1677,8 +1624,6 @@ AI Watcher Status:
   batch <size>          - Set minimum batch size (1-100)
   max_batch [count]     - Get/set max messages per scan payload (1-100000, '0'/'off' = no cap)
   temperature [value]   - Get/set temperature (0-2)
-  frequency_penalty [value] - Get/set frequency penalty (-2 to 2)
-  presence_penalty [value]  - Get/set presence penalty (-2 to 2)
   debug [on|off]        - Get/set debug logging
   history_time [time]   - Get/set history retention (seconds or e.g. '10h')
   action_rate_limit [value] - Get/set action report rate limit (e.g. '10/1m', unlimited if unset)
@@ -1696,17 +1641,42 @@ AI Watcher Status:
 	end
 })
 
-core.after(0, function()
-	-- Load initial settings from shareddb (if available)
-	update_setting_from_db(nil)   -- read all keys
+-- Boot: settings, prompt, player history and the boot announcement, all at
+-- load time — none of it needs a running server. The order is load-bearing:
+-- settings come first because they gate capture (record_message consults
+-- WATCHER_MODE) and because cleanup_player_history() prunes with
+-- HISTORY_TRACKING_TIME, one of those same settings. They also precede
+-- load_system_prompt(), whose mode=disabled on a missing prompt has to win
+-- over a DB "enabled".
+update_setting_from_db(nil)   -- read all keys
 
-	load_system_prompt()
-	load_player_history()
-	cleanup_player_history()
-	local init_msg = ("Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, max_batch: %s, sleep: %s, debug: %s, hide_usernames: %s)"):format(
-		WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE,
-		MAX_BATCH_SIZE and tostring(MAX_BATCH_SIZE) or "none", SLEEP_SCHEDULE_RAW or "none",
-		DEBUG_ENABLED and "enabled" or "disabled", HIDE_USERNAMES and "enabled" or "disabled")
-	core.log("action", "[ai_filter_watcher] " .. init_msg)
-	report("%s", init_msg)
-end)
+-- TEMPORARY CLEANUP -- delete this block once every server has booted with
+-- it at least once. DeepSeek retired the frequency_penalty and
+-- presence_penalty parameters, and the settings built on them are gone
+-- from settings_appliers, but their rows are still sitting in shareddb.
+-- One pass removes them for good (no row -> no work on later boots).
+local ctx = modstorage:get_context()
+if ctx then
+	for _, key in ipairs({ "frequency_penalty", "presence_penalty" }) do
+		local value, err = ctx:get_string(key)
+		if err then break end   -- DB unhappy: leave the rows for the next boot
+		if value ~= nil then
+			local derr = ctx:set_string(key, nil)   -- nil value deletes the row
+			if not derr then
+				core.log("action", ("[ai_filter_watcher] Dropped retired setting %q from shareddb"):format(key))
+			end
+		end
+	end
+	ctx:finalize()
+end
+
+load_system_prompt()
+load_player_history()      -- mod storage, not shareddb
+cleanup_player_history()
+
+local init_msg = ("Initialized (mode: %s, prompt: %s, interval: %ds, batch: %d, max_batch: %s, sleep: %s, debug: %s, hide_usernames: %s)"):format(
+	WATCHER_MODE, PROMPT_READY and "loaded" or "missing", SCAN_INTERVAL, MIN_BATCH_SIZE,
+	MAX_BATCH_SIZE and tostring(MAX_BATCH_SIZE) or "none", SLEEP_SCHEDULE_RAW or "none",
+	DEBUG_ENABLED and "enabled" or "disabled", HIDE_USERNAMES and "enabled" or "disabled")
+core.log("action", "[ai_filter_watcher] " .. init_msg)
+report("%s", init_msg)

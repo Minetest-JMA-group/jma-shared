@@ -209,11 +209,17 @@ end
 
 local parse_complex_time = load_parse_complex_time()
 
-local function make_env(globals, shareddb_values)
+-- globals: mods whose init.lua has already run, i.e. which globals exist
+--   (what core.global_exists answers).
+-- shareddb_values: rows to seed into the fake shareddb table.
+-- mods: mods installed and enabled (what core.get_modpath answers). The engine
+--   knows this before any mod's init.lua runs, so it can name a mod whose global
+--   does not exist yet. Defaults to the globals set.
+local function make_env(globals, shareddb_values, mods)
+	mods = mods or globals
 	local core = {}
 	core.registered_chatcommands = {}
 	core.registered_privileges = {}
-	core.after_cb = nil
 	core.globalstep_cb = nil
 	core.chat_hook = nil
 	core.send_all_hook = nil
@@ -222,7 +228,10 @@ local function make_env(globals, shareddb_values)
 		return globals[name] == true
 	end
 	core.get_current_modname = function() return "ai_filter_watcher" end
-	core.get_modpath = function() return MOD_DIR end
+	core.get_modpath = function(name)
+		if name == "ai_filter_watcher" then return MOD_DIR end
+		return mods[name] and (MOD_DIR .. "/" .. name) or nil
+	end
 	core.get_mod_storage = function()
 		local store = {}
 		return {
@@ -243,7 +252,6 @@ local function make_env(globals, shareddb_values)
 	core.register_privilege = function() end
 	core.register_globalstep = function(fn) core.globalstep_cb = fn end
 	core.register_on_chat_message = function() end
-	core.after = function(delay, fn) core.after_cb = fn end
 	core.log_msgs = {}
 	core.log = function(level, msg) table.insert(core.log_msgs, tostring(msg)) end
 	core.serialize = function(t) return t end
@@ -271,8 +279,6 @@ local function make_env(globals, shareddb_values)
 		ctx.set_system_prompt = function() end
 		ctx.set_max_steps = function() end
 		ctx.set_temperature = function() end
-		ctx.set_frequency_penalty = function() end
-		ctx.set_presence_penalty = function() end
 		ctx.set_debug = function() end
 		ctx.add_tool = function(self, def) table.insert(ctx.tools, def) end
 		ctx.destroy = function() end
@@ -409,9 +415,8 @@ local function make_env(globals, shareddb_values)
 	local source = io.open(MOD_DIR .. "init.lua"):read("*a")
 	load_with_env(source, env)
 
-	-- Boot callback: sweep + settings + prompt load
-	env.core.after_cb()
-
+	-- init.lua's whole boot — settings, prompt, player history, the boot
+	-- announcement — runs during the load above, so the env is fully booted.
 	return env
 end
 
@@ -1136,5 +1141,43 @@ envR3.cloudai.reject_call = nil
 envR3.core.globalstep_cb(61)
 check(#envR3.cloudai.prompts == 2 and table.concat(prompt_ids(envR3, envR3.cloudai.prompts[2]), ",") == "1,2,3",
 	"R3: retry takes the refused chunk after a full interval")
+
+-- === Scenario S: retired penalty settings are dropped from shareddb at boot ===
+-- DeepSeek retired the frequency_penalty/presence_penalty parameters, so the
+-- watcher no longer has settings for them -- but older versions persisted
+-- rows under those names, and a boot pass deletes the leftovers. Delete this
+-- scenario together with the cleanup block in init.lua.
+local envS = make_env({}, { frequency_penalty = "0.5", presence_penalty = "0.3", temperature = "1.5" })
+check(envS.shareddb.db.frequency_penalty == nil, "S: retired frequency_penalty row dropped at boot")
+check(envS.shareddb.db.presence_penalty == nil, "S: retired presence_penalty row dropped at boot")
+check(envS.shareddb.db.temperature == "1.5", "S: unrelated setting row left alone")
+check(count_occurrences(envS.core.log_msgs, "Dropped retired setting") == 2, "S: both drops logged")
+
+-- a second boot has nothing left to do
+local envS2 = make_env({}, envS.shareddb.db)
+check(count_occurrences(envS2.core.log_msgs, "Dropped retired setting") == 0, "S: clean db logs no drops")
+
+-- the commands and the status listing are gone with the settings
+local cmdS = envS.core.registered_chatcommands
+check(cmdS.ai_watcher.func("tester", "frequency_penalty 0.5") == false, "S: frequency_penalty command removed")
+check(cmdS.ai_watcher.func("tester", "presence_penalty 0.5") == false, "S: presence_penalty command removed")
+local _, stS = cmdS.ai_watcher.func("tester", "status")
+check(stS:find("penalty") == nil, "S: status no longer lists penalty parameters")
+
+-- === Scenario T: the /mail gate resolves by mod name, not by load order ===
+-- Here email is installed and enabled but has not defined its global yet — the
+-- state the watcher sees when it loads before the email mod does. The gate must
+-- still recognise it, through both wrap paths.
+local envT = make_env({}, nil, { email = true })
+local cmdT = envT.core.registered_chatcommands
+check(envT.core.global_exists("email") == false, "T: email mod's global not defined yet")
+check(cmdT.mail.func ~= envT.orig_mail, "T: /mail wrapped at our load without the email global")
+
+-- a mod loading after us registers /mail through the patched registrar
+local late_mail = function() return true end
+envT.core.register_chatcommand("mail", { func = late_mail })
+check(cmdT.mail.func ~= late_mail, "T: post-load /mail registration also wrapped")
+cmdT.mail.func("alice", "bob late mail")
+contains(dump_buffer(envT), "<alice> [MAIL to bob]: late mail", "T: /mail captured without the email global")
 
 print("All tests passed.")

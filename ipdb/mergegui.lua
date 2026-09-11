@@ -394,6 +394,7 @@ local function detail_formspec(state)
 		fs = fs .. string.format("button[%.2f,0.65;2.1,0.6;sort_%s;%s]",
 			1.5 + (i - 1) * 2.2, key, esc(label))
 	end
+	fs = fs .. "button[9.0,0.65;2.6,0.6;storage;Storage]"
 
 	-- The identifiers themselves: one per row, each with both timestamps. The
 	-- table is taller when there is no merge to talk about below it.
@@ -476,6 +477,138 @@ local function detail_formspec(state)
 	return fs
 end
 
+-- Storage rows shown at once, for the same reason the identifier table is
+-- capped: the cell data is a single string the client re-parses.
+local MAX_STORAGE_ROWS = 200
+-- Lines of a picked row's value that fit under the table
+local MAX_VALUE_LINES = 6
+
+-- A cell's text for the table. A stored value is often a whole JSON blob that
+-- would swamp the row, so it is flattened and shortened; the picked row is
+-- shown in full underneath.
+---@param value string|number
+---@return string
+local function cell_text(value)
+	local s = tostring(value):gsub("%s+", " ")
+	if #s > 60 then
+		s = s:sub(1, 59) .. "…"
+	end
+	return s
+end
+
+-- Cell contents for the storage table. Each cell is escaped on its own, for
+-- the same reason as the identifier table: a bare comma separates cells.
+---@param rows ModstorageRow[]
+---@return string
+local function storage_cells(rows)
+	local cells = { "mod", "key", "ancillary", "value" }
+	for _, r in ipairs(rows) do
+		cells[#cells + 1] = esc(r.modname)
+		cells[#cells + 1] = esc(r.key)
+		cells[#cells + 1] = r.ancillary and esc(r.ancillary) or ""
+		cells[#cells + 1] = esc(cell_text(r.data))
+	end
+	return table.concat(cells, ",")
+end
+
+-- The storage a node represents, as the mod names to offer and the rows of the
+-- selected one. A node that came from a merge reads that merge's log, which
+-- recorded both entries at the time; only the live entry has a "now" to read
+-- from the table itself.
+---@param node MergeTreeNode
+---@param modname string?
+---@return string[] modnames, ModstorageRow[] rows
+local function load_storage(node, modname)
+	if node.kind == "root" then
+		return dbmanager.get_modstorage_modnames(node.entry_id),
+			dbmanager.get_modstorage_rows(node.entry_id, modname)
+	end
+	local log = dbmanager.get_merge_log(node.merge.id)
+	local all = dbmanager.select_logged_modstorage(log, node.entry_id)
+	local names, seen = {}, {}
+	for _, r in ipairs(all) do
+		if not seen[r.modname] then
+			seen[r.modname] = true
+			names[#names + 1] = r.modname
+		end
+	end
+	if not modname then
+		return names, all
+	end
+	local rows = {}
+	for _, r in ipairs(all) do
+		if r.modname == modname then
+			rows[#rows + 1] = r
+		end
+	end
+	return names, rows
+end
+
+local function storage_formspec(state)
+	local node = state.node
+	local heading
+	if node.live then
+		heading = "Storage of entry #"..node.entry_id.." · live"
+	else
+		heading = "Storage of entry #"..node.entry_id.." · as of merge #"..node.merge.id
+	end
+	local fs = "formspec_version[6]size[12,8]" ..
+		string.format("label[0.4,0.25;%s]", esc(fit_line(heading)))
+
+	-- The filter list: every mod is one query, so the dropdown can show what
+	-- is actually there instead of asking you to remember a mod name.
+	local items = { "all mods" }
+	for _, name in ipairs(state.ms_names or {}) do
+		items[#items + 1] = name
+	end
+	local sel = 1
+	for i, name in ipairs(items) do
+		if name == state.ms_mod then sel = i end
+	end
+	fs = fs .. "label[0.4,0.62;Mod:]" ..
+		string.format("dropdown[1.2,0.57;4.6;ms_mod;%s;%d]", esc(table.concat(items, ",")), sel)
+
+	local rows = state.ms_rows or {}
+	local shown = math.min(#rows, MAX_STORAGE_ROWS)
+	local visible = {}
+	for i = 1, shown do visible[i] = rows[i] end
+	fs = fs .. "tableoptions[color=#dddddd;background=#1b1b1b;border=true;highlight=#466432]" ..
+		"tablecolumns[text,width=2.0;text,width=2.8;text,width=1.5;text,width=4.9]" ..
+		string.format("table[0.4,1.25;11.2,3.1;ms;%s;%d]", storage_cells(visible), state.ms_sel or 0)
+
+	local y = 4.5
+	if #rows == 0 then
+		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc("No storage for "..
+			(state.ms_mod and ("mod "..state.ms_mod) or "this entry").."."))
+	elseif #rows > shown then
+		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(string.format(
+			"showing %d of %d rows - pick a mod to narrow it down", shown, #rows)))
+	end
+	-- The picked row in full: the cell above is shortened, and a stored value
+	-- is often exactly the thing you opened this screen to read.
+	local pick = state.ms_sel and rows[state.ms_sel - 1]
+	if pick then
+		local wrapped = {}
+		append_wrapped(wrapped, "value: "..tostring(pick.data), "  ")
+		if #wrapped > MAX_VALUE_LINES then
+			wrapped[MAX_VALUE_LINES] = "…"
+			for i = #wrapped, MAX_VALUE_LINES + 1, -1 do
+				wrapped[i] = nil
+			end
+		end
+		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(
+			"mod "..pick.modname.." · key "..pick.key..
+			(pick.ancillary and (" · ancillary "..pick.ancillary) or ""))))
+		y = y + 0.4
+		for _, line in ipairs(wrapped) do
+			fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(line)))
+			y = y + 0.4
+		end
+	end
+	fs = fs .. "button[0.4,7.3;3.0,0.8;ms_back;Back]"
+	return fs
+end
+
 local function confirm_formspec(state)
 	local m = state.info.merge
 	local lines = {
@@ -542,6 +675,8 @@ local function show(state, name)
 		fs = tree_formspec(state)
 	elseif state.screen == "detail" then
 		fs = detail_formspec(state)
+	elseif state.screen == "storage" then
+		fs = storage_formspec(state)
 	elseif state.screen == "confirm" then
 		fs = confirm_formspec(state)
 	else
@@ -676,6 +811,48 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		show(state, name)
 		return
 	end
+	-- The storage viewer: a screen of its own, reached from the detail screen.
+	-- Opening it and changing the filter both re-read the rows, because which
+	-- rows are wanted is what the filter decides.
+	local function refresh_storage()
+		local ok, names, rows = pcall(load_storage, state.node, state.ms_mod)
+		if not ok then
+			-- on a throw pcall puts the error object in `names`
+			log(names)
+			state.error = "Internal error"
+			return false
+		end
+		state.ms_names, state.ms_rows = names, rows
+		state.ms_sel = nil
+		return true
+	end
+	if fields.storage then
+		if refresh_storage() then
+			state.screen = "storage"
+		end
+		show(state, name)
+		return
+	end
+	if fields.ms_back then
+		state.screen = "detail"
+		show(state, name)
+		return
+	end
+	if fields.ms_mod then
+		-- the dropdown sends the item text; "all mods" is the unfiltered one
+		state.ms_mod = (fields.ms_mod ~= "all mods") and fields.ms_mod or nil
+		refresh_storage()
+		show(state, name)
+		return
+	end
+	if fields.ms then
+		local ev, row = core.explode_table_event(fields.ms)
+		if ev == "CHG" then
+			state.ms_sel = row
+		end
+		show(state, name)
+		return
+	end
 	-- Pressing the active sort key flips the direction; pressing another one
 	-- switches the key and keeps the direction.
 	for _, key in ipairs(SORT_KEYS) do
@@ -764,6 +941,11 @@ M.show = function(name)
 		rows = {},
 		-- whether the rollback actions are explained on the detail screen
 		help = false,
+		-- storage viewer: the filter, the mod names on offer, the rows shown
+		ms_mod = nil,
+		ms_names = {},
+		ms_rows = {},
+		ms_sel = nil,
 	}
 	show(gui_states[name], name)
 end

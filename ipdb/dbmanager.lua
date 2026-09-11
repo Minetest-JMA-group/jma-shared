@@ -730,6 +730,111 @@ dbmanager.get_all_modstorage = function(userentry_id, modname)
 	return results
 end
 
+---@class ModstorageRow
+---@field modname string
+---@field key string
+---@field data string|number
+---@field ancillary integer?
+
+local modstorage_modnames
+-- Names of the mods holding storage for an entry, sorted. The GUI offers these
+-- as a filter, so it is a query of its own rather than something derived from
+-- fetching every row.
+---@param entryid integer
+---@return string[]
+dbmanager.get_modstorage_modnames = function(entryid)
+	if not modstorage_modnames then
+		modstorage_modnames = ipdb:prepare("SELECT DISTINCT modname FROM Modstorage "..
+		                                   "WHERE userentry_id = ? ORDER BY modname")
+		if not modstorage_modnames then error(ipdb:errmsg()) end
+	else
+		modstorage_modnames:reset()
+	end
+	local ret = modstorage_modnames:bind(1, entryid)
+	if ret ~= sqlite.OK then error(ret) end
+	local out = {}
+	for row in modstorage_modnames:nrows() do
+		table.insert(out, row.modname)
+	end
+	return out
+end
+
+-- Collect the rows of a prepared modstorage SELECT as plain tables
+---@param stmt userdata
+---@return ModstorageRow[]
+local function collect_modstorage_rows(stmt)
+	local out = {}
+	for row in stmt:nrows() do
+		table.insert(out, {
+			modname = row.modname,
+			key = row.key,
+			data = row.data,
+			ancillary = row.ancillary,
+		})
+	end
+	return out
+end
+
+local modstorage_rows_all
+local modstorage_rows_mod
+-- Storage rows of one entry, optionally only one mod's. A row carries no
+-- timestamp, so the only order to give them is their own names.
+---@param entryid integer
+---@param modname string?  -- nil for every mod
+---@return ModstorageRow[]
+dbmanager.get_modstorage_rows = function(entryid, modname)
+	if modname then
+		if not modstorage_rows_mod then
+			modstorage_rows_mod = ipdb:prepare("SELECT modname, key, data, ancillary FROM Modstorage "..
+			                                   "WHERE userentry_id = ? AND modname = ? ORDER BY key")
+			if not modstorage_rows_mod then error(ipdb:errmsg()) end
+		else
+			modstorage_rows_mod:reset()
+		end
+		local ret = modstorage_rows_mod:bind_values(entryid, modname)
+		if ret ~= sqlite.OK then error(ret) end
+		return collect_modstorage_rows(modstorage_rows_mod)
+	end
+	if not modstorage_rows_all then
+		modstorage_rows_all = ipdb:prepare("SELECT modname, key, data, ancillary FROM Modstorage "..
+		                                   "WHERE userentry_id = ? ORDER BY modname, key")
+		if not modstorage_rows_all then error(ipdb:errmsg()) end
+	else
+		modstorage_rows_all:reset()
+	end
+	local ret = modstorage_rows_all:bind(1, entryid)
+	if ret ~= sqlite.OK then error(ret) end
+	return collect_modstorage_rows(modstorage_rows_all)
+end
+
+-- The storage an entry had at the moment of a merge. A merge log records the
+-- storage of both participants, tagged with the owner it had then, so the rows
+-- tagged with this entry are exactly its state at that moment. That is what
+-- the rollback restores onto both sides, and it is why this works for an entry
+-- that no longer exists as much as for a live one.
+---@param log table  -- as returned by dbmanager.get_merge_log
+---@param entryid integer
+---@param modname string?  -- nil for every mod
+---@return ModstorageRow[]
+dbmanager.select_logged_modstorage = function(log, entryid, modname)
+	local out = {}
+	for _, row in ipairs(log.modstorage) do
+		if row.userentry_id == entryid and (not modname or row.modname == modname) then
+			table.insert(out, {
+				modname = row.modname,
+				key = row.key,
+				data = row.data,
+				ancillary = row.ancillary,
+			})
+		end
+	end
+	table.sort(out, function(a, b)
+		if a.modname ~= b.modname then return a.modname < b.modname end
+		return a.key < b.key
+	end)
+	return out
+end
+
 ---@class ModstorageInfo
 ---@field modname string
 ---@field userentry_id integer

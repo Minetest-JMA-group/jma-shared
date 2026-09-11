@@ -54,6 +54,11 @@ local core = {
 	end,
 	show_formspec = function(name, formname, fs) formspecs[#formspecs + 1] = fs end,
 	close_formspec = function(name, formname) closed_form = formname end,
+	-- "CHG:<row>:<col>" is what the engine sends when a table row is picked
+	explode_table_event = function(text)
+		local t, row, col = tostring(text):match("^(%a+):(%d+):(%d+)$")
+		return t, tonumber(row), tonumber(col)
+	end,
 }
 _G.core = core
 
@@ -893,6 +898,78 @@ do
 	local _, ev = pcall(dbmanager.get_merge_event, fmid)
 	assert(ev and ev.reverted_at, "the merge is marked reverted")
 	print("PASS: unmerge forget drops the post-merge identifiers")
+end
+
+-- ── the storage viewer ────────────────────────────────────────────────────
+do
+	-- 1 is absorbed by 2, then 2 by 3, and 2's storage changes in between: the
+	-- two nodes for entry 2 must show the two different states, each read from
+	-- the merge log that recorded it
+	local long_value = "first-part " .. string.rep("pad ", 20) .. "final-tail"
+	local s1 = dbmanager.new_entry()
+	dbmanager.add_name(s1, "store-1")
+	dbmanager.insert_into_modstorage(s1, "demomod", "k", "one-in-1")
+	local s2 = dbmanager.new_entry()
+	dbmanager.add_name(s2, "store-2")
+	dbmanager.insert_into_modstorage(s2, "demomod", "k", "two-before-m1")
+	dbmanager.insert_into_modstorage(s2, "othermod", "x", "two-x")
+	dbmanager.insert_into_modstorage(s2, "longmod", "blob", long_value)
+	local s3 = dbmanager.new_entry()
+	dbmanager.add_name(s3, "store-3")
+	dbmanager.insert_into_modstorage(s3, "demomod", "k", "three-own")
+
+	dbmanager.new_merge_event(s1, s2, "store-2", "")
+	local m1 = dbmanager.get_merge_events(1)[1].id
+	dbmanager.reassociate_ids(s2, dbmanager.user_exists("store-1").id)
+	dbmanager.delete_entry(s1)
+	dbmanager.update_modstorage2(s2, "demomod", "k", "two-before-m2")
+
+	dbmanager.new_merge_event(s2, s3, "store-3", "")
+	local m2 = dbmanager.get_merge_events(1)[1].id
+	dbmanager.reassociate_ids(s3, dbmanager.user_exists("store-2").id)
+	dbmanager.delete_entry(s2)
+
+	cmd.func("tester", "merge_gui")
+	gui({ go = true, root = "#"..s3, depth = "4" })
+	local stfs = formspecs[#formspecs]
+	assert(stfs:find("node_"..s2.."_"..m2..";", 1, true), "the absorbed entry's node carries the later merge")
+	gui({ ["node_"..s2.."_"..m2] = true })
+	assert(formspecs[#formspecs]:find(";storage;", 1, true), "the detail screen offers the storage viewer")
+
+	-- entry 2 as it was when merge m2 absorbed it
+	gui({ storage = true })
+	local v2 = formspecs[#formspecs]
+	assert(v2:find("Storage of entry #"..s2, 1, true), "the screen names the entry")
+	assert(v2:find("as of merge #"..m2, 1, true), "and which merge it is as of")
+	assert(v2:find("two-before-m2", 1, true), "the state at that merge is shown")
+	assert(not v2:find("two-before-m1", 1, true), "and not the earlier one")
+	assert(v2:find("demomod", 1, true) and v2:find("othermod", 1, true), "every mod is offered")
+	-- a long value is shortened in its cell
+	assert(not v2:find("final-tail", 1, true), "the cell does not carry the whole value")
+
+	-- picking the row shows the value in full
+	gui({ ms = "CHG:3:1" })
+	assert(formspecs[#formspecs]:find("final-tail", 1, true), "picking the row shows the whole value")
+
+	-- the dropdown narrows to one mod
+	gui({ ms_mod = "othermod" })
+	local f2 = formspecs[#formspecs]
+	assert(f2:find("two-x", 1, true), "the chosen mod's row is shown")
+	assert(not f2:find("two-before-m2", 1, true), "and the other mods' are not")
+	gui({ ms_mod = "all mods" })
+	assert(formspecs[#formspecs]:find("two-before-m2", 1, true), "all mods brings them back")
+
+	-- and the entry below it holds the earlier state
+	gui({ ms_back = true })
+	assert(formspecs[#formspecs]:find("Back to tree", 1, true), "back returns to the detail screen")
+	assert(stfs:find("node_"..s2.."_"..m1..";", 1, true), "the earlier state of entry 2 is a node of its own")
+	gui({ ["node_"..s2.."_"..m1] = true })
+	gui({ storage = true })
+	local v1 = formspecs[#formspecs]
+	assert(v1:find("as of merge #"..m1, 1, true), "the other node is as of the earlier merge")
+	assert(v1:find("two-before-m1", 1, true), "and shows the earlier state")
+	assert(not v1:find("two-before-m2", 1, true), "not the later one")
+	print("PASS: storage is shown per node, from the merge that recorded it")
 end
 
 -- the depth cap is 20 in the CLI too, not just in the message

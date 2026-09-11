@@ -297,6 +297,20 @@ end
 -- enough to reach the buttons would be drawn underneath them.
 local DECISION_X = 7.3
 
+-- What the three decision buttons do, spelled out with the entry ids they act
+-- on: the entry the identifiers are on now, and the one the rollback brings
+-- back for them to move to.
+---@param here integer
+---@param recreated integer
+---@return string[]
+local function action_help(here, recreated)
+	return {
+		"keep: stays on entry #"..here..", where it is now",
+		"delete: removed from the database entirely",
+		"move: moves to entry #"..recreated..", which the rollback recreates",
+	}
+end
+
 -- One decision row: the identifier and the decision made about it so far,
 -- shortened if it would otherwise reach the buttons. The value is what
 -- identifies the row, so only its very end is ever given up, and the full
@@ -417,8 +431,19 @@ local function detail_formspec(state)
 			if #adds == 0 then
 				fs = fs .. string.format("label[0.4,%.2f;Rollback is possible.]", ay)
 			else
-				fs = fs .. string.format("label[0.4,%.2f;Identifiers created after the merge - choose what happens to each:]", ay)
+				fs = fs .. string.format("label[0.4,%.2f;Identifiers created after the merge:]", ay) ..
+					string.format("button[6.4,%.2f;3.2,0.4;help;%s]", ay - 0.05, esc("what do these do?"))
 				ay = ay + 0.45
+				if state.help then
+					-- the identifiers being decided are the destination's, and
+					-- they move to the entry the rollback recreates - both are
+					-- properties of the merge, not of the node it is shown on
+					for _, line in ipairs(action_help(m.entry_dst, m.entry_src)) do
+						fs = fs .. string.format("label[0.4,%.2f;%s]", ay, esc(line))
+						ay = ay + 0.4
+					end
+					ay = ay + 0.05
+				end
 				-- only as many decision rows as fit above the button at 7.3
 				local room = math.max(0, math.floor((7.15 - ay) / 0.5))
 				if room < #adds then
@@ -646,6 +671,11 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		show(state, name)
 		return
 	end
+	if fields.help then
+		state.help = not state.help
+		show(state, name)
+		return
+	end
 	-- Pressing the active sort key flips the direction; pressing another one
 	-- switches the key and keeps the direction.
 	for _, key in ipairs(SORT_KEYS) do
@@ -732,6 +762,8 @@ M.show = function(name)
 		sort = "seen",
 		desc = true,
 		rows = {},
+		-- whether the rollback actions are explained on the detail screen
+		help = false,
 	}
 	show(gui_states[name], name)
 end

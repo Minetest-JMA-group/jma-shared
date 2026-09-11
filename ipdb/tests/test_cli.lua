@@ -766,6 +766,19 @@ do
 	assert(checked >= 6, "expected a decision row per addition, saw " .. checked)
 	print("PASS: decision rows stop before their buttons")
 
+	-- the actions can be explained on demand, naming the entry each one acts on
+	assert(dfs:find("what do these do%?", 1), "the help button is offered")
+	assert(not dfs:find("stays on entry #", 1, true), "the explanation starts hidden")
+	gui({ help = true })
+	local hfs = formspecs[#formspecs]
+	assert(hfs:find("stays on entry #"..dec_dst, 1, true), "keep explains where it stays")
+	assert(hfs:find("removed from the database", 1, true), "delete is explained")
+	assert(hfs:find("moves to entry #"..dec_src, 1, true), "move names the entry recreated")
+	assert(hfs:find("Identifiers created after the merge:", 1, true), "the decision list is still there")
+	gui({ help = true })
+	assert(not formspecs[#formspecs]:find("stays on entry #", 1, true), "pressing it again hides the explanation")
+	print("PASS: the rollback actions can be explained on demand")
+
 	-- nothing anywhere on the screen runs past the right edge either
 	for x, label in dfs:gmatch("label%[([%d%.]+),[%d%.]+;([^%]]*)%]") do
 		local right = tonumber(x) + #unesc(label) * CHAR_W

@@ -124,7 +124,20 @@ local settings_appliers = {
 		default = "100",
 		apply = function(v)
 			local n = tonumber(v)
-			if n and n >= 10 and n <= 20000 then HISTORY_SIZE = n end
+			if not n or n < 10 or n > 20000 then return end
+			HISTORY_SIZE = math.floor(n)
+			-- A shrink drops the excess right here, because add_to_history
+			-- sheds only one record per capture: an over-cap list would keep
+			-- serving records past the new window for the next (old - new)
+			-- messages. Growing needs no work - the list refills as messages
+			-- arrive, and records already trimmed never come back.
+			if #chat_history > HISTORY_SIZE then
+				local kept = {}
+				for i = #chat_history - HISTORY_SIZE + 1, #chat_history do
+					kept[#kept + 1] = chat_history[i]
+				end
+				chat_history = kept
+			end
 		end,
 	},
 	history_tracking_time = {
@@ -1466,8 +1479,30 @@ AI Watcher Status:
 			if new < old then
 				cleanup_player_history()
 			end
-			report("History tracking time changed to %d seconds by %s", new, name)
+			if new ~= old then
+				report("History tracking time changed to %d seconds by %s", new, name)
+			end
 			return true, ("History tracking time set to: %d seconds (%.1f hours)"):format(new, new/3600)
+
+		elseif cmd == "history_size" then
+			local v = param:match("%s+(%S+)")
+			if not v then
+				return true, ("Chat history size: %d messages (stored: %d)"):format(HISTORY_SIZE, #chat_history)
+			end
+			local n = tonumber(v)
+			if not n or n < 10 or n > 20000 then
+				return false, "Usage: /ai_watcher history_size <count> (10-20000)"
+			end
+			n = math.floor(n)
+			save_setting("history_size", n, "history size")
+			local old = HISTORY_SIZE
+			-- Through the applier, so a shrink drops its excess now, the same
+			-- way a shareddb-driven change does.
+			settings_appliers.history_size.apply(n)
+			if n ~= old then
+				report("Chat history size changed from %d to %d by %s", old, n, name)
+			end
+			return true, ("Chat history size set to: %d messages"):format(n)
 
 		elseif cmd == "action_rate_limit" then
 			local v = param:match("%s+(%S+)")
@@ -1625,7 +1660,8 @@ AI Watcher Status:
   max_batch [count]     - Get/set max messages per scan payload (1-100000, '0'/'off' = no cap)
   temperature [value]   - Get/set temperature (0-2)
   debug [on|off]        - Get/set debug logging
-  history_time [time]   - Get/set history retention (seconds or e.g. '10h')
+  history_time [time]   - Get/set moderation history retention time (seconds or e.g. '10h')
+  history_size [count]  - Get/set number of messages kept as context for get_history (10-20000)
   action_rate_limit [value] - Get/set action report rate limit (e.g. '10/1m', unlimited if unset)
   sleep [timespec|off]  - Get/set quiet hours (UTC timespec, e.g. weekdays,02:00-08:00). Batches are held, never lost, and drain when the window ends. 'off' disables
   process [force]       - Process buffered messages now (force overrides min batch size and quiet hours)

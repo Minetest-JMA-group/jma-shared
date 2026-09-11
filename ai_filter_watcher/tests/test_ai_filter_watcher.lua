@@ -1180,4 +1180,76 @@ check(cmdT.mail.func ~= late_mail, "T: post-load /mail registration also wrapped
 cmdT.mail.func("alice", "bob late mail")
 contains(dump_buffer(envT), "<alice> [MAIL to bob]: late mail", "T: /mail captured without the email global")
 
+-- === Scenario U: history_size command (the get_history retention window) ===
+local envU = make_env({}, { min_batch_size = "1" })
+local cmdU = envU.core.registered_chatcommands
+for i = 1, 30 do envU.core.chat_hook("alice", "m" .. i) end
+envU.core.globalstep_cb(61)                 -- ids 1..30 reviewed as one batch
+local okU, retU = cmdU.ai_watcher.func("tester", "history_size")
+check(okU == true and retU == "Chat history size: 100 messages (stored: 30)",
+	"U: reports the default window and what it holds")
+
+-- a shrink drops the excess at once, not one record per future message
+local _, retU2 = cmdU.ai_watcher.func("tester", "history_size 10")
+contains(retU2, "Chat history size set to: 10 messages", "U: shrink accepted")
+local _, stU = cmdU.ai_watcher.func("tester", "status")
+contains(stU, "- History size: 10 messages (stored: 10)", "U: excess dropped immediately")
+check(envU.shareddb.db.history_size == "10", "U: persisted to shareddb")
+
+-- the records kept are the newest ones: the shrink left ids 21..30, so
+-- capturing id 31 trims 21 and the batch after it (31) sees 22..30
+envU.core.chat_hook("alice", "m31")
+envU.core.globalstep_cb(61)
+local ghU = find_tool(envU, "get_history")
+local resU = ghU.func({ start_id = 1, end_id = 30 })
+check(resU.count == 9 and resU.messages[1].id == 30 and resU.oldest_returned_id == 22,
+	"U: window keeps the newest records")
+
+-- growing restores nothing; the list refills as messages arrive
+local _, retU3 = cmdU.ai_watcher.func("tester", "history_size 20000")
+contains(retU3, "Chat history size set to: 20000 messages", "U: grow accepted")
+local _, stU2 = cmdU.ai_watcher.func("tester", "status")
+contains(stU2, "- History size: 20000 messages (stored: 10)", "U: grow restores nothing")
+
+-- re-setting the same size still confirms, but leaves the action channel alone
+local beforeU = #envU.relay_msgs
+local _, retU4 = cmdU.ai_watcher.func("tester", "history_size 20000")
+contains(retU4, "Chat history size set to: 20000 messages", "U: unchanged size still confirmed")
+check(#envU.relay_msgs == beforeU, "U: unchanged size reports nothing")
+
+-- the shareddb path (another instance, or a direct row write) applies too
+envU.shareddb.db.history_size = "20"
+envU.shareddb.listener("history_size")
+local _, stU3 = cmdU.ai_watcher.func("tester", "status")
+contains(stU3, "- History size: 20 messages (stored: 10)", "U: shareddb row applies")
+
+-- bounds are enforced by the command and by the applier
+check(cmdU.ai_watcher.func("tester", "history_size 9") == false, "U: below 10 rejected")
+check(cmdU.ai_watcher.func("tester", "history_size 20001") == false, "U: above 20000 rejected")
+check(cmdU.ai_watcher.func("tester", "history_size abc") == false, "U: non-numeric rejected")
+envU.shareddb.db.history_size = "9"
+envU.shareddb.listener("history_size")
+local _, stU4 = cmdU.ai_watcher.func("tester", "status")
+contains(stU4, "- History size: 20 messages", "U: out-of-range shareddb row ignored")
+
+-- === Scenario V: setting a retention value that is already in effect ===
+-- The suite sits at LuaJIT's 200-locals-per-function ceiling, so this scenario
+-- keeps its locals inside a function of its own: a nested function gets a fresh
+-- budget, a do/end block does not (the count is per function, not per scope).
+local function scenarioV()
+	local envV = make_env({}, { min_batch_size = "1", history_tracking_time = "3600" })
+	local cmdV = envV.core.registered_chatcommands
+	local _, ghV = cmdV.ai_watcher.func("tester", "history_time")
+	contains(ghV, "Current history tracking time: 3600 seconds", "V: history_time reports its value")
+	local beforeV = #envV.relay_msgs
+	local _, retV = cmdV.ai_watcher.func("tester", "history_time 3600")
+	contains(retV, "History tracking time set to: 3600 seconds", "V: unchanged value still confirmed")
+	check(#envV.relay_msgs == beforeV, "V: unchanged value reports nothing")
+	local _, retV2 = cmdV.ai_watcher.func("tester", "history_time 7200")
+	contains(retV2, "History tracking time set to: 7200 seconds", "V: change accepted")
+	check(#envV.relay_msgs == beforeV + 1, "V: real change reports once")
+	check(envV.shareddb.db.history_tracking_time == "7200", "V: persisted to shareddb")
+end
+scenarioV()
+
 print("All tests passed.")

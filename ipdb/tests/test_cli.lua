@@ -59,6 +59,40 @@ local core = {
 		local t, row, col = tostring(text):match("^(%a+):(%d+):(%d+)$")
 		return t, tonumber(row), tonumber(col)
 	end,
+	-- Stand-ins for the engine's JSON and serialization functions, which are
+	-- C++ there. These check the plumbing - which text reaches them, whether
+	-- the styled form was asked for, what is shown when they refuse - and echo
+	-- their input so a test can tell what was passed.
+	parse_json = function(s, nullvalue, return_error)
+		s = tostring(s)
+		if s:sub(1, 1) ~= "{" and s:sub(1, 1) ~= "[" then
+			return nil, "invalid json near '"..s:sub(1, 8).."'"
+		end
+		return { __source = s }
+	end,
+	write_json = function(v, styled)
+		if type(v) ~= "table" then
+			return nil, "cannot write a "..type(v)
+		end
+		-- JSON takes only string and positive integer keys
+		for k in pairs(v) do
+			if type(k) ~= "string" and not (type(k) == "number" and k >= 1 and k == math.floor(k)) then
+				return nil, "cannot write a table with a "..type(k).." key"
+			end
+		end
+		return (styled and "PRETTY of " or "COMPACT of ")..tostring(v.__source or "the table")
+	end,
+	deserialize = function(s, safe)
+		s = tostring(s)
+		local loader = loadstring or load
+		local fn = loader(s)
+		if not fn then error("cannot load '"..s:sub(1, 8).."'") end
+		local v = fn()
+		if type(v) ~= "table" then error("does not evaluate to a table") end
+		v.__source = s   -- so a test can see what was handed over
+		return v
+	end,
+	serialize = function(v) return "return "..tostring(v) end,
 }
 _G.core = core
 
@@ -79,6 +113,10 @@ local algorithms = {
 	is_trusted = function() return true end,
 }
 _G.algorithms = algorithms
+
+-- the engine ships a global dump() for rendering a value readably; the value
+-- screen falls back to it when the data will not go into JSON
+_G.dump = function(v) return "DUMPED "..tostring(v.__source or v) end
 
 
 os.execute(string.format("mkdir -p %q", world))
@@ -914,6 +952,13 @@ do
 	dbmanager.insert_into_modstorage(s2, "demomod", "k", "two-before-m1")
 	dbmanager.insert_into_modstorage(s2, "othermod", "x", "two-x")
 	dbmanager.insert_into_modstorage(s2, "longmod", "blob", long_value)
+	-- one minified blob with nothing to break on, and one serialized value
+	local minified = '{"is_banned":false,"privs":["interact","shout"],' ..
+		'"homes":{"home":{"x":123.45,"y":42,"z":-987.65}},"n":123456789}'
+	dbmanager.insert_into_modstorage(s2, "jsonmod", "blob", minified)
+	dbmanager.insert_into_modstorage(s2, "sermod", "t", "return { foo = 'bar' }")
+	-- deserializes fine, but JSON cannot hold a boolean key
+	dbmanager.insert_into_modstorage(s2, "unjsonmod", "t", "return { [true] = 'x' }")
 	local s3 = dbmanager.new_entry()
 	dbmanager.add_name(s3, "store-3")
 	dbmanager.insert_into_modstorage(s3, "demomod", "k", "three-own")
@@ -947,9 +992,70 @@ do
 	-- a long value is shortened in its cell
 	assert(not v2:find("final-tail", 1, true), "the cell does not carry the whole value")
 
-	-- picking the row shows the value in full
-	gui({ ms = "CHG:3:1" })
+	-- picking a row shows it under the table
+	gui({ ms = "CHG:4:1" })
+	assert(formspecs[#formspecs]:find("mod longmod", 1, true), "the long-value row is picked")
 	assert(formspecs[#formspecs]:find("final-tail", 1, true), "picking the row shows the whole value")
+
+	-- The value screen. A minified blob is one enormous token with nothing to
+	-- break on, so wrapping by word alone would shorten it away: the whole of
+	-- it has to be reachable.
+	gui({ ms = "CHG:3:1" })
+	assert(formspecs[#formspecs]:find("mod jsonmod", 1, true), "the minified row is picked")
+	assert(formspecs[#formspecs]:find(";ms_full;", 1, true), "the picked row offers the whole value")
+	gui({ ms_full = true })
+	local vfs = formspecs[#formspecs]
+	assert(vfs:find("as stored", 1, true), "the value screen says how it is showing it")
+	local items = vfs:match("textlist%[[^;]*;[^;]*;[^;]*;([^;]*);")
+	assert(items, "the value screen carries its lines")
+	local text = items:gsub("\\,", ",")
+	assert(text:find("123456789}", 1, true), "the end of a minified blob is reachable")
+	assert(text:find("is_banned", 1, true), "and so is its beginning")
+
+	-- JSON: asked for the styled form, and shown what came back
+	gui({ value_json = true })
+	local jfs = formspecs[#formspecs]
+	assert(jfs:find("reformatted as JSON", 1, true), "the JSON view is named")
+	assert(jfs:find("PRETTY of {", 1, true), "the value was parsed and written back prettily")
+
+	-- and a value that is not JSON says so instead
+	gui({ value_back = true })
+	gui({ ms = "CHG:4:1" })
+	gui({ ms_full = true })
+	gui({ value_json = true })
+	local badfs = formspecs[#formspecs]
+	assert(badfs:find("not JSON:", 1, true), "a value that is not JSON says so")
+	assert(badfs:find("final-tail", 1, true), "and the stored text is shown instead")
+
+	-- Serialization: reads a serialized value, and refuses anything else
+	gui({ value_back = true })
+	gui({ ms = "CHG:6:1" })
+	assert(formspecs[#formspecs]:find("mod sermod", 1, true), "the serialized row is picked")
+	gui({ ms_full = true })
+	gui({ value_ser = true })
+	assert(formspecs[#formspecs]:find("PRETTY of return {", 1, true), "a serialized value is read")
+	gui({ value_back = true })
+	gui({ ms = "CHG:3:1" })
+	gui({ ms_full = true })
+	gui({ value_ser = true })
+	assert(formspecs[#formspecs]:find("not a serialized value", 1, true), "JSON is not a serialized value")
+
+	-- Data JSON cannot hold is rendered by the engine's own dump. Falling back
+	-- to serialize would write back the very text the value was stored as,
+	-- leaving the button looking as though it had done nothing.
+	gui({ value_back = true })
+	gui({ ms = "CHG:7:1" })
+	assert(formspecs[#formspecs]:find("mod unjsonmod", 1, true), "the awkward row is picked")
+	gui({ ms_full = true })
+	gui({ value_ser = true })
+	-- the brackets of the value are escaped in the formspec, so match the
+	-- prefix that tells the two renderings apart
+	assert(formspecs[#formspecs]:find("DUMPED return {", 1, true),
+		"data JSON cannot hold is dumped rather than echoed back")
+	assert(not formspecs[#formspecs]:find("PRETTY", 1, true), "and not mistaken for JSON")
+	gui({ value_back = true })
+	assert(formspecs[#formspecs]:find("Storage of entry #"..s2, 1, true), "back returns to the storage list")
+	print("PASS: the value screen converts for reading, and says when it cannot")
 
 	-- the dropdown narrows to one mod
 	gui({ ms_mod = "othermod" })

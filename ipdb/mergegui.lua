@@ -64,9 +64,10 @@ end
 -- resort on lines whose content is not bounded by the code that builds them:
 -- a label[] neither wraps nor clips, so anything past the right edge is gone.
 ---@param text string
+---@param chars integer?  # a shorter limit, when something sits to the right
 ---@return string
-local function fit_line(text)
-	local budget = math.floor(TEXT_W / CHAR_W)
+local function fit_line(text, chars)
+	local budget = chars or math.floor(TEXT_W / CHAR_W)
 	if #text > budget then
 		return text:sub(1, budget - 1) .. "…"
 	end
@@ -99,6 +100,35 @@ local function append_wrapped(lines, text, indent)
 	if cur ~= "" then
 		table.insert(lines, cur)
 	end
+end
+
+-- Split text into lines that fit, breaking inside a word when it has to. A
+-- minified JSON value is one enormous token with nothing to break on, and
+-- shortening it would lose the very content the value screen exists to show.
+-- Newlines already in the text stay line breaks. Returns true if the line
+-- limit cut the text short.
+---@param lines string[] # the lines are appended here
+---@param text string
+---@param indent string? # prefix for the continuation lines
+---@param max_lines integer?
+---@return boolean truncated
+local function append_hard_wrapped(lines, text, indent, max_lines)
+	local budget = math.floor(TEXT_W / CHAR_W)
+	local pad = indent or ""
+	local started = false
+	for raw in (text .. "\n"):gmatch("(.-)\n") do
+		local rest = raw
+		repeat
+			local chunk = rest:sub(1, budget)
+			rest = rest:sub(budget + 1)
+			table.insert(lines, (started and pad or "") .. chunk)
+			started = true
+			if max_lines and #lines >= max_lines then
+				return true
+			end
+		until rest == ""
+	end
+	return false
 end
 
 -- Label of an entry node, kept short enough to fit its button
@@ -589,23 +619,126 @@ local function storage_formspec(state)
 	local pick = state.ms_sel and rows[state.ms_sel - 1]
 	if pick then
 		local wrapped = {}
-		append_wrapped(wrapped, "value: "..tostring(pick.data), "  ")
-		if #wrapped > MAX_VALUE_LINES then
-			wrapped[MAX_VALUE_LINES] = "…"
-			for i = #wrapped, MAX_VALUE_LINES + 1, -1 do
-				wrapped[i] = nil
-			end
-		end
+		append_hard_wrapped(wrapped, tostring(pick.data), "  ", MAX_VALUE_LINES)
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(
 			"mod "..pick.modname.." · key "..pick.key..
-			(pick.ancillary and (" · ancillary "..pick.ancillary) or ""))))
-		y = y + 0.4
+			(pick.ancillary and (" · ancillary "..pick.ancillary) or ""), 52))) ..
+			"button[8.6,4.45;3.0,0.5;ms_full;Show the whole value]"
+		y = y + 0.45
 		for _, line in ipairs(wrapped) do
 			fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(line)))
 			y = y + 0.4
 		end
 	end
 	fs = fs .. "button[0.4,7.3;3.0,0.8;ms_back;Back]"
+	return fs
+end
+
+-- Lines the value screen will show before it stops. The list scrolls; the cap
+-- is there because every line is one string in the formspec the client parses.
+local MAX_FULL_LINES = 400
+
+-- The stored text prettified as JSON. Nothing here is written back to the
+-- database: the conversions exist to make a stored blob readable.
+---@param text string
+---@return string? pretty
+---@return string? err
+local function value_as_json(text)
+	local parsed, err = core.parse_json(text, nil, true)
+	if parsed == nil then
+		return nil, "not JSON: "..tostring(err)
+	end
+	local pretty, werr = core.write_json(parsed, true)
+	if not pretty then
+		return nil, "parsed as JSON, but could not be written back: "..tostring(werr)
+	end
+	return pretty
+end
+
+-- The stored text read as Lua data. It is handed to the sandboxed form of
+-- deserialize: the text came out of the database, and the engine's own
+-- documentation says not to pass it untrusted data.
+---@param text string
+---@return string? pretty
+---@return string? err
+local function value_as_deserialized(text)
+	local ok, parsed = pcall(core.deserialize, text, true)
+	if not ok then
+		return nil, "not a serialized value: "..tostring(parsed)
+	end
+	if parsed == nil then
+		return nil, "not a serialized value: it evaluates to nothing"
+	end
+	if type(parsed) ~= "table" then
+		return nil, "not a serialized value: it evaluates to a "..type(parsed)
+	end
+	-- Shown the same way as JSON where JSON can hold it. When it cannot -
+	-- mixed or non-string keys, say - the engine's own dump renders it, which
+	-- is human-readable in a way the data may not otherwise get to be.
+	-- serialize is not the fallback: it would write back the very "return
+	-- { ... }" text the value was stored as, so the button would look as if it
+	-- had done nothing at all.
+	local pretty = core.write_json(parsed, true)
+	if pretty then
+		return pretty
+	end
+	return dump(parsed)
+end
+
+local VALUE_MODE_LABEL = {
+	raw = "as stored",
+	json = "reformatted as JSON",
+	ser = "deserialized, shown as JSON",
+}
+
+-- Work out what the value screen should show for the row and mode it is in,
+-- and wrap it to fit.
+---@param state table
+local function load_value(state)
+	local row = state.value_row
+	local text = tostring(row.data)
+	local mode = state.value_mode or "raw"
+	local body, err
+	if mode == "json" then
+		body, err = value_as_json(text)
+	elseif mode == "ser" then
+		body, err = value_as_deserialized(text)
+	else
+		body = text
+	end
+	if err then
+		state.value_label = err
+		body = text
+	elseif mode == "raw" then
+		state.value_label = "as stored, "..#text.." bytes"
+	else
+		state.value_label = VALUE_MODE_LABEL[mode]
+	end
+	local lines = {}
+	if append_hard_wrapped(lines, body, "  ", MAX_FULL_LINES) then
+		lines[#lines + 1] = "… stopped at "..MAX_FULL_LINES.." lines"
+	end
+	state.value_lines = lines
+end
+
+local function value_formspec(state)
+	local row = state.value_row
+	local fs = "formspec_version[6]size[12,8]" ..
+		string.format("label[0.4,0.25;%s]", esc(fit_line(
+			"mod "..row.modname.." · key "..row.key..
+			(row.ancillary and (" · ancillary "..row.ancillary) or "")))) ..
+		string.format("label[0.4,0.62;%s]", esc(fit_line(state.value_label or "as stored")))
+	-- one list element per line, so the list scrolls; each element is escaped
+	-- on its own, and a leading # would otherwise be read as a colour
+	local items = {}
+	for _, line in ipairs(state.value_lines or {}) do
+		items[#items + 1] = esc(line:sub(1, 1) == "#" and ("#"..line) or line)
+	end
+	fs = fs .. string.format("textlist[0.4,1.05;11.2,5.7;value;%s;0;false]", table.concat(items, ","))
+	fs = fs .. "button[0.4,7.3;2.2,0.8;value_json;JSON]" ..
+		"button[2.8,7.3;3.0,0.8;value_raw;As stored]" ..
+		"button[6.0,7.3;3.4,0.8;value_ser;Serialization]" ..
+		"button[9.6,7.3;2.0,0.8;value_back;Back]"
 	return fs
 end
 
@@ -677,6 +810,8 @@ local function show(state, name)
 		fs = detail_formspec(state)
 	elseif state.screen == "storage" then
 		fs = storage_formspec(state)
+	elseif state.screen == "value" then
+		fs = value_formspec(state)
 	elseif state.screen == "confirm" then
 		fs = confirm_formspec(state)
 	else
@@ -838,6 +973,30 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		show(state, name)
 		return
 	end
+	-- The value screen: the picked row's value, with the two conversions that
+	-- make a stored blob readable. Only the display changes, never the row.
+	if fields.ms_full and state.ms_rows then
+		local row = state.ms_rows[(state.ms_sel or 0) - 1]
+		if row then
+			state.value_row = row
+			state.value_mode = "raw"
+			load_value(state)
+			state.screen = "value"
+		end
+		show(state, name)
+		return
+	end
+	if fields.value_json or fields.value_ser or fields.value_raw then
+		state.value_mode = fields.value_json and "json" or (fields.value_ser and "ser" or "raw")
+		load_value(state)
+		show(state, name)
+		return
+	end
+	if fields.value_back then
+		state.screen = "storage"
+		show(state, name)
+		return
+	end
 	if fields.ms_mod then
 		-- the dropdown sends the item text; "all mods" is the unfiltered one
 		state.ms_mod = (fields.ms_mod ~= "all mods") and fields.ms_mod or nil
@@ -946,6 +1105,12 @@ M.show = function(name)
 		ms_names = {},
 		ms_rows = {},
 		ms_sel = nil,
+		-- value screen: the row being read, how it is being shown, and what
+		-- that comes out as
+		value_row = nil,
+		value_mode = "raw",
+		value_label = nil,
+		value_lines = {},
 	}
 	show(gui_states[name], name)
 end

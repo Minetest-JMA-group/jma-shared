@@ -590,7 +590,11 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	local enter_in_field = fields.key_enter and fields.key_enter_field
 	if fields.quit or fields.close then
 		if not enter_in_field then
+			-- Forget the state *and* tell the client to close the window.
+			-- Dropping the state on its own closes nothing: the formspec stays
+			-- on screen, which is what made the Close button look broken.
 			gui_states[name] = nil
+			core.close_formspec(name, FORMNAME)
 			return
 		end
 	end

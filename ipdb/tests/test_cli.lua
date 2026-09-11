@@ -21,6 +21,7 @@ local chatcommands = {}
 local formspecs = {}
 local receive_fields_handler
 local chat_output  -- last message sent to a player, for commands that print
+local closed_form  -- formname the GUI asked the client to close, if any
 
 local core = {
 	get_current_modname = function() return "ipdb" end,
@@ -52,6 +53,7 @@ local core = {
 		}))
 	end,
 	show_formspec = function(name, formname, fs) formspecs[#formspecs + 1] = fs end,
+	close_formspec = function(name, formname) closed_form = formname end,
 }
 _G.core = core
 
@@ -464,16 +466,22 @@ do
 	assert(#formspecs == n3, "Enter with no field focused closes the window")
 	print("PASS: Enter with no field focused still closes")
 
-	-- and so do Escape / the window button, and the Close button itself
+	-- and so do Escape / the window button, and the Close button itself.
+	-- Dropping the mod's state is not enough: the client has to be told, or
+	-- the window stays on screen and the button looks dead.
 	cmd.func("tester", "merge_gui")
 	local n4 = #formspecs
+	closed_form = nil
 	gui({ quit = "true" })
-	assert(#formspecs == n4, "escape closes the window")
+	assert(#formspecs == n4, "escape shows no new screen")
+	assert(closed_form == "ipdb:merge_gui", "escape asks the client to close the formspec")
 	cmd.func("tester", "merge_gui")
 	local n5 = #formspecs
+	closed_form = nil
 	gui({ close = "true" })
-	assert(#formspecs == n5, "the Close button closes the window")
-	print("PASS: escape and the Close button still close the window")
+	assert(#formspecs == n5, "the Close button shows no new screen")
+	assert(closed_form == "ipdb:merge_gui", "the Close button asks the client to close the formspec")
+	print("PASS: escape and the Close button close the window")
 end
 
 -- ── the GUI must not hand the engine text that does not fit ───────────────

@@ -1065,6 +1065,21 @@ do
 	gui({ ms_mod = "all mods" })
 	assert(formspecs[#formspecs]:find("two-before-m2", 1, true), "all mods brings them back")
 
+	-- The dropdown's items are separate, and its value rides along with every
+	-- submission: picking a row must survive that and must not re-filter.
+	local dropscreen = formspecs[#formspecs - 1]
+	local drop = dropscreen and dropscreen:match("dropdown%[[^%]]*%]")
+	assert(drop, "the mod filter is a dropdown")
+	assert(drop:find("all mods,", 1, true),
+		"its items are separated by real commas, not escaped ones: "..drop)
+	assert(not drop:find("\\,", 1, true), "and no separator is escaped")
+	gui({ ms = "CHG:3:1", ms_mod = "all mods" })
+	assert(formspecs[#formspecs]:find("mod jsonmod", 1, true),
+		"a row pick is honoured even with the dropdown's value along for the ride")
+	assert(formspecs[#formspecs]:find(";ms_full;", 1, true), "and still offers the whole value")
+	gui({ ms_mod = "all mods" })
+	assert(formspecs[#formspecs]:find("mod jsonmod", 1, true), "a repeat of the same filter changes nothing")
+
 	-- and the entry below it holds the earlier state
 	gui({ ms_back = true })
 	assert(formspecs[#formspecs]:find("Back to tree", 1, true), "back returns to the detail screen")

@@ -587,19 +587,23 @@ local function storage_formspec(state)
 
 	-- The filter list: every mod is one query, so the dropdown can show what
 	-- is actually there instead of asking you to remember a mod name.
-	local items = { "all mods" }
-	for _, name in ipairs(state.ms_names or {}) do
-		items[#items + 1] = name
-	end
+	-- One item per mod, each escaped on its own: escaping the joined string
+	-- would turn the commas between items into literal ones, and the whole list
+	-- would arrive as a single item reading "all mods,foo,bar".
+	local names = state.ms_names or {}
 	local sel = 1
-	for i, name in ipairs(items) do
-		if name == state.ms_mod then sel = i end
+	for i, name in ipairs(names) do
+		if name == state.ms_mod then sel = i + 1 end
+	end
+	local items = { "all mods" }
+	for _, name in ipairs(names) do
+		items[#items + 1] = esc(name)
 	end
 	-- The height is given rather than left to the engine: left out, a dropdown
-	-- is drawn m_btn_height * 2 tall - about a whole unit - and covers the
-	-- first row of the table below it.
+	-- is drawn m_btn_height * 2 tall - most of a unit - and covers the first
+	-- row of the table below it.
 	fs = fs .. "label[0.4,0.62;Mod:]" ..
-		string.format("dropdown[1.2,0.57;4.6,0.6;ms_mod;%s;%d]", esc(table.concat(items, ",")), sel)
+		string.format("dropdown[1.2,0.57;4.6,0.6;ms_mod;%s;%d]", table.concat(items, ","), sel)
 
 	local rows = state.ms_rows or {}
 	local shown = math.min(#rows, MAX_STORAGE_ROWS)
@@ -1000,12 +1004,18 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		show(state, name)
 		return
 	end
+	-- A dropdown's value rides along with every submission, not only the ones
+	-- where it changed. It counts as a change only if it differs from the
+	-- filter in hand; otherwise picking a table row would be read as
+	-- re-filtering, and the pick - which the refresh clears - would be lost.
 	if fields.ms_mod then
-		-- the dropdown sends the item text; "all mods" is the unfiltered one
-		state.ms_mod = (fields.ms_mod ~= "all mods") and fields.ms_mod or nil
-		refresh_storage()
-		show(state, name)
-		return
+		local chosen = (fields.ms_mod ~= "all mods") and fields.ms_mod or nil
+		if chosen ~= state.ms_mod then
+			state.ms_mod = chosen
+			refresh_storage()
+			show(state, name)
+			return
+		end
 	end
 	if fields.ms then
 		local ev, row = core.explode_table_event(fields.ms)

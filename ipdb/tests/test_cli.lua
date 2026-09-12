@@ -1075,7 +1075,25 @@ do
 	assert(v1:find("as of merge #"..m1, 1, true), "the other node is as of the earlier merge")
 	assert(v1:find("two-before-m1", 1, true), "and shows the earlier state")
 	assert(not v1:find("two-before-m2", 1, true), "not the later one")
-	print("PASS: storage is shown per node, from the merge that recorded it")
+
+	-- A live entry has no merge to read from and no "as of" state, so it reads
+	-- the table itself - a different path from the two above.
+	cmd.func("tester", "merge_gui")
+	gui({ go = true, root = "#"..s3, depth = "2" })
+	assert(formspecs[#formspecs]:find("node_"..s3.."_0;", 1, true), "the live entry is the root node")
+	gui({ ["node_"..s3.."_0"] = true })
+	gui({ storage = true })
+	local livefs = formspecs[#formspecs]
+	assert(livefs:find("Storage of entry #"..s3.." · live", 1, true), "the live entry is shown as live")
+	assert(livefs:find("demomod", 1, true), "its storage names the mod that holds it")
+	assert(livefs:find("three-own", 1, true), "and lists the value")
+	assert(not livefs:find("no storage", 1, true), "a live entry with storage does not report none")
+	print("PASS: a live entry's storage is read from the table")
+
+	-- and the filter's height is given, or the dropdown covers the first row
+	local drop = livefs:match("dropdown%[[^%]]*%]")
+	assert(drop, "the mod filter is a dropdown")
+	assert(drop:find(";%d+%.?%d*,%d+%.?%d*;", 1), "with its height given rather than left to the engine: "..drop)
 end
 
 -- the depth cap is 20 in the CLI too, not just in the message

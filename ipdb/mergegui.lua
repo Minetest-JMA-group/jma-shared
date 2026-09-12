@@ -595,8 +595,11 @@ local function storage_formspec(state)
 	for i, name in ipairs(items) do
 		if name == state.ms_mod then sel = i end
 	end
+	-- The height is given rather than left to the engine: left out, a dropdown
+	-- is drawn m_btn_height * 2 tall - about a whole unit - and covers the
+	-- first row of the table below it.
 	fs = fs .. "label[0.4,0.62;Mod:]" ..
-		string.format("dropdown[1.2,0.57;4.6;ms_mod;%s;%d]", esc(table.concat(items, ",")), sel)
+		string.format("dropdown[1.2,0.57;4.6,0.6;ms_mod;%s;%d]", esc(table.concat(items, ",")), sel)
 
 	local rows = state.ms_rows or {}
 	local shown = math.min(#rows, MAX_STORAGE_ROWS)

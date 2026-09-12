@@ -54,10 +54,23 @@ local core = {
 	end,
 	show_formspec = function(name, formname, fs) formspecs[#formspecs + 1] = fs end,
 	close_formspec = function(name, formname) closed_form = formname end,
-	-- "CHG:<row>:<col>" is what the engine sends when a table row is picked
-	explode_table_event = function(text)
-		local t, row, col = tostring(text):match("^(%a+):(%d+):(%d+)$")
-		return t, tonumber(row), tonumber(col)
+	-- The engine sends "CHG:<row>:<col>" when a table row is picked, and this
+	-- returns a table - not several values - so the stand-in must too, or code
+	-- written against it will not work in the game.
+	explode_table_event = function(evt)
+		if evt ~= nil then
+			local parts = {}
+			for part in tostring(evt):gmatch("[^:]+") do
+				parts[#parts + 1] = part
+			end
+			if #parts == 3 then
+				local t, r, c = parts[1], tonumber(parts[2]), tonumber(parts[3])
+				if r and c and t ~= "INV" then
+					return { type = t, row = r, column = c }
+				end
+			end
+		end
+		return { type = "INV", row = 0, column = 0 }
 	end,
 	-- Stand-ins for the engine's JSON and serialization functions, which are
 	-- C++ there. These check the plumbing - which text reaches them, whether

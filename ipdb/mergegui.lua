@@ -1018,9 +1018,10 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		end
 	end
 	if fields.ms then
-		local ev, row = core.explode_table_event(fields.ms)
-		if ev == "CHG" then
-			state.ms_sel = row
+		-- explode_table_event returns a table, not several values
+		local ev = core.explode_table_event(fields.ms)
+		if ev.type == "CHG" then
+			state.ms_sel = ev.row
 		end
 		show(state, name)
 		return

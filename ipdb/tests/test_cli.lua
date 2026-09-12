@@ -1039,6 +1039,27 @@ do
 	gui({ ms = "CHG:3:1" })
 	assert(formspecs[#formspecs]:find("mod jsonmod", 1, true), "the minified row is picked")
 	assert(formspecs[#formspecs]:find(";ms_full;", 1, true), "the picked row offers the whole value")
+
+	-- The button shares the header's row and the value lines start below it,
+	-- clear of the button's lower edge.
+	local pickfs = formspecs[#formspecs]
+	local btn_y = tonumber(pickfs:match("button%[[%d%.]+,([%d%.]+);[%d%.]+,[%d%.]+;ms_full;"))
+	assert(btn_y, "the whole-value button has a position")
+	local hdr_y, val_y
+	for _, y, text in pickfs:gmatch("label%[([%d%.]+),([%d%.]+);([^%]]*)%]") do
+		if text:find("^mod ") then
+			hdr_y = tonumber(y)
+		elseif hdr_y and not val_y and tonumber(y) > hdr_y then
+			val_y = tonumber(y)
+		end
+	end
+	assert(hdr_y and val_y, "the panel has a header and a value line")
+	assert(math.abs(btn_y - (hdr_y - 0.05)) < 0.001,
+		string.format("the button is placed from the header's row (button %.2f, header %.2f)", btn_y, hdr_y))
+	assert(val_y - hdr_y >= 0.5, string.format(
+		"the value line starts %.2f below the header, so it clears the button", val_y - hdr_y))
+	print("PASS: the picked-row panel spaces its button from its text")
+
 	gui({ ms_full = true })
 	local vfs = formspecs[#formspecs]
 	assert(vfs:find("as stored", 1, true), "the value screen says how it is showing it")
@@ -1116,6 +1137,7 @@ do
 	gui({ ms_mod = "all mods" })
 	assert(formspecs[#formspecs]:find("mod jsonmod", 1, true), "a repeat of the same filter changes nothing")
 
+
 	-- and the entry below it holds the earlier state
 	gui({ ms_back = true })
 	assert(formspecs[#formspecs]:find("Back to tree", 1, true), "back returns to the detail screen")
@@ -1145,6 +1167,33 @@ do
 	local drop = livefs:match("dropdown%[[^%]]*%]")
 	assert(drop, "the mod filter is a dropdown")
 	assert(drop:find(";%d+%.?%d*,%d+%.?%d*;", 1), "with its height given rather than left to the engine: "..drop)
+
+	-- An entry with more rows than the screen shows: the note for that pushes
+	-- the picked row's panel down, and the button has to come with it. This is
+	-- the only case where the panel does not start at 4.5, so it is the only
+	-- one where the button's placement can be told from a fixed number.
+	local big = dbmanager.new_entry()
+	dbmanager.add_name(big, "bigstore")
+	for i = 1, 210 do
+		dbmanager.insert_into_modstorage(big, "bulkmod", "k"..i, "v"..i)
+	end
+	cmd.func("tester", "merge_gui")
+	gui({ go = true, root = "#"..big, depth = "1" })
+	gui({ ["node_"..big.."_0"] = true })
+	gui({ storage = true })
+	assert(formspecs[#formspecs]:find("showing 200 of 210", 1, true), "the row cap is reported")
+	gui({ ms = "CHG:2:1" })
+	local bigfs = formspecs[#formspecs]
+	local big_btn = tonumber(bigfs:match("button%[[%d%.]+,([%d%.]+);[%d%.]+,[%d%.]+;ms_full;"))
+	local big_hdr
+	for _, y, text in bigfs:gmatch("label%[([%d%.]+),([%d%.]+);([^%]]*)%]") do
+		if text:find("^mod ") then big_hdr = tonumber(y) end
+	end
+	assert(big_btn and big_hdr, "the panel and its button are both there")
+	assert(big_hdr > 4.5, "the note really did move the panel down, to "..tostring(big_hdr))
+	assert(math.abs(big_btn - (big_hdr - 0.05)) < 0.001, string.format(
+		"the button follows the panel down (button %.2f, header %.2f)", big_btn, big_hdr))
+	print("PASS: the panel's button follows it when the row cap note moves it")
 end
 
 -- the depth cap is 20 in the CLI too, not just in the message

@@ -510,8 +510,6 @@ end
 -- Storage rows shown at once, for the same reason the identifier table is
 -- capped: the cell data is a single string the client re-parses.
 local MAX_STORAGE_ROWS = 200
--- Lines of a picked row's value that fit under the table
-local MAX_VALUE_LINES = 6
 
 -- A cell's text for the table. A stored value is often a whole JSON blob that
 -- would swamp the row, so it is flattened and shortened; the picked row is
@@ -613,25 +611,36 @@ local function storage_formspec(state)
 		"tablecolumns[text,width=2.0;text,width=2.8;text,width=1.5;text,width=4.9]" ..
 		string.format("table[0.4,1.25;11.2,3.1;ms;%s;%d]", storage_cells(visible), state.ms_sel or 0)
 
+	-- Whichever note applies takes this line, and the picked row's panel goes
+	-- below it rather than on top of it
 	local y = 4.5
 	if #rows == 0 then
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc("No storage for "..
 			(state.ms_mod and ("mod "..state.ms_mod) or "this entry").."."))
+		y = y + 0.4
 	elseif #rows > shown then
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(string.format(
 			"showing %d of %d rows - pick a mod to narrow it down", shown, #rows)))
+		y = y + 0.4
 	end
 	-- The picked row in full: the cell above is shortened, and a stored value
 	-- is often exactly the thing you opened this screen to read.
 	local pick = state.ms_sel and rows[state.ms_sel - 1]
 	if pick then
-		local wrapped = {}
-		append_hard_wrapped(wrapped, tostring(pick.data), "  ", MAX_VALUE_LINES)
+		-- The button sits on the header's own row and is placed from that row's
+		-- y, so it cannot drift out of step if anything above it moves. The
+		-- value lines below then start clear of it: at 0.45 they began exactly
+		-- where the button ends and ran into its lower edge.
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(
 			"mod "..pick.modname.." · key "..pick.key..
 			(pick.ancillary and (" · ancillary "..pick.ancillary) or ""), 52))) ..
-			"button[8.6,4.45;3.0,0.5;ms_full;Show the whole value]"
-		y = y + 0.45
+			string.format("button[8.4,%.2f;3.2,0.5;ms_full;%s]", y - 0.05, esc("Show the whole value"))
+		y = y + 0.55
+		-- as many lines as fit above the Back button at 7.3, rather than a
+		-- fixed number that the note above can push into it
+		local wrapped = {}
+		append_hard_wrapped(wrapped, tostring(pick.data), "  ",
+			math.max(1, math.floor((7.2 - y) / 0.4)))
 		for _, line in ipairs(wrapped) do
 			fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(line)))
 			y = y + 0.4

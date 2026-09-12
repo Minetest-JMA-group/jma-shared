@@ -1129,6 +1129,12 @@ M.show = function(name)
 	show(gui_states[name], name)
 end
 
+-- A player who disconnects with the screen open is never going to close it,
+-- so drop their state rather than leaving it for the life of the server
+core.register_on_leaveplayer(function(player)
+	gui_states[player:get_player_name()] = nil
+end)
+
 return function(dbm, dbconn, sqlite_mod, logfunc, resolver)
 	dbmanager = dbm
 	db = dbconn

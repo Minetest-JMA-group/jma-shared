@@ -22,6 +22,7 @@ local formspecs = {}
 local receive_fields_handler
 local chat_output  -- last message sent to a player, for commands that print
 local closed_form  -- formname the GUI asked the client to close, if any
+local leave_handler  -- called when a player disconnects
 
 local core = {
 	get_current_modname = function() return "ipdb" end,
@@ -41,6 +42,7 @@ local core = {
 	register_on_authplayer = function() end,
 	register_chatcommand = function(cmd, def) chatcommands[cmd] = def end,
 	register_on_player_receive_fields = function(handler) receive_fields_handler = handler end,
+	register_on_leaveplayer = function(handler) leave_handler = handler end,
 	after = function() end,
 	chat_send_player = function(_, msg) chat_output = msg end,
 	-- the same character set the engine escapes (builtin/common/misc_helpers.lua);
@@ -922,6 +924,27 @@ do
 	gui({ ["node_"..ch_e.."_"..e_node] = true })
 	assert(formspecs[#formspecs]:find("chain%-mid"), "the entry's identifiers are listed on its node")
 	print("PASS: the GUI lists them too")
+end
+
+-- ── a player who disconnects leaves no GUI state behind ──────────────────
+do
+	cmd.func("tester", "merge_gui")
+	local before = #formspecs
+	gui({ go = true, root = "trunc", depth = "2" })
+	assert(#formspecs > before, "the screen answers while the player is here")
+	assert(leave_handler, "a disconnect handler is registered")
+
+	leave_handler({ get_player_name = function() return "tester" end })
+	local after = #formspecs
+	gui({ go = true, root = "trunc", depth = "2" })
+	assert(#formspecs == after, "and stops answering once they have gone")
+
+	-- the same player coming back gets a working screen again
+	cmd.func("tester", "merge_gui")
+	local back = #formspecs
+	gui({ go = true, root = "trunc", depth = "2" })
+	assert(#formspecs > back, "reopening after the disconnect works")
+	print("PASS: a disconnect drops that player's GUI state")
 end
 
 -- ── unmerge forget actually deletes ──────────────────────────────────────

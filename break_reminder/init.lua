@@ -156,7 +156,11 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			return
 		end
 		simplemod.ban_name(player_name, "break_reminder",
-			"You decided to take a break for " .. data.text, data.seconds)
+			"You decided to take a break for " .. data.text, data.seconds ..
+			"\nFree and anonymous counseling for problems with others online or addiction:\n" ..
+			"Kostenlose und anonyme Beratung bei Problemen mit anderen im Internet oder bei Suchtproblemen:\n" ..
+			"https://www.juuuport.de/hilfe/beratung (de/en)"
+		)
 		player_data[player_name] = nil
 	end
 end)

@@ -1,3 +1,6 @@
+-- * Copyright (c) 2026 Nanowolf4  (E-Mail: n4w@tutanota.com, XMPP/Jabber: n4w@nixnet.serivces)
+-- * SPDX-License-Identifier: GPL-3.0-or-later
+
 local game_title = ""
 do
 	local game = core.get_game_info()
@@ -43,7 +46,7 @@ local function get_server_uptime_formatted()
 end
 
 function core.get_server_status(name, joined)
-	local msg = string.format("- %s | Version: %s | Uptime: %s | Max Lag: %.3f | ",
+	local msg = string.format("* %s | Version: %s | Uptime: %s | Max Lag: %.3f | ",
 	game_title, core.get_version().string, get_server_uptime_formatted(), core.get_server_max_lag() or "0")
 
 	local players = core.get_connected_players()

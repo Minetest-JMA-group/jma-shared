@@ -23,6 +23,7 @@ local receive_fields_handler
 local chat_output  -- last message sent to a player, for commands that print
 local closed_form  -- formname the GUI asked the client to close, if any
 local leave_handler  -- called when a player disconnects
+local window_info  -- what the client reports about its window, if anything
 
 -- The real algorithms mod is loaded below, as the engine loads it, so the
 -- harness tracks which mod's load is in progress and resolves each mod's path
@@ -73,6 +74,8 @@ local core = {
 	register_chatcommand = function(cmd, def) chatcommands[cmd] = def end,
 	register_on_player_receive_fields = function(handler) receive_fields_handler = handler end,
 	register_on_leaveplayer = function(handler) leave_handler = handler end,
+	-- nil unless a test sets it: only clients that support this send it
+	get_player_window_information = function(name) return window_info end,
 	after = function() end,
 	chat_send_player = function(_, msg) chat_output = msg end,
 	-- the same character set the engine escapes (builtin/common/misc_helpers.lua);
@@ -864,9 +867,10 @@ do
 	print("PASS: the rollback actions can be explained on demand")
 
 	-- nothing anywhere on the screen runs past the right edge either
+	local win_w = tonumber(dfs:match("size%[([%d%.]+)"))
 	for x, label in dfs:gmatch("label%[([%d%.]+),[%d%.]+;([^%]]*)%]") do
 		local right = tonumber(x) + #unesc(label) * CHAR_W
-		assert(right <= 11.85, string.format("a label reaches %.2f, past the window: %s", right, unesc(label)))
+		assert(right <= win_w - 0.15, string.format("a label reaches %.2f, past the window: %s", right, unesc(label)))
 	end
 	print("PASS: no label runs past the right edge")
 
@@ -1271,6 +1275,63 @@ do
 	assert(note_fs:find("use /ipdb unmerge", 1, true), "with its advice intact")
 	assert_labels_parse(note_fs, "more additions than rows fit")
 	print("PASS: a label whose text holds a separator is escaped")
+end
+
+-- ── the GUI sizes itself to the client's window ──────────────────────────
+do
+	local function size_of(fs)
+		local w, h = fs:match("size%[([%d%.]+),([%d%.]+)%]")
+		return tonumber(w), tonumber(h)
+	end
+
+	-- a client that reports how much room it has gets a window to match
+	window_info = { max_formspec_size = { x = 18, y = 11 } }
+	cmd.func("tester", "merge_gui")
+	local w, h = size_of(formspecs[#formspecs])
+	assert(w == 18 and h == 11,
+		"the window follows the client's report, got "..tostring(w).."x"..tostring(h))
+
+	-- nothing hangs off the edge of a wider window: every button is either
+	-- anchored to it or short enough not to matter, and a coordinate left
+	-- underived shows up here
+	local wide = formspecs[#formspecs]
+	for x, bw, name in wide:gmatch("button%[([%d%.]+),%d+%.?%d*;([%d%.]+),%d+%.?%d*;([^;]+);") do
+		assert(tonumber(x) + tonumber(bw) <= 18.01,
+			name.." reaches "..tostring(tonumber(x) + tonumber(bw)).." in an 18 wide window")
+	end
+	-- and the buttons that belong at the right edge are anchored there rather
+	-- than left where they started, which is what an underived coordinate
+	-- would leave them as: inside the window, but stranded in the middle
+	for _, want in ipairs({ 18 - 5.2, 18 - 2.8 }) do
+		assert(wide:find(string.format("button[%.2f,0.3", want), 1, true),
+			string.format("expected a button anchored at x=%.2f in an 18 wide window", want))
+	end
+	print("PASS: a wider window keeps every button inside it, at the edges it uses")
+
+	-- a client that reports nothing, or something below the design, gets the
+	-- default this screen was laid out for
+	for _, report in ipairs({ nil, { max_formspec_size = { x = 4, y = 3 } } }) do
+		window_info = report
+		cmd.func("tester", "merge_gui")
+		w, h = size_of(formspecs[#formspecs])
+		assert(w == 12 and h == 8, "expected the 12x8 default, got "..tostring(w).."x"..tostring(h))
+	end
+	print("PASS: no report, or one too small, means the default window")
+
+	-- an explicit size overrides both, and reopening does not undo it
+	window_info = { max_formspec_size = { x = 18, y = 11 } }
+	expect("merge_gui 16x10", true, "GUI opened")
+	w, h = size_of(formspecs[#formspecs])
+	assert(w == 16 and h == 10, "the asked-for size is used, got "..tostring(w).."x"..tostring(h))
+	cmd.func("tester", "merge_gui")
+	w, h = size_of(formspecs[#formspecs])
+	assert(w == 16 and h == 10, "and reopening keeps it, got "..tostring(w).."x"..tostring(h))
+	expect("merge_gui auto", true, "GUI opened")
+	w, h = size_of(formspecs[#formspecs])
+	assert(w == 18 and h == 11, "auto returns to the client's report, got "..tostring(w).."x"..tostring(h))
+	expect("merge_gui 12by8", false, "Size must be 'auto' or <width>x<height>")
+	print("PASS: an explicit size overrides the report, and auto gives it back")
+	window_info = nil
 end
 
 -- the depth cap is 20 in the CLI too, not just in the message

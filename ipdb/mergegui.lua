@@ -239,9 +239,33 @@ local HBAR_H = 0.4
 -- pixels, so a larger window does not enlarge the text: it fits more of it.
 -- Everything that sits at an edge is derived from these two, while the
 -- spacing of text keeps its own fixed numbers.
----@return number w, number h
+--
+-- The client reports how large a formspec it can show before it starts
+-- shrinking one to fit, and that changes as the player resizes the window or
+-- moves it between monitors - so it is read at each render rather than
+-- remembered. Clients that do not report it, and sizes smaller than this
+-- screen was designed for, fall back to the default.
+local DEFAULT_W, DEFAULT_H = 12, 8
+
+-- A size asked for by command, per player, so it survives reopening the screen
+local gui_sizes = {}
+
+---@param state table
+---@return number w
+---@return number h
 local function window_size(state)
-	return state.win_w or 12, state.win_h or 8
+	local w, h
+	if state.win_forced then
+		w, h = state.win_forced.w, state.win_forced.h
+	else
+		local get = core.get_player_window_information
+		local info = get and get(state.player_name)
+		local max = info and info.max_formspec_size
+		if max and max.x and max.y then
+			w, h = max.x, max.y
+		end
+	end
+	return math.max(DEFAULT_W, w or DEFAULT_W), math.max(DEFAULT_H, h or DEFAULT_H)
 end
 
 local function scrollbar(x, y, w, h, orientation, name, value)
@@ -1128,8 +1152,24 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	end
 end)
 
-M.show = function(name)
+---@param name string
+---@param size string?  -- "auto", or "<width>x<height>"
+---@return string? err
+M.show = function(name, size)
+	if size then
+		if size == "auto" then
+			gui_sizes[name] = nil
+		else
+			local w, h = size:match("^(%d+)x(%d+)$")
+			if not w then
+				return "Size must be 'auto' or <width>x<height>, e.g. 16x11"
+			end
+			gui_sizes[name] = { w = tonumber(w), h = tonumber(h) }
+		end
+	end
 	gui_states[name] = {
+		player_name = name,
+		win_forced = gui_sizes[name],
 		screen = "tree",
 		root = "",
 		depth = "4",
@@ -1169,7 +1209,9 @@ end
 -- A player who disconnects with the screen open is never going to close it,
 -- so drop their state rather than leaving it for the life of the server
 core.register_on_leaveplayer(function(player)
-	gui_states[player:get_player_name()] = nil
+	local name = player:get_player_name()
+	gui_states[name] = nil
+	gui_sizes[name] = nil
 end)
 
 return function(dbm, dbconn, sqlite_mod, logfunc, resolver)

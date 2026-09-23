@@ -438,7 +438,7 @@ merges [N]: List the last N merge events
 merge <id>: Show the details of a merge event
 tree <name|IP|#entryid> [depth]: Show the merge history of an entry as a binary tree
 unmerge <id> [keep|forget]: Roll back a merge event; identifiers created after the merge are kept unless `forget` is given
-merge_gui: Open the merge history GUI
+merge_gui [auto|<W>x<H>]: Open the merge history GUI, sized to the window by default
 ]]
 core.register_chatcommand("ipdb", {
 	description = "Interface to the IP-based player entry database",
@@ -974,7 +974,12 @@ core.register_chatcommand("ipdb", {
 		end
 
 		if cmd == "merge_gui" then
-			merge_gui.show(name)
+			-- no argument keeps whatever size was asked for before, so
+			-- reopening the screen does not silently undo it
+			local sizerr = merge_gui.show(name, iter())
+			if sizerr then
+				return false, sizerr
+			end
 			return true, "Merge history GUI opened."
 		end
 

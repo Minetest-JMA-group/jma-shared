@@ -1333,6 +1333,10 @@ do
 	-- a client that reports how much room it has gets a window to match
 	window_info = { max_formspec_size = { x = 18, y = 11 } }
 	cmd.func("tester", "merge_gui")
+	-- without padding[0,0] the engine draws a border around the form of twice
+	-- the default padding, and the window overflows the screen by that much
+	assert(formspecs[#formspecs]:find("size%[18%.00,11%.00%]padding%[0,0%]"),
+		"the window is its own size, without the engine's padding border")
 	local w, h = size_of(formspecs[#formspecs])
 	assert(w == 18 and h == 11,
 		"the window follows the client's report, got "..tostring(w).."x"..tostring(h))

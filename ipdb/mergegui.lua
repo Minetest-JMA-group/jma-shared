@@ -261,6 +261,12 @@ local HBAR_H = 0.4
 -- Everything that sits at an edge is derived from these two, while the
 -- spacing of text keeps its own fixed numbers.
 --
+-- Every screen ends its size with padding[0,0], which is what makes the size
+-- the window's real size: without it the engine draws a border of twice the
+-- default padding around the form, so a window sized to what the client
+-- reported comes out larger than the screen and has its bottom edge, and the
+-- buttons on it, cut off.
+--
 -- The client reports how large a formspec it can show before it starts
 -- shrinking one to fit, and that changes as the player resizes the window or
 -- moves it between monitors - so it is read at each render rather than
@@ -296,7 +302,7 @@ end
 
 local function tree_formspec(state)
 	local fs = "formspec_version[6]" ..
-		string.format("size[%.2f,%.2f]", window_size(state)) ..
+		string.format("size[%.2f,%.2f]padding[0,0]", window_size(state)) ..
 		"field[0.4,0.35;4.6,0.8;root;" .. esc("Entry (name, IP or #id)") .. ";" .. esc(state.root or "") .. "]" ..
 		"field[5.2,0.35;1.4,0.8;depth;Depth;" .. esc(state.depth or "4") .. "]" ..
 		-- Enter submits the tree rather than closing the window, which is
@@ -470,7 +476,7 @@ local function detail_formspec(state)
 
 	local w, h = window_size(state)
 	local chars = text_budget(w)
-	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h) ..
+	local fs = string.format("formspec_version[6]size[%.2f,%.2f]padding[0,0]", w, h) ..
 		string.format("label[0.4,0.25;%s]",
 			esc("Entry #"..node.entry_id.." · "..(node.live and "live" or "pre-merge state")))
 
@@ -656,7 +662,7 @@ local function storage_formspec(state)
 	local w, h = window_size(state)
 	local chars = text_budget(w)
 	local cells_chars = cell_budget(w)
-	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h) ..
+	local fs = string.format("formspec_version[6]size[%.2f,%.2f]padding[0,0]", w, h) ..
 		string.format("label[0.4,0.25;%s]", esc(fit_line(heading, chars)))
 
 	-- The filter list: every mod is one query, so the dropdown can show what
@@ -818,7 +824,7 @@ local function value_formspec(state)
 	local row = state.value_row
 	local w, h = window_size(state)
 	local chars = text_budget(w)
-	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h) ..
+	local fs = string.format("formspec_version[6]size[%.2f,%.2f]padding[0,0]", w, h) ..
 		string.format("label[0.4,0.25;%s]", esc(fit_line(
 			"mod "..row.modname.." · key "..row.key..
 			(row.ancillary and (" · ancillary "..row.ancillary) or ""), chars))) ..
@@ -860,7 +866,7 @@ local function confirm_formspec(state)
 	table.insert(lines, "The merge event will be marked as reverted.")
 	local w, h = window_size(state)
 	local chars = text_budget(w)
-	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h)
+	local fs = string.format("formspec_version[6]size[%.2f,%.2f]padding[0,0]", w, h)
 	local y = 0.3
 	for i = 1, math.min(#lines, 10) do
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(lines[i], chars)))
@@ -892,7 +898,7 @@ local function report_formspec(state)
 	end
 	local w, h = window_size(state)
 	local chars = text_budget(w)
-	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h)
+	local fs = string.format("formspec_version[6]size[%.2f,%.2f]padding[0,0]", w, h)
 	local y = 0.3
 	for i = 1, math.min(#lines, 10) do
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(lines[i], chars)))

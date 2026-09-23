@@ -233,11 +233,16 @@ end
 -- automatic max/thumbsize calculation, and scrollbar[] always takes a value
 -- argument - both are satisfied below.
 local VIEW_X, VIEW_Y = 0.2, 1.15
-local VIEW_W, VIEW_H = 11.3, 6.3
-local VBAR_X = 11.5
-local VBAR_H = VIEW_H
-local HBAR_Y = 7.55
 local HBAR_H = 0.4
+
+-- The window a screen draws itself into. A formspec unit is a fixed number of
+-- pixels, so a larger window does not enlarge the text: it fits more of it.
+-- Everything that sits at an edge is derived from these two, while the
+-- spacing of text keeps its own fixed numbers.
+---@return number w, number h
+local function window_size(state)
+	return state.win_w or 12, state.win_h or 8
+end
 
 local function scrollbar(x, y, w, h, orientation, name, value)
 	return string.format("scrollbar[%.2f,%.2f;%.2f,%.2f;%s;%s;%d]",
@@ -246,15 +251,15 @@ end
 
 local function tree_formspec(state)
 	local fs = "formspec_version[6]" ..
-		"size[12,8]" ..
+		string.format("size[%.2f,%.2f]", window_size(state)) ..
 		"field[0.4,0.35;4.6,0.8;root;" .. esc("Entry (name, IP or #id)") .. ";" .. esc(state.root or "") .. "]" ..
 		"field[5.2,0.35;1.4,0.8;depth;Depth;" .. esc(state.depth or "4") .. "]" ..
 		-- Enter submits the tree rather than closing the window, which is
 		-- what a text field does by default; the handler reads key_enter
 		"field_close_on_enter[root;false]" ..
 		"field_close_on_enter[depth;false]" ..
-		"button[6.8,0.3;2.2,0.9;go;" .. esc("Show tree") .. "]" ..
-		"button[9.2,0.3;2.4,0.9;close;" .. esc("Close") .. "]"
+		string.format("button[%.2f,0.3;2.2,0.9;go;%s]", window_size(state) - 5.2, esc("Show tree")) ..
+		string.format("button[%.2f,0.3;2.4,0.9;close;%s]", window_size(state) - 2.8, esc("Close"))
 	-- The one free line is the one below the input row. An error drawn level
 	-- with the fields runs under the Show tree and Close buttons, which start
 	-- at x=6.8, and the engine paints the text over them.
@@ -265,6 +270,10 @@ local function tree_formspec(state)
 	if state.error then
 		fs = fs .. string.format("label[0.4,1.3;%s]", esc(state.error))
 	end
+	local w, h = window_size(state)
+	local VIEW_W, VIEW_H = w - 0.7, h - 1.7
+	local VBAR_X, VBAR_H = w - 0.5, VIEW_H
+	local HBAR_Y = h - 0.45
 	local layout = layout_tree(state.tree)
 	local content = {}
 	local canvas_w, canvas_h = 0, 0
@@ -412,7 +421,8 @@ local function detail_formspec(state)
 	local visible = {}
 	for i = 1, shown do visible[i] = rows[i] end
 
-	local fs = "formspec_version[6]size[12,8]" ..
+	local w, h = window_size(state)
+	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h) ..
 		string.format("label[0.4,0.25;%s]",
 			esc("Entry #"..node.entry_id.." · "..(node.live and "live" or "pre-merge state")))
 
@@ -427,14 +437,14 @@ local function detail_formspec(state)
 		fs = fs .. string.format("button[%.2f,0.65;2.1,0.6;sort_%s;%s]",
 			1.5 + (i - 1) * 2.2, key, esc(label))
 	end
-	fs = fs .. "button[9.0,0.65;2.6,0.6;storage;Storage]"
+	fs = fs .. string.format("button[%.2f,0.65;2.6,0.6;storage;Storage]", w - 3.0)
 
 	-- The identifiers themselves: one per row, each with both timestamps. The
 	-- table is taller when there is no merge to talk about below it.
-	local table_h = m and 2.2 or 4.4
+	local table_h = m and (h - 5.8) or (h - 3.6)
 	fs = fs .. "tableoptions[color=#dddddd;background=#1b1b1b;border=true;highlight=#466432]" ..
 		"tablecolumns[text,width=1.2;text,width=4.2;text,width=3.4;text,width=3.4]" ..
-		string.format("table[0.4,1.3;11.2,%.2f;ids;%s;]", table_h, identifier_cells(visible))
+		string.format("table[0.4,1.3;%.2f,%.2f;ids;%s;]", w - 0.8, table_h, identifier_cells(visible))
 
 	local y = 1.3 + table_h + 0.2
 	if #rows > shown then
@@ -479,7 +489,7 @@ local function detail_formspec(state)
 					ay = ay + 0.05
 				end
 				-- only as many decision rows as fit above the button at 7.3
-				local room = math.max(0, math.floor((7.15 - ay) / 0.5))
+				local room = math.max(0, math.floor((h - 0.85 - ay) / 0.5))
 				if room < #adds then
 					-- the text carries a ';', which is the field separator: left
 					-- unescaped it makes a third part, the engine reads the
@@ -500,7 +510,7 @@ local function detail_formspec(state)
 					ay = ay + 0.5
 				end
 			end
-			fs = fs .. string.format("button[8.6,7.3;3.0,0.8;rb;Roll back merge #%d]", state.merge_id)
+			fs = fs .. string.format("button[%.2f,%.2f;3.0,0.8;rb;Roll back merge #%d]", w - 3.4, h - 0.7, state.merge_id)
 		else
 			-- these reasons run to a sentence, and the end of one says which
 			-- merges to roll back first, so it is wrapped rather than cut
@@ -512,7 +522,7 @@ local function detail_formspec(state)
 			end
 		end
 	end
-	fs = fs .. "button[0.4,7.3;3.0,0.8;back;Back to tree]"
+	fs = fs .. string.format("button[0.4,%.2f;3.0,0.8;back;Back to tree]", h - 0.7)
 	return fs
 end
 
@@ -589,7 +599,8 @@ local function storage_formspec(state)
 	else
 		heading = "Storage of entry #"..node.entry_id.." · as of merge #"..node.merge.id
 	end
-	local fs = "formspec_version[6]size[12,8]" ..
+	local w, h = window_size(state)
+	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h) ..
 		string.format("label[0.4,0.25;%s]", esc(fit_line(heading)))
 
 	-- The filter list: every mod is one query, so the dropdown can show what
@@ -613,16 +624,17 @@ local function storage_formspec(state)
 		string.format("dropdown[1.2,0.57;4.6,0.6;ms_mod;%s;%d]", table.concat(items, ","), sel)
 
 	local rows = state.ms_rows or {}
+	local table_h = h - 4.9
 	local shown = math.min(#rows, MAX_STORAGE_ROWS)
 	local visible = {}
 	for i = 1, shown do visible[i] = rows[i] end
 	fs = fs .. "tableoptions[color=#dddddd;background=#1b1b1b;border=true;highlight=#466432]" ..
 		"tablecolumns[text,width=2.0;text,width=2.8;text,width=1.5;text,width=4.9]" ..
-		string.format("table[0.4,1.25;11.2,3.1;ms;%s;%d]", storage_cells(visible), state.ms_sel or 0)
+		string.format("table[0.4,1.25;%.2f,%.2f;ms;%s;%d]", w - 0.8, table_h, storage_cells(visible), state.ms_sel or 0)
 
 	-- Whichever note applies takes this line, and the picked row's panel goes
 	-- below it rather than on top of it
-	local y = 4.5
+	local y = 1.25 + table_h + 0.15
 	if #rows == 0 then
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc("No storage for "..
 			(state.ms_mod and ("mod "..state.ms_mod) or "this entry").."."))
@@ -643,19 +655,19 @@ local function storage_formspec(state)
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(
 			"mod "..pick.modname.." · key "..pick.key..
 			(pick.ancillary and (" · ancillary "..pick.ancillary) or ""), 52))) ..
-			string.format("button[8.4,%.2f;3.2,0.5;ms_full;%s]", y - 0.05, esc("Show the whole value"))
+			string.format("button[%.2f,%.2f;3.2,0.5;ms_full;%s]", w - 3.6, y - 0.05, esc("Show the whole value"))
 		y = y + 0.55
 		-- as many lines as fit above the Back button at 7.3, rather than a
 		-- fixed number that the note above can push into it
 		local wrapped = {}
 		append_hard_wrapped(wrapped, tostring(pick.data), "  ",
-			math.max(1, math.floor((7.2 - y) / 0.4)))
+			math.max(1, math.floor((h - 0.8 - y) / 0.4)))
 		for _, line in ipairs(wrapped) do
 			fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(line)))
 			y = y + 0.4
 		end
 	end
-	fs = fs .. "button[0.4,7.3;3.0,0.8;ms_back;Back]"
+	fs = fs .. string.format("button[0.4,%.2f;3.0,0.8;ms_back;Back]", h - 0.7)
 	return fs
 end
 
@@ -748,7 +760,8 @@ end
 
 local function value_formspec(state)
 	local row = state.value_row
-	local fs = "formspec_version[6]size[12,8]" ..
+	local w, h = window_size(state)
+	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h) ..
 		string.format("label[0.4,0.25;%s]", esc(fit_line(
 			"mod "..row.modname.." · key "..row.key..
 			(row.ancillary and (" · ancillary "..row.ancillary) or "")))) ..
@@ -759,11 +772,12 @@ local function value_formspec(state)
 	for _, line in ipairs(state.value_lines or {}) do
 		items[#items + 1] = esc(line:sub(1, 1) == "#" and ("#"..line) or line)
 	end
-	fs = fs .. string.format("textlist[0.4,1.05;11.2,5.7;value;%s;0;false]", table.concat(items, ","))
-	fs = fs .. "button[0.4,7.3;2.2,0.8;value_json;JSON]" ..
-		"button[2.8,7.3;3.0,0.8;value_raw;As stored]" ..
-		"button[6.0,7.3;3.4,0.8;value_ser;Serialization]" ..
-		"button[9.6,7.3;2.0,0.8;value_back;Back]"
+	fs = fs .. string.format("textlist[0.4,1.05;%.2f,%.2f;value;%s;0;false]", w - 0.8, h - 2.3, table.concat(items, ","))
+	local by = h - 0.7
+	fs = fs .. string.format("button[0.4,%.2f;2.2,0.8;value_json;JSON]", by) ..
+		string.format("button[2.8,%.2f;3.0,0.8;value_raw;As stored]", by) ..
+		string.format("button[6.0,%.2f;3.4,0.8;value_ser;Serialization]", by) ..
+		string.format("button[%.2f,%.2f;2.0,0.8;value_back;Back]", w - 2.4, by)
 	return fs
 end
 
@@ -787,14 +801,15 @@ local function confirm_formspec(state)
 	if #moves > 0 then append_list(lines, "  moved to the recreated entry: ", moves, 4) end
 	if #keeps > 0 then append_list(lines, "  kept at the destination: ", keeps, 4) end
 	table.insert(lines, "The merge event will be marked as reverted.")
-	local fs = "formspec_version[6]size[12,8]"
+	local w, h = window_size(state)
+	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h)
 	local y = 0.3
 	for i = 1, math.min(#lines, 10) do
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(lines[i])))
 		y = y + 0.45
 	end
-	fs = fs .. "button[3.2,7.3;3.4,0.8;rb_confirm;Confirm rollback]" ..
-		"button[7.0,7.3;2.6,0.8;rb_cancel;Cancel]"
+	fs = fs .. string.format("button[3.2,%.2f;3.4,0.8;rb_confirm;Confirm rollback]", h - 0.7) ..
+		string.format("button[7.0,%.2f;2.6,0.8;rb_cancel;Cancel]", h - 0.7)
 	return fs
 end
 
@@ -817,13 +832,14 @@ local function report_formspec(state)
 		table.insert(lines, string.format("  %d post-merge identifier(s): %d deleted, %d moved, %d kept",
 			r.additions_total, r.additions_deleted, r.additions_moved, r.additions_kept))
 	end
-	local fs = "formspec_version[6]size[12,8]"
+	local w, h = window_size(state)
+	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h)
 	local y = 0.3
 	for i = 1, math.min(#lines, 10) do
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(lines[i])))
 		y = y + 0.45
 	end
-	fs = fs .. "button[0.4,7.3;3.0,0.8;back;Back to tree]"
+	fs = fs .. string.format("button[0.4,%.2f;3.0,0.8;back;Back to tree]", h - 0.7)
 	return fs
 end
 

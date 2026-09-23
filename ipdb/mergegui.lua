@@ -249,10 +249,11 @@ end
 -- The canvas is a rectangular viewport below the input row. The tree is drawn
 -- in canvas coordinates (origin at the viewport's top left). When the tree
 -- does not fit, scrollbars are added and the content is wrapped in matching
--- scroll_containers; containers are nested when both axes overflow. Since
--- Luanti 5.14 the 6th scroll_container argument is a content padding for the
--- automatic max/thumbsize calculation, and scrollbar[] always takes a value
--- argument - both are satisfied below.
+-- scroll_containers; containers are nested when both axes overflow. The
+-- arguments after a container's name are its orientation, then an optional
+-- scroll factor, then an optional content padding - the last of which is what
+-- makes the engine work out the scrollbar's max and thumbsize from the content
+-- itself. scrollbar[] always takes a value argument. All are given below.
 local VIEW_X, VIEW_Y = 0.2, 1.15
 local HBAR_H = 0.4
 
@@ -552,7 +553,11 @@ local function detail_formspec(state)
 				end
 				-- only as many decision rows as fit above the button at 7.3
 				local list_h = math.max(0.5, h - 0.8 - ay)
-				if #adds * 0.5 > list_h then
+				-- The first row is inset from the top edge, as the tree's canvas
+				-- is: a row sitting exactly on the edge a container clips at is
+				-- the one place a clip shows as cut text
+				local ROW_INSET = 0.2
+				if ROW_INSET + #adds * 0.5 > list_h then
 					fs = fs .. scrollbar(list_x + list_w + 0.1, ay, 0.4, list_h,
 						"vertical", "add_scroll", state.as)
 				end
@@ -561,7 +566,7 @@ local function detail_formspec(state)
 				for i = 1, #adds do
 					local a = adds[i]
 					local act = state.decisions[a.value] or "keep"
-					local ry = (i - 1) * 0.5
+					local ry = ROW_INSET + (i - 1) * 0.5
 					fs = fs .. string.format("label[0,%.2f;%s]", ry, esc(decision_label(a, act, row_x))) ..
 						string.format("button[%.2f,%.2f;1.3,0.4;ad_%d_keep;keep]", row_x, ry, i) ..
 						string.format("button[%.2f,%.2f;1.5,0.4;ad_%d_delete;delete]", row_x + 1.4, ry, i) ..

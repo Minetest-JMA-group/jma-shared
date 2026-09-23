@@ -581,7 +581,7 @@ core.register_chatcommand("ipdb", {
 				end
 				return true, msg
 			end
-			return true, "Merge events are currently kept for "..log_retention_time.." seconds."
+			return true, "Merge events are currently kept for "..algorithms.time_to_string(log_retention_time)
 		end
 
 		if cmd == "list" then

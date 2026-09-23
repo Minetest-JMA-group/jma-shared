@@ -24,9 +24,27 @@ local function esc(s)
 end
 
 -- Width of one character in form units, measured from the client's formspec
--- font, and the width of a line of text allowing for the left margin
+-- font
 local CHAR_W = 0.15
-local TEXT_W = 11.4
+
+-- Characters that fit on a line in a window of this width: the left margin is
+-- 0.4 and a little is left at the right. A formspec unit is a fixed pixel
+-- width, so this is what actually changes when the window does - wrapping and
+-- cutting to a fixed count would waste the room a larger window has.
+---@param w number
+---@return integer
+local function text_budget(w)
+	return math.max(20, math.floor((w - 0.6) / CHAR_W))
+end
+
+-- Characters a table's value cell can hold: the table less its own margin and
+-- the room the other three columns take. The columns size themselves to their
+-- content in em, so this is only about how much is worth putting in one.
+---@param w number
+---@return integer
+local function cell_budget(w)
+	return math.max(20, math.floor((w - 0.8) / CHAR_W) - 14)
+end
 
 -- A label[] does not wrap: whatever runs past the right edge is simply gone.
 -- Split a list into lines that fit instead, indenting the continuation lines
@@ -36,9 +54,10 @@ local TEXT_W = 11.4
 ---@param prefix string
 ---@param items string[]
 ---@param limit integer?
-local function append_list(lines, prefix, items, limit)
+---@param chars integer
+local function append_list(lines, prefix, items, limit, chars)
 	limit = limit or 6
-	local budget = math.floor(TEXT_W / CHAR_W)
+	local budget = chars
 	local parts = {}
 	for i = 1, math.min(limit, #items) do
 		parts[#parts + 1] = items[i]
@@ -67,7 +86,7 @@ end
 ---@param chars integer?  # a shorter limit, when something sits to the right
 ---@return string
 local function fit_line(text, chars)
-	local budget = chars or math.floor(TEXT_W / CHAR_W)
+	local budget = chars
 	if #text > budget then
 		return text:sub(1, budget - 1) .. "…"
 	end
@@ -80,8 +99,9 @@ end
 ---@param lines string[] # the lines are appended here
 ---@param text string
 ---@param indent string? # prefix for the continuation lines
-local function append_wrapped(lines, text, indent)
-	local budget = math.floor(TEXT_W / CHAR_W)
+---@param chars integer
+local function append_wrapped(lines, text, indent, chars)
+	local budget = chars
 	local pad = indent or ""
 	local cur = ""
 	for word in text:gmatch("%S+") do
@@ -111,9 +131,10 @@ end
 ---@param text string
 ---@param indent string? # prefix for the continuation lines
 ---@param max_lines integer?
+---@param chars integer
 ---@return boolean truncated
-local function append_hard_wrapped(lines, text, indent, max_lines)
-	local budget = math.floor(TEXT_W / CHAR_W)
+local function append_hard_wrapped(lines, text, indent, max_lines, chars)
+	local budget = chars
 	local pad = indent or ""
 	local started = false
 	for raw in (text .. "\n"):gmatch("(.-)\n") do
@@ -446,6 +467,7 @@ local function detail_formspec(state)
 	for i = 1, shown do visible[i] = rows[i] end
 
 	local w, h = window_size(state)
+	local chars = text_budget(w)
 	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h) ..
 		string.format("label[0.4,0.25;%s]",
 			esc("Entry #"..node.entry_id.." · "..(node.live and "live" or "pre-merge state")))
@@ -484,11 +506,11 @@ local function detail_formspec(state)
 			esc("Merge #"..m.id.." · "..os.date("!%Y-%m-%d %H:%M:%S", m.timestamp)))
 		y = y + 0.45
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y,
-			esc(fit_line("  "..m.name.." / "..m.ip.." · #"..m.entry_src.." absorbed into #"..m.entry_dst)))
+			esc(fit_line("  "..m.name.." / "..m.ip.." · #"..m.entry_src.." absorbed into #"..m.entry_dst, chars)))
 		y = y + 0.45
 		if m.reverted_at then
 			fs = fs .. string.format("label[0.4,%.2f;%s]", y,
-				esc(fit_line("  rolled back on "..os.date("!%Y-%m-%d %H:%M", m.reverted_at))))
+				esc(fit_line("  rolled back on "..os.date("!%Y-%m-%d %H:%M", m.reverted_at), chars)))
 			y = y + 0.45
 		end
 	end
@@ -539,7 +561,7 @@ local function detail_formspec(state)
 			-- these reasons run to a sentence, and the end of one says which
 			-- merges to roll back first, so it is wrapped rather than cut
 			local wrapped = {}
-			append_wrapped(wrapped, "Rollback unavailable: "..(state.reason or "?"), "  ")
+			append_wrapped(wrapped, "Rollback unavailable: "..(state.reason or "?"), "  ", chars)
 			for _, line in ipairs(wrapped) do
 				fs = fs .. string.format("label[0.4,%.2f;%s]", y + 0.15, esc(line))
 				y = y + 0.4
@@ -559,10 +581,10 @@ local MAX_STORAGE_ROWS = 200
 -- shown in full underneath.
 ---@param value string|number
 ---@return string
-local function cell_text(value)
+local function cell_text(value, chars)
 	local s = tostring(value):gsub("%s+", " ")
-	if #s > 60 then
-		s = s:sub(1, 59) .. "…"
+	if #s > chars then
+		s = s:sub(1, chars - 1) .. "…"
 	end
 	return s
 end
@@ -570,14 +592,15 @@ end
 -- Cell contents for the storage table. Each cell is escaped on its own, for
 -- the same reason as the identifier table: a bare comma separates cells.
 ---@param rows ModstorageRow[]
+---@param chars integer
 ---@return string
-local function storage_cells(rows)
+local function storage_cells(rows, chars)
 	local cells = { "mod", "key", "ancillary", "value" }
 	for _, r in ipairs(rows) do
 		cells[#cells + 1] = esc(r.modname)
 		cells[#cells + 1] = esc(r.key)
 		cells[#cells + 1] = r.ancillary and esc(r.ancillary) or ""
-		cells[#cells + 1] = esc(cell_text(r.data))
+		cells[#cells + 1] = esc(cell_text(r.data, chars))
 	end
 	return table.concat(cells, ",")
 end
@@ -624,8 +647,10 @@ local function storage_formspec(state)
 		heading = "Storage of entry #"..node.entry_id.." · as of merge #"..node.merge.id
 	end
 	local w, h = window_size(state)
+	local chars = text_budget(w)
+	local cells_chars = cell_budget(w)
 	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h) ..
-		string.format("label[0.4,0.25;%s]", esc(fit_line(heading)))
+		string.format("label[0.4,0.25;%s]", esc(fit_line(heading, chars)))
 
 	-- The filter list: every mod is one query, so the dropdown can show what
 	-- is actually there instead of asking you to remember a mod name.
@@ -654,7 +679,7 @@ local function storage_formspec(state)
 	for i = 1, shown do visible[i] = rows[i] end
 	fs = fs .. "tableoptions[color=#dddddd;background=#1b1b1b;border=true;highlight=#466432]" ..
 		"tablecolumns[text,width=2.0;text,width=2.8;text,width=1.5;text,width=4.9]" ..
-		string.format("table[0.4,1.25;%.2f,%.2f;ms;%s;%d]", w - 0.8, table_h, storage_cells(visible), state.ms_sel or 0)
+		string.format("table[0.4,1.25;%.2f,%.2f;ms;%s;%d]", w - 0.8, table_h, storage_cells(visible, cells_chars), state.ms_sel or 0)
 
 	-- Whichever note applies takes this line, and the picked row's panel goes
 	-- below it rather than on top of it
@@ -678,16 +703,16 @@ local function storage_formspec(state)
 		-- where the button ends and ran into its lower edge.
 		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(
 			"mod "..pick.modname.." · key "..pick.key..
-			(pick.ancillary and (" · ancillary "..pick.ancillary) or ""), 52))) ..
+			(pick.ancillary and (" · ancillary "..pick.ancillary) or ""), text_budget(w - 4.0)))) ..
 			string.format("button[%.2f,%.2f;3.2,0.5;ms_full;%s]", w - 3.6, y - 0.05, esc("Show the whole value"))
 		y = y + 0.55
 		-- as many lines as fit above the Back button at 7.3, rather than a
 		-- fixed number that the note above can push into it
 		local wrapped = {}
 		append_hard_wrapped(wrapped, tostring(pick.data), "  ",
-			math.max(1, math.floor((h - 0.8 - y) / 0.4)))
+			math.max(1, math.floor((h - 0.8 - y) / 0.4)), chars)
 		for _, line in ipairs(wrapped) do
-			fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(line)))
+			fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(line, chars)))
 			y = y + 0.4
 		end
 	end
@@ -776,7 +801,7 @@ local function load_value(state)
 		state.value_label = VALUE_MODE_LABEL[mode]
 	end
 	local lines = {}
-	if append_hard_wrapped(lines, body, "  ", MAX_FULL_LINES) then
+	if append_hard_wrapped(lines, body, "  ", MAX_FULL_LINES, text_budget(state.win_w or 12)) then
 		lines[#lines + 1] = "… stopped at "..MAX_FULL_LINES.." lines"
 	end
 	state.value_lines = lines
@@ -785,11 +810,12 @@ end
 local function value_formspec(state)
 	local row = state.value_row
 	local w, h = window_size(state)
+	local chars = text_budget(w)
 	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h) ..
 		string.format("label[0.4,0.25;%s]", esc(fit_line(
 			"mod "..row.modname.." · key "..row.key..
-			(row.ancillary and (" · ancillary "..row.ancillary) or "")))) ..
-		string.format("label[0.4,0.62;%s]", esc(fit_line(state.value_label or "as stored")))
+			(row.ancillary and (" · ancillary "..row.ancillary) or ""), chars))) ..
+		string.format("label[0.4,0.62;%s]", esc(fit_line(state.value_label or "as stored", chars)))
 	-- one list element per line, so the list scrolls; each element is escaped
 	-- on its own, and a leading # would otherwise be read as a colour
 	local items = {}
@@ -821,15 +847,16 @@ local function confirm_formspec(state)
 		elseif act == "move" then table.insert(moves, a.value)
 		else table.insert(keeps, a.value) end
 	end
-	if #dels > 0 then append_list(lines, "  deleted: ", dels, 4) end
-	if #moves > 0 then append_list(lines, "  moved to the recreated entry: ", moves, 4) end
-	if #keeps > 0 then append_list(lines, "  kept at the destination: ", keeps, 4) end
+	if #dels > 0 then append_list(lines, "  deleted: ", dels, 4, chars) end
+	if #moves > 0 then append_list(lines, "  moved to the recreated entry: ", moves, 4, chars) end
+	if #keeps > 0 then append_list(lines, "  kept at the destination: ", keeps, 4, chars) end
 	table.insert(lines, "The merge event will be marked as reverted.")
 	local w, h = window_size(state)
+	local chars = text_budget(w)
 	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h)
 	local y = 0.3
 	for i = 1, math.min(#lines, 10) do
-		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(lines[i])))
+		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(lines[i], chars)))
 		y = y + 0.45
 	end
 	fs = fs .. string.format("button[3.2,%.2f;3.4,0.8;rb_confirm;Confirm rollback]", h - 0.7) ..
@@ -857,10 +884,11 @@ local function report_formspec(state)
 			r.additions_total, r.additions_deleted, r.additions_moved, r.additions_kept))
 	end
 	local w, h = window_size(state)
+	local chars = text_budget(w)
 	local fs = string.format("formspec_version[6]size[%.2f,%.2f]", w, h)
 	local y = 0.3
 	for i = 1, math.min(#lines, 10) do
-		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(lines[i])))
+		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(fit_line(lines[i], chars)))
 		y = y + 0.45
 	end
 	fs = fs .. string.format("button[0.4,%.2f;3.0,0.8;back;Back to tree]", h - 0.7)

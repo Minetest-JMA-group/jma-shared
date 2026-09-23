@@ -1343,6 +1343,31 @@ do
 	assert(w == 18 and h == 11, "auto goes back to the client's report, got "..tostring(w).."x"..tostring(h))
 	expect("merge_gui 12by8", false, "Size must be 'auto', 'default' or <width>x<height>")
 	print("PASS: an explicit size overrides the report, auto gives it back, default pins it")
+
+	-- Cutoffs follow the window too: a stored value is shown as far as there
+	-- is room for it, rather than to a fixed count that wastes a wide window
+	local wide_ent = dbmanager.new_entry()
+	dbmanager.add_name(wide_ent, "widescreen")
+	dbmanager.insert_into_modstorage(wide_ent, "widemod", "blob", string.rep("x", 400))
+	local function cell_at(report)
+		window_info = report
+		cmd.func("tester", "merge_gui")
+		gui({ go = true, root = "#"..wide_ent, depth = "1" })
+		gui({ ["node_"..wide_ent.."_0"] = true })
+		gui({ storage = true })
+		local cells = select(4, formspecs[#formspecs]:match("table%[([^;]*);([^;]*);([^;]*);([^;]*);"))
+		assert(cells, "the storage table carries cells")
+		return cells, select(2, cells:gsub(",", ""))
+	end
+	local narrow, narrow_cells = cell_at({ max_formspec_size = { x = 12, y = 8 } })
+	local wide, wide_cells = cell_at({ max_formspec_size = { x = 24, y = 14 } })
+	-- the value is 400 x's; at 12 wide the cell holds about 59 of them, and at
+	-- 24 about 139, so a run of 100 tells the two apart exactly
+	assert(wide:find(string.rep("x", 100), 1, true) and not narrow:find(string.rep("x", 100), 1, true),
+		string.format("both windows cut the value at the same place: %d and %d characters",
+			#narrow, #wide))
+	assert(narrow_cells == wide_cells, "and it is still the same table, one cell per column")
+	print("PASS: what a value is cut at follows the window")
 	window_info = nil
 end
 

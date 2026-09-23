@@ -21,13 +21,14 @@ local joined = {}
 
 local last_notified = {}
 
-local notify_interval = tonumber(core.settings:get("break_reminder_interval")) or 60 * 60 * 2
+local notify_interval = tonumber(core.settings:get("break_reminder_interval")) or
+60 * 60 * 2
 
 local player_data = {}
 
 local default_bantime_index = 1
 
-local bantime_display_table = {"30min", "1h", "1d", "10d", "30d"}
+local bantime_display_table = { "30min", "1h", "1d", "10d", "30d" }
 local bantime_value_table = {
 	["30min"] = 1800,
 	["1h"] = 3600,
@@ -43,38 +44,39 @@ local function beautify_time(s)
 	local m = math.floor((s % 3600) / 60)
 	local sec = s % 60
 	local parts = {}
-	if h > 0 then table.insert(parts, h.."h") end
-	if m > 0 then table.insert(parts, m.."m") end
-	if sec > 0 or #parts == 0 then table.insert(parts, sec.."s") end
+	if h > 0 then table.insert(parts, h .. "h") end
+	if m > 0 then table.insert(parts, m .. "m") end
+	if sec > 0 or #parts == 0 then table.insert(parts, sec .. "s") end
 	return table.concat(parts, " ")
 end
 
 function break_reminder.show_reminder(playername)
-	if storage:get_string(playername.."_pref") == "off" or not core.get_player_by_name(playername) then
+	if storage:get_string(playername .. "_pref") == "off" or not core.get_player_by_name(playername) then
 		return
 	end
 
 	local time_str
 
 	if joined[playername] then
-		time_str = beautify_time(os.time()-joined[playername])
+		time_str = beautify_time(os.time() - joined[playername])
 	else
 		time_str = "a while"
 	end
 
 	local formspec =
-	"formspec_version[6]"..
-	"size[15,11]"..
-	"hypertext[1,1;13,3;title;"..
-		"<bigger><center>It's time to take a break</center></bigger>"..
-	"]"..
-	"image[5,2.5;5,5;break_reminder_sam_drinking.png]"..
-	"hypertext[1,8.5;13,3;subtitle;"..
-		"<big><center>You've been playing for "..time_str.."! Consider taking a break.</center></big>"..
-	"]"..
-	"button_exit[12.8,9.6;2,0.8;ban_menu;Ban Me]"..
-	"button_exit[6,9.6;3,0.8;close;OK]"..
-	"button_exit[0.2,9.6;2,0.8;kick_me;Kick me]"
+		"formspec_version[6]" ..
+		"size[15,11]" ..
+		"hypertext[1,1;13,3;title;" ..
+		"<bigger><center>It's time to take a break</center></bigger>" ..
+		"]" ..
+		"image[5,2.5;5,5;break_reminder_sam_drinking.png]" ..
+		"hypertext[1,8.5;13,3;subtitle;" ..
+		"<big><center>You've been playing for " ..
+		time_str .. "! Consider taking a break.</center></big>" ..
+		"]" ..
+		"button_exit[12.8,9.6;2,0.8;ban_menu;Ban Me]" ..
+		"button_exit[6,9.6;3,0.8;close;OK]" ..
+		"button_exit[0.2,9.6;2,0.8;kick_me;Kick me]"
 
 	core.show_formspec(playername, "break_reminder:reminder", formspec)
 
@@ -86,15 +88,16 @@ function break_reminder.show_ban_menu(playername)
 	local selected_index = data and data.index or default_bantime_index
 
 	local formspec =
-		"formspec_version[6]"..
-			"size[7,4.5]"..
-			"hypertext[2.25,0.4;3,3;title;"..
-				"<big>Timeout me</big>"..
-			"]"..
-			"label[2.4,1.4;3,3;Choose ban time:]"..
-			"dropdown[2,2;3,0.8;BanTime;"..table.concat(bantime_display_table, ",") ..";"..selected_index.."]"..
-			"button_exit[4.7,3.4;2,0.8;ban;Ban me]"..
-			"button_exit[0.3,3.4;2,0.8;kick_me;Cancel]"
+		"formspec_version[6]" ..
+		"size[7,4.5]" ..
+		"hypertext[2.25,0.4;3,3;title;" ..
+		"<big>Timeout me</big>" ..
+		"]" ..
+		"label[2.4,1.4;3,3;Choose ban time:]" ..
+		"dropdown[2,2;3,0.8;BanTime;" ..
+		table.concat(bantime_display_table, ",") .. ";" .. selected_index .. "]" ..
+		"button_exit[4.7,3.4;2,0.8;ban;Ban me]" ..
+		"button_exit[0.3,3.4;2,0.8;kick_me;Cancel]"
 
 	core.show_formspec(playername, "break_reminder:ban_menu", formspec)
 end
@@ -110,14 +113,14 @@ function break_reminder.show_confirm_menu(playername)
 	local text = data.text
 
 	local formspec =
-		"formspec_version[6]"..
-			"size[7,2.8]"..
-			"hypertext[2.25,0.4;3,3;title;"..
-				"<big>Are you sure?</big>"..
-			"]"..
-			"label[2.02,1.2;4,3;You will be banned for "..text.."]"..
-			"button_exit[4.7,1.8;2,0.8;close;NO]"..
-			"button_exit[0.3,1.8;2,0.8;confirm;YES]"
+		"formspec_version[6]" ..
+		"size[7,2.8]" ..
+		"hypertext[2.25,0.4;3,3;title;" ..
+		"<big>Are you sure?</big>" ..
+		"]" ..
+		"label[2.02,1.2;4,3;You will be banned for " .. text .. "]" ..
+		"button_exit[4.7,1.8;2,0.8;close;NO]" ..
+		"button_exit[0.3,1.8;2,0.8;confirm;YES]"
 
 	core.show_formspec(playername, "break_reminder:confirm_menu", formspec)
 end
@@ -127,7 +130,8 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	local selected_text = fields["BanTime"]
 
 	if formname == "break_reminder:reminder" and fields.kick_me then
-		core.kick_player(player_name, "You clicked 'Kick me' in the break reminder formspec.")
+		core.kick_player(player_name,
+			"You clicked 'Kick me' in the break reminder formspec.")
 	elseif formname == "break_reminder:reminder" and fields.ban_menu then
 		player_data[player_name] = nil
 		break_reminder.show_ban_menu(player_name)
@@ -151,10 +155,14 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			break_reminder.show_ban_menu(player_name)
 			return
 		end
-		simplemod.ban_name(player_name, "break_reminder", "You decided to take a break for " .. data.text, data.seconds)
+		simplemod.ban_name(player_name, "break_reminder",
+			"You decided to take a break for " .. data.text, data.seconds ..
+			"\nFree and anonymous counseling for problems with others online or addiction:\n" ..
+			"Kostenlose und anonyme Beratung bei Problemen mit anderen im Internet oder bei Suchtproblemen:\n" ..
+			"https://www.juuuport.de/hilfe/beratung (de/en)"
+		)
 		player_data[player_name] = nil
 	end
-
 end)
 
 core.register_on_joinplayer(function(player)
@@ -177,9 +185,9 @@ core.register_chatcommand("break_reminder", {
 			return false, "Please provide a valid argument (on or off)"
 		end
 
-		storage:set_string(name.."_pref", param)
+		storage:set_string(name .. "_pref", param)
 
-		return true, "Successfully set your break reminder to "..param
+		return true, "Successfully set your break reminder to " .. param
 	end
 })
 
@@ -202,7 +210,7 @@ core.register_chatcommand("show_reminder", {
 
 		break_reminder.show_reminder(param)
 
-		return true, "Successfully showed break reminder to ".. param
+		return true, "Successfully showed break reminder to " .. param
 	end
 })
 
@@ -234,7 +242,7 @@ end
 
 if core.get_modpath("ctf_api") then -- We are running on a CTF server
 	ctf_api.register_on_respawnplayer(function(player)
-        check_playtime(player:get_player_name())
+		check_playtime(player:get_player_name())
 	end)
 
 	ctf_api.register_on_new_match(function()
@@ -252,7 +260,7 @@ else
 			end
 		end
 
-		core.after(60*2, check_all_playtimes)
+		core.after(60 * 2, check_all_playtimes)
 	end
 
 	check_all_playtimes()

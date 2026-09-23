@@ -160,6 +160,15 @@ assert(algorithms.is_ip and algorithms.is_ipv4 and algorithms.time_to_string and
 _G.dump = function(v) return "DUMPED "..tostring(v.__source or v) end
 
 
+-- A character is what it is, not what it takes to store: the ellipsis the
+-- layout shortens things with is one column wide and three bytes, so a test
+-- measuring bytes would call a label too wide when it fits.
+local function chars_of(text)
+	local n = 0
+	for _ in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do n = n + 1 end
+	return n
+end
+
 os.execute(string.format("mkdir -p %q", world))
 os.remove(world .. "/ipdb.sqlite")
 
@@ -585,6 +594,7 @@ do
 		return (s:gsub("\\(.)", "%1"))
 	end
 
+
 	local function labels(fs)
 		local out = {}
 		for w, h, text in fs:gmatch("button%[[%d%.]+,[%d%.]+;([%d%.]+),([%d%.]+);node_%d+_%d+;([^%]]*)%]") do
@@ -839,7 +849,7 @@ do
 	-- the right edge of each row's label, and the left edge of its buttons
 	local label_right = {}
 	for x, y, text in dfs:gmatch("label%[([%d%.]+),([%d%.]+);([^%]]*)%]") do
-		label_right[tonumber(y)] = tonumber(x) + #unesc(text) * CHAR_W
+		label_right[tonumber(y)] = tonumber(x) + chars_of(unesc(text)) * CHAR_W
 	end
 	local checked = 0
 	for x, y, name in dfs:gmatch("button%[([%d%.]+),([%d%.]+);[%d%.]+,[%d%.]+;(ad_%d+_%w+);") do
@@ -869,7 +879,7 @@ do
 	-- nothing anywhere on the screen runs past the right edge either
 	local win_w = tonumber(dfs:match("size%[([%d%.]+)"))
 	for x, label in dfs:gmatch("label%[([%d%.]+),[%d%.]+;([^%]]*)%]") do
-		local right = tonumber(x) + #unesc(label) * CHAR_W
+		local right = tonumber(x) + chars_of(unesc(label)) * CHAR_W
 		assert(right <= win_w - 0.15, string.format("a label reaches %.2f, past the window: %s", right, unesc(label)))
 	end
 	print("PASS: no label runs past the right edge")
@@ -1271,10 +1281,46 @@ do
 	assert(nnode, "the merge is in the tree")
 	gui({ ["node_"..pdst.."_"..nnode] = true })
 	local note_fs = formspecs[#formspecs]
-	assert(note_fs:find("more - they will be kept", 1, true), "the note about the rest is drawn")
-	assert(note_fs:find("use /ipdb unmerge", 1, true), "with its advice intact")
+	-- Every one of the 40 has a row of its own now, in a list that scrolls:
+	-- none is dropped, and none is decided behind your back as "keep".
+	assert(not note_fs:find("more - they will be kept", 1, true), "nothing is quietly left out")
+	local rows, lowest = 0, 0
+	for y in note_fs:gmatch("button%[[%d%.]+,([%d%.]+);[%d%.]+,[%d%.]+;ad_%d+_keep;") do
+		rows = rows + 1
+		lowest = math.max(lowest, tonumber(y))
+	end
+	assert(rows == 40, "a row per identifier, got "..rows)
+	assert(lowest > 19, "the last row is at "..lowest..", well past what fits, so the list scrolls")
+	assert(note_fs:find("scroll_container%[", 1) and note_fs:find("scroll_container_end%[%]", 1),
+		"the rows are inside a scroll container")
+	assert(note_fs:find(";add_scroll;", 1, true), "with a scrollbar of their own")
+	assert_valid_scrollbars(note_fs, "a merge with more additions than fit")
 	assert_labels_parse(note_fs, "more additions than rows fit")
-	print("PASS: a label whose text holds a separator is escaped")
+
+	-- Scrolling arrives with whatever else was clicked, as the tree's does, and
+	-- has to survive the re-render that follows: a decision taken far down the
+	-- list would otherwise throw you back to the top of it
+	gui({ add_scroll = "5", ad_40_delete = true })
+	assert(formspecs[#formspecs]:find(";add_scroll;5]", 1, true), "the scroll position is kept")
+	assert(formspecs[#formspecs]:find("-> delete", 1, true), "and a decision at the bottom is recorded")
+	-- and at a wider window the rows still fit the list they are drawn in,
+	-- which is narrower than the window because the scrollbar takes a strip
+	window_info = { max_formspec_size = { x = 20, y = 12 } }
+	cmd.func("tester", "merge_gui")
+	gui({ go = true, root = "#"..pdst, depth = "2" })
+	gui({ ["node_"..pdst.."_"..nnode] = true })
+	local wide_fs = formspecs[#formspecs]
+	local _lx, _ly, list_w = wide_fs:match("scroll_container%[([%d%.]+),([%d%.]+);([%d%.]+)")
+	list_w = tonumber(list_w)
+	assert(list_w, "the rows are in a list")
+	local rightmost = 0
+	for bx, _by, bw in wide_fs:gmatch("button%[([%d%.]+),([%d%.]+);([%d%.]+),([%d%.]+);ad_%d+_move;") do
+		rightmost = math.max(rightmost, tonumber(bx) + tonumber(bw))
+	end
+	assert(rightmost > 0 and rightmost <= list_w, string.format(
+		"the decision buttons reach %.2f in a list %.2f wide", rightmost, list_w))
+	window_info = nil
+	print("PASS: every identifier gets a row, in a list that scrolls")
 end
 
 -- ── the GUI sizes itself to the client's window ──────────────────────────

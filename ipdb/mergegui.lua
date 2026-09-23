@@ -379,7 +379,9 @@ end
 -- Where the keep/delete/move buttons of a decision row start. The row's label
 -- stops before this: a label[] is painted wherever it is put, so a value long
 -- enough to reach the buttons would be drawn underneath them.
-local DECISION_X = 7.3
+-- The three buttons of a decision row, laid out from the left edge of the
+-- scrolling list they sit in, and the width they take up in total
+local DECISION_W = 1.3 + 0.1 + 1.5 + 0.1 + 1.3
 
 -- The three things that can be decided about a post-merge identifier
 local DECISION_ACTIONS = { keep = true, delete = true, move = true }
@@ -405,12 +407,12 @@ end
 ---@param a table  -- an addition from get_merge_rollback_info
 ---@param action string
 ---@return string
-local function decision_label(a, action)
+local function decision_label(a, action, row_x)
 	local head = a.type.." "
 	-- the date is enough here: the rows are post-merge by construction, and
 	-- the whole time is on the merge line above
 	local tail = string.format(" (%s) -> %s", a.created_at:sub(1, 10), action)
-	local room = math.floor((DECISION_X - 0.4) / CHAR_W) - #head - #tail
+	local room = math.floor(row_x / CHAR_W) - #head - #tail
 	local value = a.value
 	if #value > room then
 		value = value:sub(1, math.max(1, room - 1)) .. "…"
@@ -518,6 +520,14 @@ local function detail_formspec(state)
 		if state.info then
 			local adds = state.info.additions
 			local ay = y + 0.15
+			-- The rows sit in a list of their own, between the summary above
+			-- and the buttons below, so the summary stays in view while you
+			-- work down them. It scrolls because there can be far more
+			-- identifiers than fit here and, unlike a list being read, every
+			-- one of them needs a decision - dropping the extras would silently
+			-- decide them as "keep".
+			local list_x, list_w = 0.4, w - 0.9
+			local row_x = list_w - 0.1 - DECISION_W
 			if #adds == 0 then
 				fs = fs .. string.format("label[0.4,%.2f;Rollback is possible.]", ay)
 			else
@@ -535,26 +545,23 @@ local function detail_formspec(state)
 					ay = ay + 0.05
 				end
 				-- only as many decision rows as fit above the button at 7.3
-				local room = math.max(0, math.floor((h - 0.85 - ay) / 0.5))
-				if room < #adds then
-					-- the text carries a ';', which is the field separator: left
-					-- unescaped it makes a third part, the engine reads the
-					-- element as the sized form label[X,Y;W,H;text], takes this
-					-- text for the geometry and drops it with "Invalid geometry
-					-- for element label" logged
-					fs = fs .. string.format("label[0.4,%.2f;%s]", ay + room * 0.5, esc(string.format(
-						"%d more - they will be kept; use /ipdb unmerge %d to handle them",
-						#adds - room, state.merge_id)))
+				local list_h = math.max(0.5, h - 0.8 - ay)
+				if #adds * 0.5 > list_h then
+					fs = fs .. scrollbar(list_x + list_w + 0.1, ay, 0.4, list_h,
+						"vertical", "add_scroll", state.as)
 				end
-				for i = 1, math.min(#adds, room) do
+				fs = fs .. string.format("scroll_container[%.2f,%.2f;%.2f,%.2f;add_scroll;vertical;0.1;0]",
+					list_x, ay, list_w, list_h)
+				for i = 1, #adds do
 					local a = adds[i]
 					local act = state.decisions[a.value] or "keep"
-					fs = fs .. string.format("label[0.4,%.2f;%s]", ay, esc(decision_label(a, act))) ..
-						string.format("button[%.2f,%.2f;1.3,0.4;ad_%d_keep;keep]", DECISION_X, ay, i) ..
-						string.format("button[%.2f,%.2f;1.5,0.4;ad_%d_delete;delete]", DECISION_X + 1.4, ay, i) ..
-						string.format("button[%.2f,%.2f;1.3,0.4;ad_%d_move;move]", DECISION_X + 3.0, ay, i)
-					ay = ay + 0.5
+					local ry = (i - 1) * 0.5
+					fs = fs .. string.format("label[0,%.2f;%s]", ry, esc(decision_label(a, act, row_x))) ..
+						string.format("button[%.2f,%.2f;1.3,0.4;ad_%d_keep;keep]", row_x, ry, i) ..
+						string.format("button[%.2f,%.2f;1.5,0.4;ad_%d_delete;delete]", row_x + 1.4, ry, i) ..
+						string.format("button[%.2f,%.2f;1.3,0.4;ad_%d_move;move]", row_x + 3.0, ry, i)
 				end
+				fs = fs .. "scroll_container_end[]"
 			end
 			fs = fs .. string.format("button[%.2f,%.2f;3.0,0.8;rb;Roll back merge #%d]", w - 3.4, h - 0.7, state.merge_id)
 		else
@@ -970,6 +977,9 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	if fields.merge_scroll_h then
 		state.sh = tonumber(fields.merge_scroll_h) or state.sh or 0
 	end
+	if fields.add_scroll then
+		state.as = tonumber(fields.add_scroll) or state.as or 0
+	end
 	-- Enter in a text field submits the form. A client that still has the
 	-- default close-on-enter reports quit along with it, so this has to be
 	-- claimed before the close check reads it. key_enter_field is only sent
@@ -1217,6 +1227,8 @@ M.show = function(name, size)
 		report = nil,
 		sv = 0,
 		sh = 0,
+		-- how far down the rollback decision list is scrolled
+		as = 0,
 		-- identifier list: how it is ordered and the rows currently shown
 		sort = "seen",
 		desc = true,

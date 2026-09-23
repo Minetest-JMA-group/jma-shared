@@ -126,6 +126,24 @@ local algorithms = {
 		return secs
 	end,
 	is_trusted = function() return true end,
+	-- mirrors algorithms.time_to_string (algorithms/init.lua), which
+	-- /ipdb log_retention now renders the retention with
+	time_to_string = function(sec)
+		if type(sec) ~= "number" then return "" end
+		sec = math.floor(sec)
+		local min = math.floor(sec / 60); sec = sec % 60
+		local hour = math.floor(min / 60); min = min % 60
+		local day = math.floor(hour / 24); hour = hour % 24
+		local month = math.floor(day / 30); day = day % 30
+		local year = math.floor(month / 12); month = month % 12
+		local function plural(n, word) return n == 1 and word or (word .. "s") end
+		if year > 0 then return "more than a year" end
+		if month > 0 then return tostring(month).." "..plural(month, "month") end
+		if day > 0 then return tostring(day).." "..plural(day, "day") end
+		if hour > 0 then return tostring(hour).." "..plural(hour, "hour") end
+		if min > 0 then return tostring(min).." "..plural(min, "minute") end
+		return tostring(sec).." "..plural(sec, "second")
+	end,
 }
 _G.algorithms = algorithms
 
@@ -192,9 +210,9 @@ expect("unmerge 1 keep", true, "rolled back")
 expect("unmerge 1", false, "already been rolled back")
 expect("merge 1", true, "rolled back on")
 expect("tree alice 3", true, "current")
-expect("log_retention", true, "kept for 1296000")
+expect("log_retention", true, "kept for 15 days")
 expect("log_retention 2D", true, "2D (172800 seconds)")
-expect("log_retention", true, "kept for 172800")
+expect("log_retention", true, "kept for 2 days")
 expect("log_retention 0", false, "Usage")
 expect("log_retention nonsense", false, "Usage")
 -- the value must actually land in Metadata (it is re-read on server restart)

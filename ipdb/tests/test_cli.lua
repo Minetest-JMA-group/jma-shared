@@ -24,10 +24,40 @@ local chat_output  -- last message sent to a player, for commands that print
 local closed_form  -- formname the GUI asked the client to close, if any
 local leave_handler  -- called when a player disconnects
 
+-- The real algorithms mod is loaded below, as the engine loads it, so the
+-- harness tracks which mod's load is in progress and resolves each mod's path
+local current_mod = "ipdb"
+local algorithms_path = modpath .. "/../algorithms"
+
 local core = {
-	get_current_modname = function() return "ipdb" end,
-	get_modpath = function() return modpath end,
+	get_current_modname = function() return current_mod end,
+	get_modpath = function(modname)
+		if modname == "algorithms" then return algorithms_path end
+		return modpath
+	end,
 	get_worldpath = function() return world end,
+	-- What the engine hands a trusted mod. These are the two members the
+	-- algorithms mod uses: require, and package.loadlib for its C++ part,
+	-- which has nothing to load here.
+	request_insecure_environment = function()
+		return {
+			require = require,
+			package = { loadlib = function() return nil, "no shared libraries here" end },
+		}
+	end,
+	settings = {
+		get = function(_, key)
+			-- both lists matter: c_mods lets ipdb require lsqlite3 through the
+			-- insecure environment, trusted_mods lets get_internal hand it the
+			-- database handle
+			if key == "secure.c_mods" or key == "secure.trusted_mods" then return "ipdb" end
+			return nil
+		end,
+		get_bool = function(_, key, default)
+			if key == "algorithms.verbose" then return false end
+			return default
+		end,
+	},
 	log = function() end,
 	get_dir_list = function(path)
 		local out = {}
@@ -111,41 +141,16 @@ local core = {
 }
 _G.core = core
 
-local algorithms = {
-	require = function(name) return require(name) end,
-	is_ip = function(s) return s:match("^%d+%.%d+%.%d+%.%d+$") ~= nil end,
-	-- same grammar as the real algorithms.parse_time: number followed by an
-	-- optional unit (s/m/h/d/w/M/y; bare numbers are seconds)
-	parse_time = function(t)
-		if type(t) ~= "string" then return 0 end
-		local unit_to_secs = { s = 1, m = 60, h = 3600, d = 86400, D = 86400, w = 604800, W = 604800, M = 2592000, y = 31536000, Y = 31536000 }
-		local secs = 0
-		for num, unit in t:gmatch("(%d+)([smhdDwWMYy]?)") do
-			secs = secs + (tonumber(num) * (unit_to_secs[unit] or 1))
-		end
-		return secs
-	end,
-	is_trusted = function() return true end,
-	-- mirrors algorithms.time_to_string (algorithms/init.lua), which
-	-- /ipdb log_retention renders the retention with
-	time_to_string = function(sec)
-		if type(sec) ~= "number" then return "" end
-		sec = math.floor(sec)
-		local min = math.floor(sec / 60); sec = sec % 60
-		local hour = math.floor(min / 60); min = min % 60
-		local day = math.floor(hour / 24); hour = hour % 24
-		local month = math.floor(day / 30); day = day % 30
-		local year = math.floor(month / 12); month = month % 12
-		local function plural(n, word) return n == 1 and word or (word .. "s") end
-		if year > 0 then return "more than a year" end
-		if month > 0 then return tostring(month).." "..plural(month, "month") end
-		if day > 0 then return tostring(day).." "..plural(day, "day") end
-		if hour > 0 then return tostring(hour).." "..plural(hour, "hour") end
-		if min > 0 then return tostring(min).." "..plural(min, "minute") end
-		return tostring(sec).." "..plural(sec, "second")
-	end,
-}
-_G.algorithms = algorithms
+-- Load the real algorithms mod, as the engine would before ipdb. Standing in
+-- for it here meant reimplementing is_ip, parse_time and time_to_string, which
+-- drifted: the suite went red when the real module gained a function the
+-- stand-in did not have, and the stand-in's is_ip knew nothing of IPv6.
+current_mod = "algorithms"
+assert(loadfile(algorithms_path .. "/init.lua"))()
+current_mod = "ipdb"
+-- a function only the real module has, so a stand-in cannot creep back in
+assert(algorithms.is_ip and algorithms.is_ipv4 and algorithms.time_to_string and algorithms.nGram,
+	"the real algorithms mod loaded")
 
 -- the engine ships a global dump() for rendering a value readably; the value
 -- screen falls back to it when the data will not go into JSON

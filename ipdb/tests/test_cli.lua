@@ -127,7 +127,7 @@ local algorithms = {
 	end,
 	is_trusted = function() return true end,
 	-- mirrors algorithms.time_to_string (algorithms/init.lua), which
-	-- /ipdb log_retention now renders the retention with
+	-- /ipdb log_retention renders the retention with
 	time_to_string = function(sec)
 		if type(sec) ~= "number" then return "" end
 		sec = math.floor(sec)
@@ -269,7 +269,10 @@ assert(detail_fs:find("frank"), "detail shows the post-merge identifier")
 assert(detail_fs:find("ad_1_delete"), "detail offers per-identifier decisions")
 print("PASS: gui detail shows additions with decisions")
 gui({ ad_1_delete = true })
-assert(formspecs[#formspecs]:find("delete", 1, true), "decision recorded")
+-- the row's own label, not the button of the same name: "delete" appears in
+-- the formspec either way, so searching for that proves nothing
+assert(formspecs[#formspecs]:find("-> delete", 1, true), "the decision is shown on the row")
+assert(not formspecs[#formspecs]:find("-> keep", 1, true), "and the previous one is gone")
 gui({ rb = true })
 assert(formspecs[#formspecs]:find("Confirm rollback"), "confirm screen shown")
 gui({ rb_confirm = true })
@@ -1212,6 +1215,57 @@ do
 	assert(math.abs(big_btn - (big_hdr - 0.05)) < 0.001, string.format(
 		"the button follows the panel down (button %.2f, header %.2f)", big_btn, big_hdr))
 	print("PASS: the panel's button follows it when the row cap note moves it")
+end
+
+-- ── a label's text must not carry an unescaped field separator ───────────
+-- The engine splits label[X,Y;text] on ';'. A second one in the text makes a
+-- third part, which it reads as the sized form label[X,Y;W,H;text], takes the
+-- text for the geometry and drops the element, logging "Invalid geometry for
+-- element label". That is what the note about the identifiers a rollback
+-- would leave behind did with its "; use /ipdb unmerge" clause.
+do
+	local function assert_labels_parse(fs, ctx)
+		for elem in fs:gmatch("label%[[^%]]*%]") do
+			local inner = elem:sub(7, -2)
+			local seps, i = 0, 1
+			while i <= #inner do
+				if inner:sub(i, i) == "\\" then
+					i = i + 2
+				else
+					if inner:sub(i, i) == ";" then seps = seps + 1 end
+					i = i + 1
+				end
+			end
+			assert(seps == 1, ctx..": a label carries "..seps.." unescaped separators: "..elem)
+		end
+	end
+
+	-- a merge with more post-merge identifiers than the screen has room for,
+	-- so the note about the rest is drawn at all
+	local psrc = dbmanager.new_entry()
+	dbmanager.add_name(psrc, "note-src")
+	local pdst = dbmanager.new_entry()
+	dbmanager.add_name(pdst, "note-dst")
+	dbmanager.new_merge_event(psrc, pdst, "note-dst", "")
+	dbmanager.reassociate_ids(pdst, dbmanager.user_exists("note-src").id, nil)
+	dbmanager.delete_entry(psrc)
+	for i = 1, 40 do
+		local n = "note-id"..i
+		dbmanager.add_name(pdst, n)
+		db:exec("UPDATE Usernames SET created_at = datetime('now','+1 minute') WHERE name = '"..n.."'")
+	end
+
+	cmd.func("tester", "merge_gui")
+	gui({ go = true, root = "#"..pdst, depth = "2" })
+	local nfs = formspecs[#formspecs]
+	local nnode = nfs:match("node_"..pdst.."_(%d+)")
+	assert(nnode, "the merge is in the tree")
+	gui({ ["node_"..pdst.."_"..nnode] = true })
+	local note_fs = formspecs[#formspecs]
+	assert(note_fs:find("more - they will be kept", 1, true), "the note about the rest is drawn")
+	assert(note_fs:find("use /ipdb unmerge", 1, true), "with its advice intact")
+	assert_labels_parse(note_fs, "more additions than rows fit")
+	print("PASS: a label whose text holds a separator is escaped")
 end
 
 -- the depth cap is 20 in the CLI too, not just in the message

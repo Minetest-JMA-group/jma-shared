@@ -327,6 +327,9 @@ end
 -- enough to reach the buttons would be drawn underneath them.
 local DECISION_X = 7.3
 
+-- The three things that can be decided about a post-merge identifier
+local DECISION_ACTIONS = { keep = true, delete = true, move = true }
+
 -- What the three decision buttons do, spelled out with the entry ids they act
 -- on: the entry the identifiers are on now, and the one the rollback brings
 -- back for them to move to.
@@ -478,8 +481,14 @@ local function detail_formspec(state)
 				-- only as many decision rows as fit above the button at 7.3
 				local room = math.max(0, math.floor((7.15 - ay) / 0.5))
 				if room < #adds then
-					fs = fs .. string.format("label[0.4,%.2f;%d more - they will be kept; use /ipdb unmerge %d to handle them]",
-						ay + room * 0.5, #adds - room, state.merge_id)
+					-- the text carries a ';', which is the field separator: left
+					-- unescaped it makes a third part, the engine reads the
+					-- element as the sized form label[X,Y;W,H;text], takes this
+					-- text for the geometry and drops it with "Invalid geometry
+					-- for element label" logged
+					fs = fs .. string.format("label[0.4,%.2f;%s]", ay + room * 0.5, esc(string.format(
+						"%d more - they will be kept; use /ipdb unmerge %d to handle them",
+						#adds - room, state.merge_id)))
 				end
 				for i = 1, math.min(#adds, room) do
 					local a = adds[i]
@@ -1076,8 +1085,11 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			end
 			return
 		end
-		local ad_idx, action = fieldname:match("^ad_(%d+)_(keep|delete|move)$")
-		if ad_idx and state.info then
+		-- Lua patterns have no alternation: "(keep|delete|move)" matches that
+		-- literal text, so this never matched and the buttons did nothing.
+		-- The action is captured and checked instead.
+		local ad_idx, action = fieldname:match("^ad_(%d+)_(%a+)$")
+		if ad_idx and DECISION_ACTIONS[action] and state.info then
 			local a = state.info.additions[tonumber(ad_idx)]
 			if a then state.decisions[a.value] = action end
 			show(state, name)

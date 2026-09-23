@@ -1159,10 +1159,14 @@ M.show = function(name, size)
 	if size then
 		if size == "auto" then
 			gui_sizes[name] = nil
+		elseif size == "default" then
+			-- the size this screen was designed for, for anyone who wants it
+			-- back without having to remember the numbers
+			gui_sizes[name] = { w = DEFAULT_W, h = DEFAULT_H }
 		else
 			local w, h = size:match("^(%d+)x(%d+)$")
 			if not w then
-				return "Size must be 'auto' or <width>x<height>, e.g. 16x11"
+				return "Size must be 'auto', 'default' or <width>x<height>, e.g. 16x11"
 			end
 			gui_sizes[name] = { w = tonumber(w), h = tonumber(h) }
 		end

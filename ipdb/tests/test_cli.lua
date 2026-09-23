@@ -1329,8 +1329,20 @@ do
 	expect("merge_gui auto", true, "GUI opened")
 	w, h = size_of(formspecs[#formspecs])
 	assert(w == 18 and h == 11, "auto returns to the client's report, got "..tostring(w).."x"..tostring(h))
-	expect("merge_gui 12by8", false, "Size must be 'auto' or <width>x<height>")
-	print("PASS: an explicit size overrides the report, and auto gives it back")
+
+	-- "default" pins the size this screen was designed for, whatever the
+	-- client reports, so nobody has to remember the numbers
+	expect("merge_gui default", true, "GUI opened")
+	w, h = size_of(formspecs[#formspecs])
+	assert(w == 12 and h == 8, "default pins 12x8, got "..tostring(w).."x"..tostring(h))
+	cmd.func("tester", "merge_gui")
+	w, h = size_of(formspecs[#formspecs])
+	assert(w == 12 and h == 8, "and reopening keeps it, got "..tostring(w).."x"..tostring(h))
+	expect("merge_gui auto", true, "GUI opened")
+	w, h = size_of(formspecs[#formspecs])
+	assert(w == 18 and h == 11, "auto goes back to the client's report, got "..tostring(w).."x"..tostring(h))
+	expect("merge_gui 12by8", false, "Size must be 'auto', 'default' or <width>x<height>")
+	print("PASS: an explicit size overrides the report, auto gives it back, default pins it")
 	window_info = nil
 end
 

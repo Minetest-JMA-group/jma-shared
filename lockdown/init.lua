@@ -11,7 +11,7 @@ local reg_cooldown = modstorage:contains("reg_cooldown") and modstorage:get_int(
 local last_reg_timestamp = 0
 local whitelist_min_playtime = tonumber(core.settings:get("lockdown_whitelist_min_playtime")) or 10
 
-local contact_info = "Discord: www.ctf.jma-sig.de or E-Mail loki@jma-sig.de"
+local contact_info = "Discord: www.ctf.jma-sig.de or E-Mail support.jma@proton.me"
 local disconnect_message = "Server Lockdown!\nWe aren't accepting new players right now.\n\n" ..
 	"If you want to create a new account, contact us on " .. contact_info
 local disconnect_message_cooldown = "We aren't accepting new players right now.\n" ..

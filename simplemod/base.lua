@@ -15,7 +15,7 @@ return function(shared)
 
 
 Contact / Kontakt:
-email: loki@jma-sig.de︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xmpp:general@conference.jmaminetest.mooo.com?join ]]
+email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xmpp:general@conference.jmaminetest.mooo.com?join ]]
 	shared.ROW_SCROLL_STEP = 20
 	shared.ROW_SCROLL_MAX = 600
 	local ROW_VISIBLE_CHARS = 120

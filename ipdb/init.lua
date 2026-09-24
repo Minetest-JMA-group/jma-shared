@@ -179,7 +179,7 @@ local function register_new_ids(name, ip)
 		if ip then ipent = dbmanager.ip_exists(ip) end
 		if not user and not ipent then
 			if no_newentries then
-				return "[Access restriction]: New account from an unrecognized network detected. Please contact us on Discord: www.ctf.jma-sig.de or E-Mail loki@jma-sig.de to get whitelisted."
+				return "[Access restriction]: New account from an unrecognized network detected. Please contact us on Discord: www.ctf.jma-sig.de or E-Mail support.jma@proton.me to get whitelisted."
 			end
 			local entryid = dbmanager.new_entry()
 			if name then dbmanager.add_name(entryid, name) end

@@ -50,11 +50,12 @@ function core.get_server_status(name, joined)
 	game_title, core.get_version().string, get_server_uptime_formatted(), core.get_server_max_lag() or "0")
 
 	local players = core.get_connected_players()
-    local plist = "Players: "
+    local plist = "Players"
 
     if #players == 0 then
         plist = plist .. "No connected players."
     else
+        plist = plist .. " (" .. #players .. "): "
         for i, p in ipairs(players) do
             plist = plist .. p:get_player_name()
             if i < #players then

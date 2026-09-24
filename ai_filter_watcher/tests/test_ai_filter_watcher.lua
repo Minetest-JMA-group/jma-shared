@@ -359,6 +359,7 @@ local function make_env(globals, shareddb_values, mods)
 			enabled = true,
 			send_mention = function(msg, id)
 				table.insert(env.discord_mentions, msg)
+				table.insert(env.discord_mention_channels, id)
 			end,
 		},
 		-- Global (not core.*) in the engine, so init.lua's PcgRandom(os.time())
@@ -388,6 +389,8 @@ local function make_env(globals, shareddb_values, mods)
 	env.essentials_calls = {}
 	env.mute_calls = {}
 	env.discord_mentions = {}
+	-- Channel ID each mention was addressed to, parallel to discord_mentions
+	env.discord_mention_channels = {}
 	-- ASCII subset of the shared player name characters (tests use ASCII)
 	env.utf8_simple.player_name_chars = {}
 	for c in env.utf8_simple.chars("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") do
@@ -1251,5 +1254,72 @@ local function scenarioV()
 	check(envV.shareddb.db.history_tracking_time == "7200", "V: persisted to shareddb")
 end
 scenarioV()
+
+-- === Scenario W: a report whose evidence is private-channel content goes to
+-- the moderators-only channel; everything else keeps the public one ===
+-- Like Scenario V, this scenario keeps its locals inside a function of its
+-- own: the suite sits at LuaJIT's 200-locals-per-function ceiling.
+local function scenarioW()
+	local PUBLIC_CH, PRIVATE_CH = "1525628775923060958", "1535761405137920070"
+	local envW = make_env({ discord = true }, { min_batch_size = "1" })
+	local cmdW = envW.core.registered_chatcommands
+	envW.core.chat_hook("alice", "hello")
+	envW.core.globalstep_cb(61)              -- one batch, so the tools exist
+	local rpW = find_tool(envW, "report_player")
+	local chans = envW.discord_mention_channels
+
+	-- public unless the report is flagged, and the post itself is unchanged
+	check(rpW.func({ name = "bob", reason = "griefing" }).success == true, "W: plain report succeeds")
+	check(chans[#chans] == PUBLIC_CH, "W: plain report goes to the public channel")
+	contains(envW.discord_mentions[#envW.discord_mentions],
+		"**AI Watcher**: Reported player bob to moderators: griefing",
+		"W: report format unchanged")
+	rpW.func({ name = "bob", reason = "grooming in PM", private = true })
+	check(chans[#chans] == PRIVATE_CH, "W: flagged report goes to the private channel")
+	rpW.func({ name = "bob", reason = "x", private = false })
+	check(chans[#chans] == PUBLIC_CH, "W: explicit false stays public")
+
+	-- strict = false, so the flag can arrive as a JSON string, and "false" is
+	-- truthy in Lua
+	rpW.func({ name = "bob", reason = "x", private = "true" })
+	check(chans[#chans] == PRIVATE_CH, 'W: string "true" counts as flagged')
+	rpW.func({ name = "bob", reason = "x", private = "false" })
+	check(chans[#chans] == PUBLIC_CH, 'W: string "false" does not')
+
+	local _, phW = cmdW.ai_watcher.func("tester", "player_history bob")
+	contains(phW, "grooming in PM", "W: private report lands in moderation history")
+
+	-- both channels are settings, read and written like every other one
+	local okW, retW = cmdW.ai_watcher.func("tester", "report_channel")
+	check(okW == true and retW == "Current report channel: " .. PUBLIC_CH, "W: reports the public channel")
+	local okW2, retW2 = cmdW.ai_watcher.func("tester", "report_channel_private")
+	check(okW2 == true and retW2 == "Current private report channel: " .. PRIVATE_CH,
+		"W: reports the private channel")
+	local _, stW = cmdW.ai_watcher.func("tester", "status")
+	contains(stW, "- Report channel: " .. PUBLIC_CH, "W: status lists the public channel")
+	contains(stW, "- Private report channel: " .. PRIVATE_CH, "W: status lists the private channel")
+
+	local _, setW = cmdW.ai_watcher.func("tester", "report_channel_private 999888777666555444")
+	contains(setW, "Private report channel set to: 999888777666555444", "W: private channel set")
+	check(envW.shareddb.db.report_channel_private == "999888777666555444", "W: persisted to shareddb")
+	rpW.func({ name = "bob", reason = "x", private = true })
+	check(chans[#chans] == "999888777666555444", "W: the new private channel takes effect")
+
+	-- the shareddb path (another instance, or a direct row write) applies too
+	envW.shareddb.db.report_channel = "111222333444555666"
+	envW.shareddb.listener("report_channel")
+	rpW.func({ name = "bob", reason = "x" })
+	check(chans[#chans] == "111222333444555666", "W: shareddb row applies")
+
+	-- anything that isn't a channel ID is refused, and the channel in use
+	-- stays: the last row is a snowflake round-tripped through a float
+	check(cmdW.ai_watcher.func("tester", "report_channel abc") == false, "W: non-numeric channel rejected")
+	check(cmdW.ai_watcher.func("tester", "report_channel 12.5") == false, "W: fractional channel rejected")
+	envW.shareddb.db.report_channel = "1525628775923060958.0"
+	envW.shareddb.listener("report_channel")
+	rpW.func({ name = "bob", reason = "x" })
+	check(chans[#chans] == "111222333444555666", "W: invalid shareddb row ignored")
+end
+scenarioW()
 
 print("All tests passed.")

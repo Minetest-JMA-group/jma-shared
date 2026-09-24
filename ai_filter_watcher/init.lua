@@ -22,6 +22,12 @@ local SLEEP_SCHEDULE = nil		-- parsed quiet-hours schedule (UTC), nil = never sl
 local SLEEP_SCHEDULE_RAW = nil		-- schedule string as typed, for display
 local MAX_BATCH_SIZE = nil		-- nil = no cap: the whole buffer goes in one payload per scan
 
+-- Where report_player sends its reports. Discord snowflakes exceed 2^53, so
+-- both stay strings rather than numbers. The private channel takes reports
+-- whose evidence is private-channel content (PM, MAIL, BABEL PM, XMPP-DM).
+local REPORT_CHANNEL = "1525628775923060958"
+local PRIVATE_REPORT_CHANNEL = "1535761405137920070"
+
 local PROMPT_READY = false
 local message_buffer = {}
 local chat_history = {}		-- newest at the end, trimmed to HISTORY_SIZE
@@ -92,6 +98,13 @@ end
 -- ends, so a window ending at HH:MM expires at the top of HH:MM+1.
 local function quiet_hours_active()
 	return SLEEP_SCHEDULE ~= nil and SLEEP_SCHEDULE:contains() or false
+end
+
+-- A channel ID from the database or the chat command. Anything that isn't
+-- digits (a snowflake that round-tripped through a float as "123.0") is
+-- refused, so a bad value leaves the channel already in use in place.
+local function channel_id_valid(v)
+	return type(v) == "string" and v:match("^%d+$") ~= nil
 end
 
 -- Single source of truth for settings: key -> { default, apply }.
@@ -191,6 +204,18 @@ local settings_appliers = {
 			-- Unparseable, absent or explicit 0 all mean "no cap"
 			local n = tonumber(v)
 			MAX_BATCH_SIZE = (n and n >= 1) and math.floor(n) or nil
+		end,
+	},
+	report_channel = {
+		default = "1525628775923060958",
+		apply = function(v)
+			if channel_id_valid(v) then REPORT_CHANNEL = v end
+		end,
+	},
+	report_channel_private = {
+		default = "1535761405137920070",
+		apply = function(v)
+			if channel_id_valid(v) then PRIVATE_REPORT_CHANNEL = v end
 		end,
 	},
 }
@@ -1072,7 +1097,11 @@ local function process_batch(override_quiet)
 			watcher_stats.actions_taken = watcher_stats.actions_taken + 1
 			watcher_stats.last_action_time = os.time()
 			local msg = string.format("**AI Watcher**: Reported player %s to moderators: %s", player_name, reason)
-			discord.send_mention(msg, "1525628775923060958")
+			-- Tools are registered with strict = false, so the flag can arrive
+			-- as the string "true" — and "false" is a non-empty string, i.e.
+			-- truthy in Lua, which plain truthiness would misread as set.
+			local is_private = args.private == true or args.private == "true"
+			discord.send_mention(msg, is_private and PRIVATE_REPORT_CHANNEL or REPORT_CHANNEL)
 			-- Record the report so later batches show the player was already
 			-- reported (moderation history); the AI deduplicates from there.
 			add_to_player_history(player_name, "report", nil, summary)
@@ -1083,7 +1112,8 @@ local function process_batch(override_quiet)
 		properties = {
 			name = { type = "string", description = "Player name to report" },
 			reason = { type = "string", description = "Detailed reason for reporting" },
-			summary = { type = "string", description = "One short sentence capturing the incident; recorded in moderation history" }
+			summary = { type = "string", description = "One short sentence capturing the incident; recorded in moderation history" },
+			private = { type = "boolean", description = "True when the report draws on private channels (PM, MAIL, BABEL PM, XMPP-DM); those reports go to a moderators-only channel" }
 		}
 	})
 
@@ -1322,6 +1352,8 @@ AI Watcher Status:
   • Temperature: %s
 - Debug logging: %s
 - Username hiding: %s
+- Report channel: %s
+- Private report channel: %s
 - Statistics:
   • Scans performed: %d
   • Messages processed: %d
@@ -1345,6 +1377,8 @@ AI Watcher Status:
 				val_or_def(TEMPERATURE),
 				DEBUG_ENABLED and "Enabled" or "Disabled",
 				HIDE_USERNAMES and "Enabled" or "Disabled",
+				REPORT_CHANNEL,
+				PRIVATE_REPORT_CHANNEL,
 				watcher_stats.scans_performed,
 				watcher_stats.messages_processed,
 				watcher_stats.actions_taken,
@@ -1521,6 +1555,26 @@ AI Watcher Status:
 			ACTION_RATE_LIMIT = limit
 			return true, ("Action report rate limit set to: %s (max %d messages per %d seconds)"):format(v, limit.count, limit.seconds)
 
+		elseif cmd == "report_channel" or cmd == "report_channel_private" then
+			local is_private = cmd == "report_channel_private"
+			local label = is_private and "Private report channel" or "Report channel"
+			local what = label:lower()
+			local v = param:match("%s+(%S+)")
+			if not v then
+				return true, ("Current %s: %s"):format(what,
+					is_private and PRIVATE_REPORT_CHANNEL or REPORT_CHANNEL)
+			end
+			if not channel_id_valid(v) then
+				return false, ("Usage: /ai_watcher %s [channel_id] (a Discord channel ID, digits only)"):format(cmd)
+			end
+			save_setting(cmd, v, what)
+			if is_private then
+				PRIVATE_REPORT_CHANNEL = v
+			else
+				REPORT_CHANNEL = v
+			end
+			return true, ("%s set to: %s"):format(label, v)
+
 		elseif cmd == "sleep" then
 			local spec = param:match("%s+(.+)")
 			if spec then spec = spec:match("^%s*(.-)%s*$") end
@@ -1663,6 +1717,8 @@ AI Watcher Status:
   history_time [time]   - Get/set moderation history retention time (seconds or e.g. '10h')
   history_size [count]  - Get/set number of messages kept as context for get_history (10-20000)
   action_rate_limit [value] - Get/set action report rate limit (e.g. '10/1m', unlimited if unset)
+  report_channel [id]   - Get/set the Discord channel for player reports
+  report_channel_private [id] - Get/set the Discord channel for reports whose evidence is private (PM, MAIL, BABEL PM, XMPP-DM)
   sleep [timespec|off]  - Get/set quiet hours (UTC timespec, e.g. weekdays,02:00-08:00). Batches are held, never lost, and drain when the window ends. 'off' disables
   process [force]       - Process buffered messages now (force overrides min batch size and quiet hours)
   dump                  - Show messages in buffer

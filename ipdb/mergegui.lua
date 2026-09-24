@@ -18,6 +18,17 @@ local M = {}
 local gui_states = {}
 local FORMNAME = "ipdb:merge_gui"
 
+-- The position a scrollbar reports. The engine sends "CHG:<pos>" when the
+-- player moves it and "VAL:<pos>" otherwise - never a bare number - so
+-- tonumber() on the field always came up nil and the position was never
+-- remembered: every re-render sent the scrollbar back to the top.
+---@param text string|number
+---@return integer?
+local function scroll_value(text)
+	local n = tostring(text):match("^(%d+)$") or tostring(text):match("^%a+:(%d+)$")
+	return tonumber(n)
+end
+
 -- Escape text for use in a formspec
 local function esc(s)
 	return core.formspec_escape(tostring(s or ""))
@@ -983,13 +994,13 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	if not state then return end
 	-- Remember where the user had scrolled to, so a re-render keeps the position
 	if fields.merge_scroll then
-		state.sv = tonumber(fields.merge_scroll) or state.sv or 0
+		state.sv = scroll_value(fields.merge_scroll) or state.sv or 0
 	end
 	if fields.merge_scroll_h then
-		state.sh = tonumber(fields.merge_scroll_h) or state.sh or 0
+		state.sh = scroll_value(fields.merge_scroll_h) or state.sh or 0
 	end
 	if fields.add_scroll then
-		state.as = tonumber(fields.add_scroll) or state.as or 0
+		state.as = scroll_value(fields.add_scroll) or state.as or 0
 	end
 	-- Enter in a text field submits the form. A client that still has the
 	-- default close-on-enter reports quit along with it, so this has to be

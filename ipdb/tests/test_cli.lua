@@ -336,7 +336,7 @@ assert(deep_fs:find("node_%d+_3"), "oldest same-second chain merge is in the tre
 print("PASS: gui deep tree renders with a valid horizontal scrollbar")
 -- clicking a deep node (carrying merge id 8) opens its detail; the scroll
 -- position sent along with the click is remembered
-gui({ merge_scroll_h = "33", ["node_" .. (deep_fs:match("node_(%d+)_8") or "") .. "_8"] = true })
+gui({ merge_scroll_h = "CHG:33", ["node_" .. (deep_fs:match("node_(%d+)_8") or "") .. "_8"] = true })
 assert(formspecs[#formspecs]:find("Merge #8", 1, true), "clicking a deep node opens its merge detail")
 print("PASS: gui deep node click works")
 gui({ back = true })
@@ -1300,9 +1300,17 @@ do
 	-- Scrolling arrives with whatever else was clicked, as the tree's does, and
 	-- has to survive the re-render that follows: a decision taken far down the
 	-- list would otherwise throw you back to the top of it
-	gui({ add_scroll = "5", ad_40_delete = true })
-	assert(formspecs[#formspecs]:find(";add_scroll;5]", 1, true), "the scroll position is kept")
-	assert(formspecs[#formspecs]:find("-> delete", 1, true), "and a decision at the bottom is recorded")
+	-- The engine sends "CHG:<pos>" when the scrollbar moves and "VAL:<pos>" when
+	-- it is merely reported alongside whatever else was clicked - never a bare
+	-- number, which is why a test sending one proved nothing
+	gui({ add_scroll = "CHG:5", ad_40_delete = true })
+	local scrolled = formspecs[#formspecs]
+	assert(scrolled:find(";add_scroll;5]", 1, true), "the scroll position is kept")
+	assert(scrolled:find("-> delete", 1, true), "and a decision at the bottom is recorded")
+	gui({ add_scroll = "VAL:7", ad_40_move = true })
+	local again = formspecs[#formspecs]
+	assert(again:find(";add_scroll;7]", 1, true), "and the other form of it is understood too")
+	assert(again:find("-> move", 1, true), "with that decision recorded as well")
 	-- and at a wider window the rows still fit the list they are drawn in,
 	-- which is narrower than the window because the scrollbar takes a strip
 	window_info = { max_formspec_size = { x = 20, y = 12 } }

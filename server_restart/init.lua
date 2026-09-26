@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- Copyright (c) 2024 Nanowolf4 (n4w@tutanota.com)
+-- Copyright (c) 2026 Nanowolf4 (n4w@tutanota.com)
 
 server_restart = {}
 local ie = core.request_insecure_environment()
@@ -10,6 +10,7 @@ end
 
 local shell_command = core.settings:get("restart_command")
 local update_command = core.settings:get("update_command")
+local restart_interval = (tonumber(core.settings:get("restart_interval")) or 24) * 60 * 60
 local disconnect_msg = "Server is restarting. Please reconnect in a couple seconds."
 
 local do_restart = function()
@@ -184,6 +185,16 @@ ctf_api.register_on_match_end(function()
 			core.log("[server_restart]: Not restarting yet")
 		end
 	end
+end)
+
+ctf_api.register_on_new_match(function()
+	if ctf_modebase.restart_on_next_match or core.get_server_uptime() < restart_interval then
+		return
+	end
+
+	requested_by = "System"
+	ctf_modebase.restart_on_next_match = true
+	core.chat_send_all(core.colorize("yellow", "The server is scheduled to restart after this match."))
 end)
 
 core.register_on_leaveplayer(function(ObjectRef, timed_out)

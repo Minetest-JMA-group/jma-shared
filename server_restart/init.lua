@@ -10,7 +10,7 @@ end
 
 local shell_command = core.settings:get("restart_command")
 local update_command = core.settings:get("update_command")
-local restart_interval = (tonumber(core.settings:get("restart_interval")) or 24) * 60 * 60
+local restart_interval = tonumber(core.settings:get("restart_interval"))
 local disconnect_msg = "Server is restarting. Please reconnect in a couple seconds."
 
 local do_restart = function()
@@ -188,7 +188,10 @@ ctf_api.register_on_match_end(function()
 end)
 
 ctf_api.register_on_new_match(function()
-	if ctf_modebase.restart_on_next_match or core.get_server_uptime() < restart_interval then
+	if not restart_interval or restart_interval <= 0 or ctf_modebase.restart_on_next_match then
+		return
+	end
+	if core.get_server_uptime() < restart_interval * 60 * 60 then
 		return
 	end
 

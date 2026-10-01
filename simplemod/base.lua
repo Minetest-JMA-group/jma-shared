@@ -80,7 +80,7 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 			source = source,
 			reason = reason or "",
 			time = now,
-			expiry = duration_sec and duration_sec > 0 and now + duration_sec or nil,
+			expiry = type(duration_sec) == "number" and duration_sec > 0 and now + duration_sec or nil,
 			target = target,
 		}
 	end

@@ -443,7 +443,7 @@ merge_gui [auto|default|<W>x<H>]: Open the merge history GUI, sized to the windo
 core.register_chatcommand("ipdb", {
 	description = "Interface to the IP-based player entry database",
 	params = "<subcommand> args",
-	privs = { ban = true },
+	privs = { server_shield_manager = true },
 	---@param name string
 	---@param params string
 	func = function(name, params)

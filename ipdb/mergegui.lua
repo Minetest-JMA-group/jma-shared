@@ -862,6 +862,10 @@ end
 
 local function confirm_formspec(state)
 	local m = state.info.merge
+	-- The lists below are wrapped as they are built, with the same budget the
+	-- labels underneath cut at, so the budget is needed before `lines` is.
+	local w, h = window_size(state)
+	local chars = text_budget(w)
 	local lines = {
 		"Roll back merge #"..state.merge_id.."?",
 		"  entry #"..m.entry_src.." will be recreated as it was at the merge",
@@ -880,8 +884,6 @@ local function confirm_formspec(state)
 	if #moves > 0 then append_list(lines, "  moved to the recreated entry: ", moves, 4, chars) end
 	if #keeps > 0 then append_list(lines, "  kept at the destination: ", keeps, 4, chars) end
 	table.insert(lines, "The merge event will be marked as reverted.")
-	local w, h = window_size(state)
-	local chars = text_budget(w)
 	local fs = string.format("formspec_version[6]size[%.2f,%.2f]padding[0,0]", w, h)
 	local y = 0.3
 	for i = 1, math.min(#lines, 10) do

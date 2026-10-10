@@ -176,7 +176,7 @@ assert(loadfile(modpath .. "/init.lua"))()
 
 local cmd = chatcommands["ipdb"]
 assert(cmd, "chatcommand /ipdb not registered")
-assert(cmd.privs.ban, "/ipdb requires ban priv")
+assert(cmd.privs.server_shield_manager, "/ipdb requires server_shield_manager priv")
 
 local dbmanager = ipdb.dbmanager
 local db = ipdb.get_internal(5, "database")
@@ -251,6 +251,11 @@ dbmanager.reassociate_ids(C, eve.id, ip55.id)
 dbmanager.delete_entry(D)
 dbmanager.add_name(C, "frank")
 db:exec("UPDATE Usernames SET created_at = datetime('now', '+1 minute') WHERE name = 'frank'")
+-- a second post-merge identifier, so the confirm screen has a list with more
+-- than one entry to lay out: the additions are ordered by created_at, so its
+-- own timestamp is what puts it second
+dbmanager.add_name(C, "gina")
+db:exec("UPDATE Usernames SET created_at = datetime('now', '+2 minutes') WHERE name = 'gina'")
 
 -- ── GUI flow: open -> show tree -> click node -> decide -> roll back ──────
 local player = { get_player_name = function() return "tester" end }
@@ -283,15 +288,24 @@ print("clicking node", eid, "2")
 gui({ ["node_" .. eid .. "_2"] = true })
 local detail_fs = formspecs[#formspecs]
 assert(detail_fs:find("frank"), "detail shows the post-merge identifier")
-assert(detail_fs:find("ad_1_delete"), "detail offers per-identifier decisions")
+assert(detail_fs:find("gina"), "detail shows the second post-merge identifier")
+assert(detail_fs:find("ad_2_delete"), "detail offers a row per identifier")
 print("PASS: gui detail shows additions with decisions")
 gui({ ad_1_delete = true })
 -- the row's own label, not the button of the same name: "delete" appears in
 -- the formspec either way, so searching for that proves nothing
-assert(formspecs[#formspecs]:find("-> delete", 1, true), "the decision is shown on the row")
+assert(formspecs[#formspecs]:find("frank.-%-> delete"), "the decision is shown on the row")
+assert(formspecs[#formspecs]:find("gina.-%-> keep"), "and the other row keeps its own")
+gui({ ad_2_delete = true })
+assert(formspecs[#formspecs]:find("gina.-%-> delete"), "the second decision is shown too")
 assert(not formspecs[#formspecs]:find("-> keep", 1, true), "and the previous one is gone")
 gui({ rb = true })
-assert(formspecs[#formspecs]:find("Confirm rollback"), "confirm screen shown")
+local confirm_fs = formspecs[#formspecs]
+assert(confirm_fs:find("Confirm rollback"), "confirm screen shown")
+-- both identifiers ride on one "deleted:" line, which is the wrapping the
+-- screen does on the lists: it is what a single addition never exercised
+assert(confirm_fs:find("frank"), "confirm names the first identifier")
+assert(confirm_fs:find("gina"), "confirm names the second identifier")
 gui({ rb_confirm = true })
 local report_fs = formspecs[#formspecs]
 assert(report_fs:find("rolled back"), "report screen shown")

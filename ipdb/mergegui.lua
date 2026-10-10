@@ -829,8 +829,11 @@ local function load_value(state)
 	else
 		state.value_label = VALUE_MODE_LABEL[mode]
 	end
+	-- The lines are wrapped to the same budget the value screen draws them
+	-- with, so what arrives there is already the right width
+	local w = window_size(state)
 	local lines = {}
-	if append_hard_wrapped(lines, body, "  ", MAX_FULL_LINES, text_budget(state.win_w or 12)) then
+	if append_hard_wrapped(lines, body, "  ", MAX_FULL_LINES, text_budget(w)) then
 		lines[#lines + 1] = "… stopped at "..MAX_FULL_LINES.." lines"
 	end
 	state.value_lines = lines

@@ -1429,17 +1429,27 @@ do
 		gui({ storage = true })
 		local cells = select(4, formspecs[#formspecs]:match("table%[([^;]*);([^;]*);([^;]*);([^;]*);"))
 		assert(cells, "the storage table carries cells")
-		return cells, select(2, cells:gsub(",", ""))
+		-- and on to the value screen the row leads to: the table's first row is
+		-- the header, so the only stored row is the second one to the engine
+		gui({ ms = "CHG:2:1" })
+		gui({ ms_full = true })
+		local lines = formspecs[#formspecs]:match("textlist%[[^;]*;[^;]*;[^;]*;([^;]*);")
+		assert(lines, "the value screen carries its lines")
+		return cells, select(2, cells:gsub(",", "")), lines
 	end
-	local narrow, narrow_cells = cell_at({ max_formspec_size = { x = 12, y = 8 } })
-	local wide, wide_cells = cell_at({ max_formspec_size = { x = 24, y = 14 } })
+	local narrow, narrow_cells, narrow_lines = cell_at({ max_formspec_size = { x = 12, y = 8 } })
+	local wide, wide_cells, wide_lines = cell_at({ max_formspec_size = { x = 24, y = 14 } })
 	-- the value is 400 x's; at 12 wide the cell holds about 59 of them, and at
 	-- 24 about 139, so a run of 100 tells the two apart exactly
 	assert(wide:find(string.rep("x", 100), 1, true) and not narrow:find(string.rep("x", 100), 1, true),
 		string.format("both windows cut the value at the same place: %d and %d characters",
 			#narrow, #wide))
 	assert(narrow_cells == wide_cells, "and it is still the same table, one cell per column")
-	print("PASS: what a value is cut at follows the window")
+	-- the lines the value screen wraps it into follow the window as well: the
+	-- same run of 100 is on one line only when there is room for it
+	assert(wide_lines:find(string.rep("x", 100), 1, true) and not narrow_lines:find(string.rep("x", 100), 1, true),
+		"both windows wrap the value at the same place")
+	print("PASS: what a value is cut at, and wrapped at, follows the window")
 	window_info = nil
 end
 

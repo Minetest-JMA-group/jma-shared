@@ -826,11 +826,16 @@ local function storage_formspec(state)
 		y = y + 0.4
 	end
 	-- The picked row in full: the cell above is shortened, and a stored value
-	-- is often exactly the thing you opened this screen to read. The row is
-	-- read from the same 1-based index the table reports - it is the index of
-	-- the row that was clicked, and subtracting one here showed the row above
-	-- it (and nothing at all for the first row).
-	local pick = state.ms_sel and rows[state.ms_sel]
+	-- is often exactly the thing you opened this screen to read.
+	--
+	-- The reported row counts the header line, which is a row of the table
+	-- like any other: a table[]'s rows are exactly the cells handed to it, and
+	-- the line naming the columns is the first of them, built here in
+	-- storage_cells(). So the engine's row 1 is that header, row 2 is the
+	-- first row of data, and one has to come off to index this array with it.
+	-- Reading the reported row as-is looks like it fixes an off-by-one and
+	-- does the opposite: every pick shows the row below the one clicked.
+	local pick = state.ms_sel and rows[state.ms_sel - 1]
 	if pick then
 		-- The button sits on the header's own row and is placed from that row's
 		-- y, so it cannot drift out of step if anything above it moves. The
@@ -1239,8 +1244,8 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	-- The value screen: the picked row's value, with the two conversions that
 	-- make a stored blob readable. Only the display changes, never the row.
 	if fields.ms_full and state.ms_rows then
-		-- the same 1-based index the table reported, as in the panel below it
-		local row = state.ms_rows[state.ms_sel or 0]
+		-- the reported row, header line and all, as in the panel below it
+		local row = state.ms_rows[(state.ms_sel or 0) - 1]
 		if row then
 			state.value_row = row
 			state.value_mode = "raw"

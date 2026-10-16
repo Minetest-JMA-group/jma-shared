@@ -851,19 +851,22 @@ do
 	gui({ ms_filter = "" })
 	assert(select(1, stored(formspecs[#formspecs])) == 2, "clearing it brings the rows back")
 
-	-- The index a table reports counts its rows from one, so the panel under
-	-- the table and the whole-value button both show the row that was clicked.
-	-- Reading one index lower showed the row above it, and nothing at all for
-	-- the first row.
+	-- A table's rows are the cells it was handed, so the line naming the
+	-- columns is row 1 to the engine and the first row of data is row 2. The
+	-- panel under the table and the whole-value button both show the row that
+	-- was clicked; reading the reported row as an index into the data rows
+	-- instead shows the one below it.
 	gui({ ms = "CHG:1:1" })
-	local picked = formspecs[#formspecs]
-	assert(picked:find(";ms_full;", 1, true), "the first row can be picked")
-	assert(picked:find("mod demomod", 1, true), "and the panel names the row that was clicked")
+	assert(not formspecs[#formspecs]:find(";ms_full;", 1, true),
+		"the header line is a row of the table, but not a row with a value")
 	gui({ ms = "CHG:2:1" })
-	assert(formspecs[#formspecs]:find("mod longmod", 1, true), "picking the second names the second row")
+	local picked = formspecs[#formspecs]
+	assert(picked:find("mod demomod", 1, true), "the first row of data is the table's second row")
+	gui({ ms = "CHG:3:1" })
+	assert(formspecs[#formspecs]:find("mod longmod", 1, true), "and the second row of data is its third")
 	gui({ ms_full = true })
 	assert(formspecs[#formspecs]:find("needle-tail", 1, true),
-		"and the whole value shown is that same row's")
+		"the whole value shown belongs to that same row")
 	print("PASS: a picked row is the row that was clicked")
 	print("PASS: the storage filter matches stored values whole, and survives the screen")
 
@@ -1299,16 +1302,17 @@ do
 	-- a long value is shortened in its cell
 	assert(not v2:find("final-tail", 1, true), "the cell does not carry the whole value")
 
-	-- Picking a row shows it under the table. The index is the row the table
-	-- reports, counting from one: the first data row is row 1.
-	gui({ ms = "CHG:3:1" })
+	-- Picking a row shows it under the table. The reported row counts the
+	-- header line - a table's rows are the cells handed to it, header and all -
+	-- so the long-value row, the third of the data rows, is row 4.
+	gui({ ms = "CHG:4:1" })
 	assert(formspecs[#formspecs]:find("mod longmod", 1, true), "the long-value row is picked")
 	assert(formspecs[#formspecs]:find("final-tail", 1, true), "picking the row shows the whole value")
 
 	-- The value screen. A minified blob is one enormous token with nothing to
 	-- break on, so wrapping by word alone would shorten it away: the whole of
 	-- it has to be reachable.
-	gui({ ms = "CHG:2:1" })
+	gui({ ms = "CHG:3:1" })
 	assert(formspecs[#formspecs]:find("mod jsonmod", 1, true), "the minified row is picked")
 	assert(formspecs[#formspecs]:find(";ms_full;", 1, true), "the picked row offers the whole value")
 
@@ -1349,7 +1353,7 @@ do
 
 	-- and a value that is not JSON says so instead
 	gui({ value_back = true })
-	gui({ ms = "CHG:3:1" })
+	gui({ ms = "CHG:4:1" })
 	gui({ ms_full = true })
 	gui({ value_json = true })
 	local badfs = formspecs[#formspecs]
@@ -1358,13 +1362,13 @@ do
 
 	-- Serialization: reads a serialized value, and refuses anything else
 	gui({ value_back = true })
-	gui({ ms = "CHG:5:1" })
+	gui({ ms = "CHG:6:1" })
 	assert(formspecs[#formspecs]:find("mod sermod", 1, true), "the serialized row is picked")
 	gui({ ms_full = true })
 	gui({ value_ser = true })
 	assert(formspecs[#formspecs]:find("PRETTY of return {", 1, true), "a serialized value is read")
 	gui({ value_back = true })
-	gui({ ms = "CHG:2:1" })
+	gui({ ms = "CHG:3:1" })
 	gui({ ms_full = true })
 	gui({ value_ser = true })
 	assert(formspecs[#formspecs]:find("not a serialized value", 1, true), "JSON is not a serialized value")
@@ -1373,7 +1377,7 @@ do
 	-- to serialize would write back the very text the value was stored as,
 	-- leaving the button looking as though it had done nothing.
 	gui({ value_back = true })
-	gui({ ms = "CHG:6:1" })
+	gui({ ms = "CHG:7:1" })
 	assert(formspecs[#formspecs]:find("mod unjsonmod", 1, true), "the awkward row is picked")
 	gui({ ms_full = true })
 	gui({ value_ser = true })
@@ -1402,7 +1406,7 @@ do
 	assert(drop:find("all mods,", 1, true),
 		"its items are separated by real commas, not escaped ones: "..drop)
 	assert(not drop:find("\\,", 1, true), "and no separator is escaped")
-	gui({ ms = "CHG:2:1", ms_mod = "all mods" })
+	gui({ ms = "CHG:3:1", ms_mod = "all mods" })
 	assert(formspecs[#formspecs]:find("mod jsonmod", 1, true),
 		"a row pick is honoured even with the dropdown's value along for the ride")
 	assert(formspecs[#formspecs]:find(";ms_full;", 1, true), "and still offers the whole value")
@@ -1686,9 +1690,9 @@ do
 		gui({ storage = true })
 		local cells = select(4, formspecs[#formspecs]:match("table%[([^;]*);([^;]*);([^;]*);([^;]*);"))
 		assert(cells, "the storage table carries cells")
-		-- and on to the value screen the row leads to: headers are not rows to
-		-- the engine, so the one stored row is row 1
-		gui({ ms = "CHG:1:1" })
+		-- and on to the value screen the row leads to: the table's first row is
+		-- the header, so the only stored row is the second one to the engine
+		gui({ ms = "CHG:2:1" })
 		gui({ ms_full = true })
 		local lines = formspecs[#formspecs]:match("textlist%[[^;]*;[^;]*;[^;]*;([^;]*);")
 		assert(lines, "the value screen carries its lines")

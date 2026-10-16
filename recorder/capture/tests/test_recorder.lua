@@ -366,6 +366,8 @@ local leaves = events_of("leave")
 check(#leaves == 2, "leaving is recorded")
 check(leaves[1].data == nil, "an ordinary quit carries no data: " .. tostring(leaves[1].data))
 check(leaves[2].data == '{"timed_out":true}', "a timeout says so: " .. tostring(leaves[2].data))
+check(leaves[1].pos_x == 10 and leaves[1].pos_z == 10,
+	"a leave says where the player was when they went: " .. tostring(leaves[1].pos_x))
 check(#events_of("die") == 1 and #events_of("respawn") == 1, "dying and coming back are recorded")
 check(events_of("die")[1].data:find('"object":"Alice"') ~= nil,
 	"the reason for a death names the player responsible, not an ObjectRef")
@@ -595,8 +597,16 @@ check(recorder.start("broken_player") == nil, "a recording starts")
 local broken_path = recorder.get_recording_path()
 mock.steps(3, 0.1)
 check(recorder.is_recording(), "it does not end over one unreadable player")
+-- An object that cannot be read is one thing; a player leaving is another, and
+-- the leave has to be recorded whether or not the engine still knows where the
+-- player was.
+mock.fire("register_on_leaveplayer", broken, false)
 check(recorder.stop() == nil, "it stops normally")
 db = open_recording(broken_path)
+check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'leave'") == 1,
+	"a player that cannot be read still leaves the recording")
+check(value(db, "SELECT pos_x FROM Events WHERE type = 'leave'") == nil,
+	"and is recorded with no position rather than with no event")
 check(value(db, ("SELECT COUNT(*) FROM Movement JOIN Players ON Players.id = Movement.player_id " ..
 	"WHERE Players.name = 'Alice' AND Movement.tick = 1")) == 1, "the other players are still recorded")
 check(value(db, ("SELECT COUNT(*) FROM Movement JOIN Players ON Players.id = Movement.player_id " ..
@@ -632,6 +642,12 @@ for i = logged_before + 1, #mock.logs do
 	if mock.logs[i].message:find("cannot write", 1, true) then complaint = mock.logs[i].message end
 end
 check(complaint ~= nil, "the failure is logged: " .. tostring(complaint))
+-- A run of failed commits is the one thing an operator looking at the status
+-- has to be told about, because it is the difference between a recording that
+-- is whole and one whose last seconds are missing.
+local status_ok, status_message = mock.chatcommands.recorder.func("someone", "status")
+check(status_ok and status_message:find("failed write", 1, true) ~= nil,
+	"the status says the writes are failing: " .. tostring(status_message))
 blocker:exec("ROLLBACK")
 blocker:close()
 
@@ -646,6 +662,44 @@ local bob_rows = value(db, ("SELECT COUNT(*) FROM Movement JOIN Players ON Playe
 	"WHERE Players.name = 'Bob' AND Movement.tick = %d"):format(errors[1].tick + 1))
 check(bob_rows == 1, "every player is written again after a gap, so a reader is not left guessing")
 db:close()
+mock.settings["recorder.flush_interval"] = nil
+
+----------------------------------------------------------------------------
+print("=== giving up on a recording that cannot be written ===")
+----------------------------------------------------------------------------
+
+-- A database that stays unavailable is no reason to buffer rows until the
+-- server runs out of memory. Ten commits in a row that fail end the recording,
+-- and the log says so - the recording itself cannot, its rows being exactly
+-- what will not go in.
+mock.settings["recorder.flush_interval"] = "0.01"  -- commit on every step
+check(recorder.start("doomed") == nil, "a recording starts")
+local doomed_path = recorder.get_recording_path()
+-- One step before the lock goes on, so that the opening state - the world time,
+-- the joins, a Players row each - is written while the database still accepts
+-- writes. Otherwise every later step pays the busy timeout again for the player
+-- row it cannot write, and this test spends half a minute saying what it could
+-- say in four seconds.
+mock.step(0.1)
+local doomed_blocker = sqlite.open(doomed_path)
+check(doomed_blocker:exec("BEGIN IMMEDIATE") == sqlite.OK, "another connection takes the write lock")
+local before_giving_up = #mock.logs
+for i = 1, 12 do
+	-- Something has to be buffered each step: a commit with nothing to write
+	-- succeeds without touching the database, and would clear the count.
+	alice.pos.x = 100 + i
+	mock.step(0.1)
+end
+check(recorder.is_recording() == false, "the recording gives up instead of buffering for ever")
+local gave_up = false
+for i = before_giving_up + 1, #mock.logs do
+	if mock.logs[i].message and mock.logs[i].message:find("giving up on the recording", 1, true) then
+		gave_up = true
+	end
+end
+check(gave_up, "and the log says why")
+doomed_blocker:exec("ROLLBACK")
+doomed_blocker:close()
 mock.settings["recorder.flush_interval"] = nil
 
 ----------------------------------------------------------------------------
@@ -701,7 +755,31 @@ check(objected, "and the setting is reported as ignored")
 mock.settings["recorder.disabled_events"] = nil
 mock.settings["recorder.flush_interval"] = nil
 
+----------------------------------------------------------------------------
+print("=== where a recording is written ===")
+----------------------------------------------------------------------------
+
+-- A relative directory belongs to the world it is a recording of. The working
+-- directory is a property of how the server was started - a systemd unit, the
+-- shell somebody ran it from - and a recording that followed it around would
+-- land somewhere different for no reason a reader could see.
+mock.settings["recorder.directory"] = "myrecordings"
+check(recorder.start("relative") == nil, "a recording with a directory of its own starts")
+check(recorder.get_recording_path():find(world .. "/myrecordings/", 1, true) == 1,
+	"a relative directory is taken from the world directory: " .. tostring(recorder.get_recording_path()))
+check(recorder.stop() == nil, "it stops")
+
+local absolute_dir = tmpbase .. "/recorder_tests/absolute"
+mock.settings["recorder.directory"] = absolute_dir
+check(recorder.start("absolute") == nil, "a recording with an absolute directory starts")
+check(recorder.get_recording_path():find(absolute_dir .. "/", 1, true) == 1,
+	"an absolute directory is used as it is: " .. tostring(recorder.get_recording_path()))
+check(recorder.stop() == nil, "it stops")
+mock.settings["recorder.directory"] = nil
+
+----------------------------------------------------------------------------
 -- The chat command
+----------------------------------------------------------------------------
 local command = mock.chatcommands.recorder
 check(command ~= nil, "the /recorder command is registered")
 check(command.privs.server == true, "and needs the server privilege")

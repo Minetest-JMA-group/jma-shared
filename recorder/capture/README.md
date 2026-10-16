@@ -1,11 +1,12 @@
-# recorder – record what happens on the server, in order, into SQLite
+# capture – record what happens on the server, in order, into SQLite
 
-recorder writes down what players do and where they are: every action that Luanti
-offers a callback for (digging, placing, punching, talking, crafting, dying, ...)
-and one sample per player per server step of the kinematic state that goes with it
-(position, orientation, velocity, derived acceleration, pressed keys). All of it
-lands in a single SQLite file per recording, in the order in which it happened, so
-the recording can later be replayed, analysed, or just read with the `sqlite3`
+capture is the recording half of the `recorder` modpack. It writes down what
+players do and where they are: every action that Luanti offers a callback for
+(digging, placing, punching, talking, crafting, dying, ...) and one sample per
+player per server step of the kinematic state that goes with it (position,
+orientation, velocity, derived acceleration, pressed keys). All of it lands in a
+single SQLite file per recording, in the order in which it happened, so the
+recording can later be replayed, analysed, or just read with the `sqlite3`
 shell.
 
 ## Features
@@ -35,9 +36,9 @@ shell.
 
 ## Installation
 
-1. Place the mod folder in your `mods/` directory.
+1. Place the modpack folder in your `mods/` directory.
 2. Ensure `lsqlite3` is available (e.g. `luarocks install lsqlite3`).
-3. Add `"recorder"` to `secure.trusted_mods` in `minetest.conf`.
+3. Add `"capture"` to `secure.trusted_mods` in `minetest.conf`.
 4. Create `world/recordings/` if you want it somewhere the mod cannot create
    itself (it creates the directory if it can).
 
@@ -89,7 +90,7 @@ Settings are read when a recording starts, so a change applies to the next one.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `recorder.directory` | empty | Where recordings are written. Empty means `world/recordings/`. |
+| `recorder.directory` | empty | Where recordings are written. A relative path is taken from the world directory, an absolute path as it is. Empty means `world/recordings/`. |
 | `recorder.flush_interval` | `2.0` | Seconds of server time between commits. |
 | `recorder.max_buffered` | `20000` | Rows buffered before a commit is forced early. `0` leaves the timing to `flush_interval` alone. |
 | `recorder.max_duration` | `0` | Stop the recording after this many seconds. `0` is no limit. |
@@ -171,7 +172,7 @@ SQLite's JSON functions can dig into it, e.g.
 | `recording_stop` | – | – | – | `reason` (`api`, `shutdown`, `limit_duration`, `limit_size`, `write_error`) |
 | `write_error` | – | – | – | `dropped_rows`, `message` – a gap in the recording, see below |
 | `join` | player | – | `pos`, `item` (wielded) | `at_start`, `last_login`, `hp`, `breath`, `pitch`, `yaw`, `inventory` |
-| `leave` | player | – | – | `timed_out` |
+| `leave` | player | – | `pos` (where they were, if the engine still answers for them) | `timed_out` |
 | `die` | player | – | `pos` | `reason` |
 | `respawn` | player | – | `pos` (before being moved) | – |
 | `hp_change` | player | – | `pos` | `amount`, `reason` |
@@ -318,7 +319,7 @@ what each callback records, the settings and the failure path. It needs a Lua
 interpreter (luajit preferred) with `lsqlite3`:
 
 ```sh
-cd recorder/tests && ./run_tests.sh
+cd recorder/capture/tests && ./run_tests.sh
 ```
 
 ## License

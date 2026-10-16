@@ -76,7 +76,6 @@ local state = {
 	max_duration = 0,    -- server seconds; 0 = no limit
 	max_size = 0,        -- bytes; 0 = no limit
 	disabled = {},       -- event types not to record
-	failures = 0,        -- failed commits in a row
 	complaints = {},     -- what has already been reported, so it is said once
 	player_errors = {},  -- players whose row could not be written (said once)
 	troubles = {},       -- what to write down about them, for the file
@@ -495,7 +494,19 @@ end
 local function on_leave(player, timed_out)
 	local name = player_name(player)
 	if not name then return end
-	record_event({ type = "leave", subject = name, data = { timed_out = timed_out or nil } })
+	-- Where the player was when they left is what a reader following their
+	-- trail has to end on; without it the trail stops at their last sample,
+	-- which can be some way back - a fall or a kill in progress. The engine is
+	-- free to have let go of the object by now, and the leave itself is worth
+	-- more than the position, so a player that cannot be read is recorded
+	-- without one.
+	local read, pos = pcall(function() return player:get_pos() end)
+	record_event({
+		type = "leave",
+		subject = name,
+		pos = read and pos or nil,
+		data = { timed_out = timed_out or nil },
+	})
 	local pid = dbmanager.player_id(name)
 	if pid then
 		-- Whatever the player does after rejoining has no relation to these,
@@ -511,10 +522,20 @@ end
 -- The recording file
 ----------------------------------------------------------------------------
 
+-- Where recordings are written. A directory named in the setting is taken
+-- relative to the world unless it is an absolute path: the working directory is
+-- a property of how the server was started - a systemd unit, the shell somebody
+-- ran it from - and a recording has no business landing somewhere else because
+-- of it.
 local function recordings_dir()
 	local dir = core.settings:get("recorder.directory")
-	if dir and dir ~= "" then return dir end
-	return core.get_worldpath() .. "/recordings"
+	if not dir or dir == "" then
+		return core.get_worldpath() .. "/recordings"
+	end
+	if dir:sub(1, 1) == "/" then
+		return dir
+	end
+	return core.get_worldpath() .. "/" .. dir
 end
 
 -- A recording name ends up in a file name, so anything that is not plainly a
@@ -596,11 +617,9 @@ local function maybe_flush()
 	state.last_flush = state.elapsed
 	local ok, err, lost = dbmanager.flush()
 	if ok then
-		state.failures = 0
 		write_troubles()
 		return
 	end
-	state.failures = state.failures + 1
 	log_error(string.format("cannot write %d rows to %s: %s", lost or 0, tostring(state.path), tostring(err)))
 	-- The rows are gone, so what was last written is no longer what a reader
 	-- would carry forward: every player's next sample is written again rather
@@ -611,7 +630,10 @@ local function maybe_flush()
 		type = "write_error",
 		data = { dropped_rows = lost, message = err },
 	})
-	if state.failures >= MAX_FAILURES then
+	-- The database counts the failed commits itself, and clears the count on the
+	-- first one that goes through, so there is one answer to "is this recording
+	-- in trouble" rather than two that can drift apart.
+	if dbmanager.stats().failed >= MAX_FAILURES then
 		log_error("giving up on the recording after repeated write failures")
 		stop_recording("write_error")
 	end
@@ -666,7 +688,6 @@ recorder.start = function(record_name)
 	state.tick = 0
 	state.elapsed = 0
 	state.last_flush = 0
-	state.failures = 0
 	state.complaints, state.player_errors = {}, {}
 	state.troubles, state.troubles_dirty = {}, false
 	state.prev, state.written, state.wield, state.joined = {}, {}, {}, {}
@@ -731,7 +752,6 @@ recorder.stop = function(reason)
 	end
 	state.name, state.path = nil, nil
 	state.prev, state.written, state.wield, state.joined = {}, {}, {}, {}
-	state.failures = 0
 	state.pending_start = false
 	if ok and closed then return nil end
 	return tostring(err)
@@ -1086,6 +1106,13 @@ local function status_string()
 		return "No recording in progress."
 	end
 	local stats = dbmanager.stats()
+	-- Commits that are failing right now are the difference between a recording
+	-- that is whole and one whose last seconds are missing, so they are said out
+	-- loud - and not said at all when there are none, which is the usual state.
+	local failing = ""
+	if stats.failed > 0 then
+		failing = string.format(", %d failed write%s in a row", stats.failed, stats.failed == 1 and "" or "s")
+	end
 	local limit = ""
 	if state.max_duration > 0 then
 		limit = limit .. string.format(", stops at %d s", math.floor(state.max_duration))
@@ -1095,10 +1122,10 @@ local function status_string()
 	end
 	return string.format(
 		"Recording '%s' to %s: %d s, tick %d, %d events, %d movement rows, " ..
-		"%d buffered, %d dropped, %.1f MB on disk%s",
+		"%d buffered, %d dropped%s, %.1f MB on disk%s",
 		state.name, state.path, math.floor(state.elapsed), state.tick,
 		stats.events, stats.movement, stats.buffered, stats.dropped,
-		recording_size(state.path) / (1024 * 1024), limit)
+		failing, recording_size(state.path) / (1024 * 1024), limit)
 end
 
 core.register_chatcommand("recorder", {

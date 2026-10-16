@@ -24,7 +24,7 @@ local sqlite = require("lsqlite3")
 
 local logs = {}
 core = {
-	get_current_modname = function() return "capture" end,
+	get_current_modname = function() return "recorder_capture" end,
 	get_modpath = function() return modpath end,
 	get_worldpath = function() return world end,
 	log = function(level, msg)

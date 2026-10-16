@@ -1,5 +1,5 @@
 ---@meta
--- Type declarations for the capture mod, for editors that read LuaLS
+-- Type declarations for the recorder_capture mod, for editors that read LuaLS
 -- annotations. This file is not loaded by the engine.
 
 ---@class RecorderEventFields

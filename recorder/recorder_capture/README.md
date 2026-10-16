@@ -1,9 +1,9 @@
-# capture – record what happens on the server, in order, into SQLite
+# recorder_capture – record what happens on the server, in order, into SQLite
 
-capture is the recording half of the `recorder` modpack. It writes down what
-players do and where they are: every action that Luanti offers a callback for
-(digging, placing, punching, talking, crafting, dying, ...) and one sample per
-player per server step of the kinematic state that goes with it (position,
+recorder_capture is the recording half of the `recorder` modpack. It writes down
+what players do and where they are: every action that Luanti offers a callback
+for (digging, placing, punching, talking, crafting, dying, ...) and one sample
+per player per server step of the kinematic state that goes with it (position,
 orientation, velocity, derived acceleration, pressed keys). All of it lands in a
 single SQLite file per recording, in the order in which it happened, so the
 recording can later be replayed, analysed, or just read with the `sqlite3`
@@ -38,7 +38,7 @@ shell.
 
 1. Place the modpack folder in your `mods/` directory.
 2. Ensure `lsqlite3` is available (e.g. `luarocks install lsqlite3`).
-3. Add `"capture"` to `secure.trusted_mods` in `minetest.conf`.
+3. Add `"recorder_capture"` to `secure.trusted_mods` in `minetest.conf`.
 4. Create `world/recordings/` if you want it somewhere the mod cannot create
    itself (it creates the directory if it can).
 
@@ -319,7 +319,7 @@ what each callback records, the settings and the failure path. It needs a Lua
 interpreter (luajit preferred) with `lsqlite3`:
 
 ```sh
-cd recorder/capture/tests && ./run_tests.sh
+cd recorder/recorder_capture/tests && ./run_tests.sh
 ```
 
 ## License

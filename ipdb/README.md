@@ -69,7 +69,7 @@ so the two spellings never collide.
 | `/ipdb merge <id>` | Show the details of a merge event and whether it can be rolled back. |
 | `/ipdb tree <name\|IP\|#entryid> [depth]` | Show the merge history of an entry as a binary tree (default depth 4, max 20). |
 | `/ipdb unmerge <id> [keep\|forget]` | Roll back a merge event. Identifiers created after the merge are kept unless `forget` is given. |
-| `/ipdb merge_gui [auto\|default\|<W>x<H>]` | Open the merge history GUI (tree view, detail view, rollback with per-identifier decisions, and the storage an entry held at any point in its history). The window is sized to the client's screen; `default` pins it to 12x8 and `auto` goes back to the screen. |
+| `/ipdb merge_gui [auto\|default\|<W>x<H>]` | Open the merge history GUI (tree view, detail view, rollback with per-identifier decisions, and the storage an entry held at any point in its history). Both lists carry a search bar that shows only the rows whose value contains the typed text, and the identifiers created after a merge can be decided one by one or all at once. The window is sized to the client's screen; `default` pins it to 12x8 and `auto` goes back to the screen. |
 
 ### Merge history and rollback
 Every merge event is logged together with snapshots of the absorbed entry's
@@ -85,8 +85,8 @@ still belong to the original destination entry; otherwise the rollback is
 refused and the later merges must be rolled back first. Identifiers that were
 created after the merge did not exist in the pre-merge state, so their
 ownership is ambiguous - the GUI offers a decision per identifier (keep,
-delete, or move to the recreated entry), the chat command takes a single
-`keep`/`forget` flag. The destination's modstorage of the merged mods is
+delete, or move to the recreated entry) and one press that applies the same
+decision to all of them, the chat command takes a single `keep`/`forget` flag. The destination's modstorage of the merged mods is
 replaced by the logged pre-merge snapshot; post-merge writes to it are lost.
 
 ### Migration Commands

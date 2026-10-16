@@ -706,6 +706,223 @@ do
 	assert(max <= BUDGET, string.format("detail line is %d chars, budget is %d: %s", max, BUDGET, worst))
 end
 
+-- ── the value filters ────────────────────────────────────────────────────
+-- Both lists carry one: the identifier table of the detail screen matches on
+-- the name or the address, the storage table on the stored value. Only the
+-- value column is matched - a timestamp or a mod name must not bring a row in
+-- - and a stored value is matched whole, not as far as its cell shows.
+do
+	local fe = dbmanager.new_entry()
+	dbmanager.add_name(fe, "Steve-gamer")
+	dbmanager.add_name(fe, "alex")
+	dbmanager.add_ip(fe, "203.0.113.7")
+	dbmanager.add_ip(fe, "47.122.68.14")
+	-- long enough that its cell shows only the beginning of it
+	dbmanager.insert_into_modstorage(fe, "longmod", "blob",
+		"first-part " .. string.rep("pad ", 40) .. "needle-tail")
+	dbmanager.insert_into_modstorage(fe, "demomod", "greeting", "hello filter world")
+
+	cmd.func("tester", "merge_gui")
+	gui({ go = true, root = "#"..fe, depth = "1" })
+	gui({ ["node_"..fe.."_0"] = true })
+
+	-- the table's cell data is one string, so a row is four cells after the
+	-- four headers
+	local function cells_of(fs)
+		return select(4, fs:match("table%[([^;]*);([^;]*);([^;]*);([^;]*);"))
+	end
+	-- one comma between each pair of cells, and the four headers are not rows
+	local function rows_of(cells)
+		return (select(2, cells:gsub(",", "")) - 3) / 4, cells
+	end
+	local function ids(fs)
+		return rows_of(cells_of(fs))
+	end
+
+	-- the screen the node click produced: nothing filtered yet
+	local n, cells = ids(formspecs[#formspecs])
+	assert(n == 4, "the detail list starts with every row, got "..n)
+
+	-- case is folded, so a typed "steve" finds "Steve-gamer"
+	gui({ filter = "steve" })
+	n, cells = ids(formspecs[#formspecs])
+	assert(n == 1, "the filter narrows the table to what matches, got "..n)
+	assert(cells:find("Steve-gamer", 1, true), "and it is the matching row that is left")
+	assert(not cells:find("alex", 1, true), "with the others gone")
+
+	-- a typed "." is a full stop, not a pattern character: as a Lua pattern,
+	-- "4.122" would match the address 47.122.68.14
+	gui({ filter = "4.122" })
+	assert(select(1, ids(formspecs[#formspecs])) == 0, "the search is plain text, not a pattern")
+	assert(formspecs[#formspecs]:find("No identifier matches the filter.", 1, true),
+		"and the screen says the filter is what emptied it")
+
+	-- the timestamps are not searched
+	gui({ filter = "203.0.113" })
+	local created = select(2, ids(formspecs[#formspecs])):match("[%d][%d][%d][%d]%-")
+	assert(created, "a row carries a created_at")
+	gui({ filter = created:sub(1, 4) })
+	assert(select(1, ids(formspecs[#formspecs])) == 0, "a fragment of a timestamp matches nothing")
+	print("PASS: the identifier filter matches values, and only values")
+
+	-- The field's value rides along with every submission, so a sort press
+	-- made while it holds text has to apply both rather than lose one of them.
+	gui({ filter = "203.0.113", sort_created = true })
+	local both = formspecs[#formspecs]
+	assert(select(1, ids(both)) == 1, "the filter applies with the sort press")
+	assert(both:find("Created ▼", 1, true), "and so does the sort")
+
+	-- Enter in the filter re-filters the list. It must not submit a tree - this
+	-- screen has no root field to submit - and must not close the window, even
+	-- for a client that reports quit along with the Enter.
+	closed_form = nil
+	gui({ key_enter = "true", key_enter_field = "filter", quit = "true", filter = "alex" })
+	local enterfs = formspecs[#formspecs]
+	assert(closed_form == nil, "Enter in the filter does not close the window")
+	assert(enterfs:find("Entry #"..fe, 1, true), "and the detail screen stays up")
+	assert(not enterfs:find("node_", 1, true), "rather than a tree being shown")
+	assert(select(1, ids(enterfs)) == 1, "with the filter it carried applied")
+
+	gui({ filter = "" })
+	assert(select(1, ids(formspecs[#formspecs])) == 4, "clearing the filter brings every row back")
+	print("PASS: Enter in the filter re-filters instead of submitting or closing")
+
+	-- ── the same over the storage table ──
+	gui({ storage = true })
+	local function stored(fs)
+		return rows_of(cells_of(fs))
+	end
+	assert(select(1, stored(formspecs[#formspecs])) == 2, "both stored rows are listed to begin with")
+
+	gui({ ms_filter = "filter world" })
+	local sfs = formspecs[#formspecs]
+	local sn, scells = stored(sfs)
+	assert(sn == 1, "the value filter narrows the storage table, got "..sn)
+	assert(scells:find("greeting", 1, true), "to the row whose value matches")
+	assert(not scells:find("longmod", 1, true), "and not the others")
+
+	-- a mod name is in the table, but not in the value column
+	gui({ ms_filter = "longmod" })
+	assert(select(1, stored(formspecs[#formspecs])) == 0, "only values are searched, not mod names")
+	assert(formspecs[#formspecs]:find("No storage value matches the filter.", 1, true),
+		"and the note names the filter, not the entry")
+
+	-- the cell shows only the beginning of a long value; the filter sees all of
+	-- it, which is the point of searching for something you only remember the
+	-- end of
+	gui({ ms_filter = "needle-tail" })
+	sn, scells = stored(formspecs[#formspecs])
+	assert(sn == 1, "a value is matched whole, got "..sn)
+	assert(scells:find("longmod", 1, true), "so the long value's row is found")
+	assert(not scells:find("needle-tail", 1, true), "even though its cell stops short of the match")
+
+	-- The dropdown's value rides along with every submission as well, so one
+	-- press can carry both a new pattern and a new mod; neither half of it may
+	-- be dropped. The dropdown's own index is what tells the mod changed even
+	-- where both changes leave the same row on screen.
+	gui({ ms_filter = "hello", ms_mod = "demomod" })
+	local bothfs = formspecs[#formspecs]
+	sn, scells = stored(bothfs)
+	assert(sn == 1 and scells:find("hello filter world", 1, true), "the filter and the mod both apply")
+	local drop = bothfs:match("dropdown%[[^%]]*%]")
+	assert(drop and drop:match(";(%d+)%]$") == "2", "and the dropdown moved to the chosen mod: "..tostring(drop))
+	gui({ ms_filter = "hello filter world", ms_mod = "longmod" })
+	sn, scells = stored(formspecs[#formspecs])
+	assert(sn == 0, "a filter that does not match the chosen mod empties the table, got "..sn)
+	assert(formspecs[#formspecs]:find("No storage value matches the filter.", 1, true),
+		"and says so rather than blaming the entry")
+
+	-- the filter survives a trip back to the detail screen: it belongs to the
+	-- storage screen, not to one visit of it
+	gui({ ms_back = true })
+	gui({ storage = true })
+	assert(formspecs[#formspecs]:find(";ms_filter;;hello filter world]", 1, true),
+		"the filter field still holds the pattern")
+	assert(select(1, stored(formspecs[#formspecs])) == 0, "and the table is filtered still")
+
+	-- Enter in this one re-filters too
+	closed_form = nil
+	gui({ key_enter = "true", key_enter_field = "ms_filter", quit = "true",
+		ms_filter = "nothing", ms_mod = "all mods" })
+	local s_enter = formspecs[#formspecs]
+	assert(closed_form == nil, "Enter in the storage filter does not close the window")
+	assert(s_enter:find("Storage of entry #"..fe, 1, true), "and the storage screen stays up")
+	assert(select(1, stored(s_enter)) == 0, "with the filter it carried applied")
+	gui({ ms_filter = "" })
+	assert(select(1, stored(formspecs[#formspecs])) == 2, "clearing it brings the rows back")
+
+	-- The index a table reports counts its rows from one, so the panel under
+	-- the table and the whole-value button both show the row that was clicked.
+	-- Reading one index lower showed the row above it, and nothing at all for
+	-- the first row.
+	gui({ ms = "CHG:1:1" })
+	local picked = formspecs[#formspecs]
+	assert(picked:find(";ms_full;", 1, true), "the first row can be picked")
+	assert(picked:find("mod demomod", 1, true), "and the panel names the row that was clicked")
+	gui({ ms = "CHG:2:1" })
+	assert(formspecs[#formspecs]:find("mod longmod", 1, true), "picking the second names the second row")
+	gui({ ms_full = true })
+	assert(formspecs[#formspecs]:find("needle-tail", 1, true),
+		"and the whole value shown is that same row's")
+	print("PASS: a picked row is the row that was clicked")
+	print("PASS: the storage filter matches stored values whole, and survives the screen")
+
+	-- Both bars stay inside the window they are drawn in, at the width this
+	-- screen was designed for and at wider ones, and the detail screen's sits
+	-- above the table rather than over it. Where the window has a gap between
+	-- the sort buttons and Storage the bar goes in it; where it does not, the
+	-- bar takes a row of its own and the table starts a row lower.
+	for _, report in ipairs({ { max_formspec_size = { x = 12, y = 8 } },
+	                          { max_formspec_size = { x = 15, y = 9 } },
+	                          { max_formspec_size = { x = 20, y = 12 } } }) do
+		local w = report.max_formspec_size.x
+		window_info = report
+		cmd.func("tester", "merge_gui")
+		gui({ go = true, root = "#"..fe, depth = "1" })
+		gui({ ["node_"..fe.."_0"] = true })
+		local detail = formspecs[#formspecs]
+		local fx, fy, fw, fh = detail:match("field%[([%d%.]+),([%d%.]+);([%d%.]+),([%d%.]+);filter;")
+		assert(fx, "the detail screen has a value filter")
+		fx, fy, fw, fh = tonumber(fx), tonumber(fy), tonumber(fw), tonumber(fh)
+		assert(fx + fw <= w - 0.4 + 0.001,
+			string.format("the filter field ends at %.2f in a %d wide window", fx + fw, w))
+		local ty = tonumber(select(2, detail:match("table%[([%d%.]+),([%d%.]+);")))
+		assert(ty, "the detail screen has its table")
+		assert(fy + fh <= ty + 0.001,
+			string.format("the filter row reaches %.2f, over the table at %.2f", fy + fh, ty))
+
+		-- the magnifier is drawn in front of the field, inside its band
+		local ix, iy, tex = detail:match("image%[([%d%.]+),([%d%.]+);0%.45,0%.45;([^%]]+)%]")
+		assert(ix, "the search bar carries a magnifier")
+		assert(tonumber(ix) < fx and tonumber(iy) >= fy and tonumber(iy) + 0.45 <= fy + fh + 0.001,
+			"drawn in front of the field rather than over it")
+		-- a texture the mod does not ship is a logged error and a hole in the
+		-- layout on the client, with nothing here to notice it
+		local f = io.open(modpath.."/textures/"..tex, "rb")
+		assert(f, "the magnifier texture ships with the mod: "..tostring(tex))
+		f:close()
+
+		if w >= 15 then
+			-- the gap between the sort buttons (which end at 8.0) and Storage
+			assert(fx > 8.0 and fx + fw <= w - 3.2 + 0.001,
+				string.format("in a %d wide window the bar is in the gap, at %.2f", w, fx))
+			assert(math.abs(ty - 1.3) < 0.001, "and the table keeps its height")
+		else
+			assert(fx < 8.0 and fy >= 1.25, "with no gap the bar drops to a row of its own")
+			assert(ty > 1.9, "and the table starts below it")
+		end
+
+		gui({ storage = true })
+		local sx, _, sw = formspecs[#formspecs]:match("field%[([%d%.]+),([%d%.]+);([%d%.]+),([%d%.]+);ms_filter;")
+		assert(sx, "the storage screen has a value filter")
+		assert(tonumber(sx) + tonumber(sw) <= w - 0.4 + 0.001,
+			string.format("the storage filter ends at %.2f in a %d wide window", tonumber(sx) + tonumber(sw), w))
+		assert(formspecs[#formspecs]:find("image%[[%d%.]+,[%d%.]+;0%.45,0%.45;", 1), "with its magnifier too")
+	end
+	window_info = nil
+	print("PASS: the search bars fit the window and take the room a window has")
+end
+
 -- ── /ipdb list: sorted, one identifier per row, both timestamps ──────────
 do
 	local le = dbmanager.new_entry()
@@ -1082,15 +1299,16 @@ do
 	-- a long value is shortened in its cell
 	assert(not v2:find("final-tail", 1, true), "the cell does not carry the whole value")
 
-	-- picking a row shows it under the table
-	gui({ ms = "CHG:4:1" })
+	-- Picking a row shows it under the table. The index is the row the table
+	-- reports, counting from one: the first data row is row 1.
+	gui({ ms = "CHG:3:1" })
 	assert(formspecs[#formspecs]:find("mod longmod", 1, true), "the long-value row is picked")
 	assert(formspecs[#formspecs]:find("final-tail", 1, true), "picking the row shows the whole value")
 
 	-- The value screen. A minified blob is one enormous token with nothing to
 	-- break on, so wrapping by word alone would shorten it away: the whole of
 	-- it has to be reachable.
-	gui({ ms = "CHG:3:1" })
+	gui({ ms = "CHG:2:1" })
 	assert(formspecs[#formspecs]:find("mod jsonmod", 1, true), "the minified row is picked")
 	assert(formspecs[#formspecs]:find(";ms_full;", 1, true), "the picked row offers the whole value")
 
@@ -1131,7 +1349,7 @@ do
 
 	-- and a value that is not JSON says so instead
 	gui({ value_back = true })
-	gui({ ms = "CHG:4:1" })
+	gui({ ms = "CHG:3:1" })
 	gui({ ms_full = true })
 	gui({ value_json = true })
 	local badfs = formspecs[#formspecs]
@@ -1140,13 +1358,13 @@ do
 
 	-- Serialization: reads a serialized value, and refuses anything else
 	gui({ value_back = true })
-	gui({ ms = "CHG:6:1" })
+	gui({ ms = "CHG:5:1" })
 	assert(formspecs[#formspecs]:find("mod sermod", 1, true), "the serialized row is picked")
 	gui({ ms_full = true })
 	gui({ value_ser = true })
 	assert(formspecs[#formspecs]:find("PRETTY of return {", 1, true), "a serialized value is read")
 	gui({ value_back = true })
-	gui({ ms = "CHG:3:1" })
+	gui({ ms = "CHG:2:1" })
 	gui({ ms_full = true })
 	gui({ value_ser = true })
 	assert(formspecs[#formspecs]:find("not a serialized value", 1, true), "JSON is not a serialized value")
@@ -1155,7 +1373,7 @@ do
 	-- to serialize would write back the very text the value was stored as,
 	-- leaving the button looking as though it had done nothing.
 	gui({ value_back = true })
-	gui({ ms = "CHG:7:1" })
+	gui({ ms = "CHG:6:1" })
 	assert(formspecs[#formspecs]:find("mod unjsonmod", 1, true), "the awkward row is picked")
 	gui({ ms_full = true })
 	gui({ value_ser = true })
@@ -1184,7 +1402,7 @@ do
 	assert(drop:find("all mods,", 1, true),
 		"its items are separated by real commas, not escaped ones: "..drop)
 	assert(not drop:find("\\,", 1, true), "and no separator is escaped")
-	gui({ ms = "CHG:3:1", ms_mod = "all mods" })
+	gui({ ms = "CHG:2:1", ms_mod = "all mods" })
 	assert(formspecs[#formspecs]:find("mod jsonmod", 1, true),
 		"a row pick is honoured even with the dropdown's value along for the ride")
 	assert(formspecs[#formspecs]:find(";ms_full;", 1, true), "and still offers the whole value")
@@ -1341,8 +1559,47 @@ do
 	end
 	assert(rightmost > 0 and rightmost <= list_w, string.format(
 		"the decision buttons reach %.2f in a list %.2f wide", rightmost, list_w))
+
+	-- The row of buttons over the list decides every identifier at once: forty
+	-- of them getting the same answer should not take forty presses. Each row
+	-- shows its decision, so the count of them says what the batch did.
+	local function decisions(fs, action)
+		local n = 0
+		for _ in fs:gmatch(" %-> "..action) do n = n + 1 end
+		return n
+	end
+	gui({ ad_all_delete = true })
+	local alldel = formspecs[#formspecs]
+	assert(decisions(alldel, "delete") == 40, "every row deleted, got "..decisions(alldel, "delete"))
+	assert(decisions(alldel, "move") == 0 and decisions(alldel, "keep") == 0,
+		"and no row keeps an answer from before the batch")
+	gui({ ad_all_keep = true })
+	assert(decisions(formspecs[#formspecs], "keep") == 40, "every row kept")
+	gui({ ad_all_move = true })
+	assert(decisions(formspecs[#formspecs], "move") == 40, "every row moved")
+	-- and a single row can still be taken back out of the batch
+	gui({ ad_1_keep = true })
+	local one = formspecs[#formspecs]
+	assert(decisions(one, "keep") == 1 and decisions(one, "move") == 39,
+		"a row's own button still overrides the batch")
+	-- the confirm screen takes the batch as it stands
+	gui({ rb = true })
+	local batch_confirm = formspecs[#formspecs]
+	assert(batch_confirm:find("+35 more", 1, true), "the batch reaches the confirm screen")
+	assert(batch_confirm:find("kept at the destination: ", 1, true), "with the one row taken back listed apart")
+
+	-- The batch buttons are drawn in the columns of the rows' own buttons, so
+	-- the line reads as their heading; the rows sit in a list that starts below
+	-- it, which is what keeps it in view while the list is scrolled.
+	local all_x, all_y = wide_fs:match("button%[([%d%.]+),([%d%.]+);1%.3,0%.4;ad_all_keep;")
+	local own_x = wide_fs:match("button%[([%d%.]+),%d+%.?%d*;1%.3,0%.4;ad_%d+_keep;")
+	assert(all_x and own_x, "both the batch buttons and the rows' own are drawn")
+	assert(math.abs(tonumber(all_x) - (_lx + tonumber(own_x))) < 0.001, string.format(
+		"the batch button is at %.2f, the row's own at %.2f", tonumber(all_x), _lx + tonumber(own_x)))
+	assert(tonumber(all_y) < tonumber(_ly), "and it is above the list rather than in it")
 	window_info = nil
 	print("PASS: every identifier gets a row, in a list that scrolls")
+	print("PASS: a batch of decisions is taken in one press")
 end
 
 -- ── the GUI sizes itself to the client's window ──────────────────────────
@@ -1429,9 +1686,9 @@ do
 		gui({ storage = true })
 		local cells = select(4, formspecs[#formspecs]:match("table%[([^;]*);([^;]*);([^;]*);([^;]*);"))
 		assert(cells, "the storage table carries cells")
-		-- and on to the value screen the row leads to: the table's first row is
-		-- the header, so the only stored row is the second one to the engine
-		gui({ ms = "CHG:2:1" })
+		-- and on to the value screen the row leads to: headers are not rows to
+		-- the engine, so the one stored row is row 1
+		gui({ ms = "CHG:1:1" })
 		gui({ ms_full = true })
 		local lines = formspecs[#formspecs]:match("textlist%[[^;]*;[^;]*;[^;]*;([^;]*);")
 		assert(lines, "the value screen carries its lines")

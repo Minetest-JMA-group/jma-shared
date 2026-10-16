@@ -465,17 +465,52 @@ local function identifier_cells(rows)
 	return table.concat(cells, ",")
 end
 
+-- Shipped with the mod, and drawn in front of both search bars. A field
+-- cannot carry the word for what it does: its own label is drawn above it,
+-- which beside the sort buttons would land on them.
+local SEARCH_ICON = "ipdb_search.png"
+-- How wide a search bar gets when it shares a row with something else. A bar
+-- on a row of its own takes the room it has instead.
+local SEARCH_W = 6.0
+
+-- Rows whose value contains the typed text. Only the value column is matched -
+-- the rest of a row is a timestamp or the name of a thing, and a filter that
+-- hit those would be a filter on when or where rather than on what. Case is
+-- folded, so a typed "steve" finds "Steve-gamer", and the search is a plain
+-- substring: a typed "." is a full stop, not a pattern character.
+---@param rows table[]
+---@param field string  -- which member of a row holds its value
+---@param pattern string?
+---@return table[]
+local function filter_by_value(rows, field, pattern)
+	if not pattern or pattern == "" then
+		return rows
+	end
+	local needle = pattern:lower()
+	local out = {}
+	for _, row in ipairs(rows) do
+		if tostring(row[field]):lower():find(needle, 1, true) then
+			out[#out + 1] = row
+		end
+	end
+	return out
+end
+
 -- Re-derive the rows on display from the node being shown. The node carries
 -- the identifier rows, with their timestamps, for whichever point in the
--- entry's history it represents - so sorting again costs no query.
+-- entry's history it represents - so sorting and filtering again cost no
+-- query. How many there were before the filter is kept as well: the screen
+-- says which of the two it is that is keeping rows out.
 ---@param state table
 local function refresh_rows(state)
 	local node = state.node
 	if not node then
-		state.rows = {}
+		state.rows, state.rows_total = {}, 0
 		return
 	end
-	state.rows = dbmanager.order_identifiers(node.name_rows or {}, node.ip_rows or {}, state.sort, state.desc)
+	local all = dbmanager.order_identifiers(node.name_rows or {}, node.ip_rows or {}, state.sort, state.desc)
+	state.rows_total = #all
+	state.rows = filter_by_value(all, "value", state.filter)
 end
 
 local function detail_formspec(state)
@@ -505,20 +540,50 @@ local function detail_formspec(state)
 	end
 	fs = fs .. string.format("button[%.2f,0.65;2.6,0.6;storage;Storage]", w - 3.0)
 
+	-- The value filter goes wherever there is room for it: in the gap between
+	-- the sort buttons and Storage on a window wide enough to hold it, and on
+	-- a row of its own below them otherwise, which is all the width this
+	-- screen is designed for leaves. Only what matches is listed beneath it.
+	local FILTER_X, FILTER_MIN = 8.75, 2.5
+	local gap_w = (w - 3.2) - FILTER_X
+	local inline = gap_w >= FILTER_MIN
+	local icon_x, icon_y, filter_x, filter_y, filter_w
+	if inline then
+		icon_x, icon_y = FILTER_X - 0.6, 0.725
+		filter_x, filter_y, filter_w = FILTER_X, 0.65, math.min(SEARCH_W, gap_w)
+	else
+		icon_x, icon_y = 0.4, 1.325
+		filter_x, filter_y, filter_w = 1.0, 1.25, w - 1.4
+	end
+	fs = fs .. string.format("image[%.2f,%.2f;0.45,0.45;%s]", icon_x, icon_y, SEARCH_ICON) ..
+		string.format("field[%.2f,%.2f;%.2f,0.6;filter;;%s]", filter_x, filter_y, filter_w, esc(state.filter or "")) ..
+		"field_close_on_enter[filter;false]"
+
 	-- The identifiers themselves: one per row, each with both timestamps. The
-	-- table is taller when there is no merge to talk about below it.
-	local table_h = m and (h - 5.8) or (h - 3.6)
+	-- table is taller when there is no merge to talk about below it, and a
+	-- filter that had to take a row of its own takes 0.65 off both.
+	local filter_h = inline and 0 or 0.65
+	local table_y = 1.3 + filter_h
+	local table_h = m and (h - 5.8 - filter_h) or (h - 3.6 - filter_h)
 	fs = fs .. "tableoptions[color=#dddddd;background=#1b1b1b;border=true;highlight=#466432]" ..
 		"tablecolumns[text,width=1.2;text,width=4.2;text,width=3.4;text,width=3.4]" ..
-		string.format("table[0.4,1.3;%.2f,%.2f;ids;%s;]", w - 0.8, table_h, identifier_cells(visible))
+		string.format("table[0.4,%.2f;%.2f,%.2f;ids;%s;]", table_y, w - 0.8, table_h, identifier_cells(visible))
 
-	local y = 1.3 + table_h + 0.2
+	-- Whichever note applies takes this line. With a filter in hand the counts
+	-- are of what matched, and narrowing the filter, not /ipdb list, is what
+	-- brings the rest of them into view.
+	local y = table_y + table_h + 0.2
+	local note
 	if #rows > shown then
-		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(string.format(
-			"showing %d of %d - the rest are listed by /ipdb list", shown, #rows)))
-		y = y + 0.4
+		note = state.filter ~= "" and
+			string.format("showing %d of %d matches - narrow the filter to see the rest", shown, #rows) or
+			string.format("showing %d of %d - the rest are listed by /ipdb list", shown, #rows)
 	elseif #rows == 0 then
-		fs = fs .. string.format("label[0.4,%.2f;No identifiers at this point in the entry's history.]", y)
+		note = (state.rows_total or 0) > 0 and "No identifier matches the filter." or
+			"No identifiers at this point in the entry's history."
+	end
+	if note then
+		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(note))
 		y = y + 0.4
 	end
 	if m then
@@ -562,6 +627,18 @@ local function detail_formspec(state)
 					end
 					ay = ay + 0.05
 				end
+				-- The same three buttons once more, over the list and in the
+				-- columns the rows' own buttons are in: one press decides every
+				-- identifier at once, which is the whole job when they all get
+				-- the same answer and there are dozens of them.
+				local all_x = list_x + row_x
+				local all_label = "All rows:"
+				fs = fs .. string.format("label[%.2f,%.2f;%s]",
+						all_x - 0.15 - #all_label * CHAR_W, ay, esc(all_label)) ..
+					string.format("button[%.2f,%.2f;1.3,0.4;ad_all_keep;keep]", all_x, ay - 0.05) ..
+					string.format("button[%.2f,%.2f;1.5,0.4;ad_all_delete;delete]", all_x + 1.4, ay - 0.05) ..
+					string.format("button[%.2f,%.2f;1.3,0.4;ad_all_move;move]", all_x + 3.0, ay - 0.05)
+				ay = ay + 0.45
 				-- only as many decision rows as fit above the button at 7.3
 				local list_h = math.max(0.5, h - 0.8 - ay)
 				-- The first row is inset from the top edge, as the tree's canvas
@@ -634,6 +711,15 @@ local function storage_cells(rows, chars)
 	return table.concat(cells, ",")
 end
 
+-- The rows the storage screen lists: those of the mod chosen in the dropdown,
+-- with the value filter applied. The unfiltered rows are kept as well, so that
+-- the screen can say whether it was the filter or the entry itself that left
+-- the table empty.
+---@param state table
+local function apply_storage_filter(state)
+	state.ms_rows = filter_by_value(state.ms_all_rows or {}, "data", state.ms_filter)
+end
+
 -- The storage a node represents, as the mod names to offer and the rows of the
 -- selected one. A node that came from a merge reads that merge's log, which
 -- recorded both entries at the time; only the live entry has a "now" to read
@@ -699,7 +785,14 @@ local function storage_formspec(state)
 	-- is drawn m_btn_height * 2 tall - most of a unit - and covers the first
 	-- row of the table below it.
 	fs = fs .. "label[0.4,0.62;Mod:]" ..
-		string.format("dropdown[1.2,0.57;4.6,0.6;ms_mod;%s;%d]", table.concat(items, ","), sel)
+		string.format("dropdown[1.2,0.57;4.6,0.6;ms_mod;%s;%d]", table.concat(items, ","), sel) ..
+		-- The value filter, on the dropdown's own row: what a stored value is
+		-- is often the one thing you remember about it, and a value is matched
+		-- whole, even where the cell above shows only its beginning.
+		string.format("image[6.0,0.645;0.45,0.45;%s]", SEARCH_ICON) ..
+		string.format("field[6.6,0.57;%.2f,0.6;ms_filter;;%s]",
+			math.min(SEARCH_W, w - 7.0), esc(state.ms_filter or "")) ..
+		"field_close_on_enter[ms_filter;false]"
 
 	local rows = state.ms_rows or {}
 	local table_h = h - 4.9
@@ -711,20 +804,33 @@ local function storage_formspec(state)
 		string.format("table[0.4,1.25;%.2f,%.2f;ms;%s;%d]", w - 0.8, table_h, storage_cells(visible, cells_chars), state.ms_sel or 0)
 
 	-- Whichever note applies takes this line, and the picked row's panel goes
-	-- below it rather than on top of it
+	-- below it rather than on top of it. With a filter in hand the counts are
+	-- of what matched, and narrowing the filter is what brings the rest in.
 	local y = 1.25 + table_h + 0.15
+	local note
 	if #rows == 0 then
-		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc("No storage for "..
-			(state.ms_mod and ("mod "..state.ms_mod) or "this entry").."."))
-		y = y + 0.4
+		-- the filter emptied the table only if there were rows of this mod to
+		-- show in the first place
+		if state.ms_filter ~= "" and (state.ms_total or 0) > 0 then
+			note = "No storage value matches the filter."
+		else
+			note = "No storage for "..(state.ms_mod and ("mod "..state.ms_mod) or "this entry").."."
+		end
 	elseif #rows > shown then
-		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(string.format(
-			"showing %d of %d rows - pick a mod to narrow it down", shown, #rows)))
+		note = state.ms_filter ~= "" and
+			string.format("showing %d of %d matches - narrow the filter to see the rest", shown, #rows) or
+			string.format("showing %d of %d rows - pick a mod to narrow it down", shown, #rows)
+	end
+	if note then
+		fs = fs .. string.format("label[0.4,%.2f;%s]", y, esc(note))
 		y = y + 0.4
 	end
 	-- The picked row in full: the cell above is shortened, and a stored value
-	-- is often exactly the thing you opened this screen to read.
-	local pick = state.ms_sel and rows[state.ms_sel - 1]
+	-- is often exactly the thing you opened this screen to read. The row is
+	-- read from the same 1-based index the table reports - it is the index of
+	-- the row that was clicked, and subtracting one here showed the row above
+	-- it (and nothing at all for the first row).
+	local pick = state.ms_sel and rows[state.ms_sel]
 	if pick then
 		-- The button sits on the header's own row and is placed from that row's
 		-- y, so it cannot drift out of step if anything above it moves. The
@@ -1007,12 +1113,36 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	if fields.add_scroll then
 		state.as = scroll_value(fields.add_scroll) or state.as or 0
 	end
+	-- The two filter fields. A text field's value rides along with every
+	-- submission, not only with the one that edited it, so a field counts as
+	-- changed only when it differs from the filter in hand - otherwise every
+	-- click would be read as a re-filter. They are read here rather than in
+	-- branches of their own because a submission can carry both an edited
+	-- filter and a button, and dropping either half of it would lose a press;
+	-- a submission that carried nothing else is re-drawn at the end.
+	local refiltered = false
+	if fields.filter ~= nil and fields.filter ~= state.filter then
+		state.filter = fields.filter
+		refresh_rows(state)
+		refiltered = true
+	end
+	if fields.ms_filter ~= nil and fields.ms_filter ~= state.ms_filter then
+		state.ms_filter = fields.ms_filter
+		apply_storage_filter(state)
+		-- the picked row may be one the filter now hides
+		state.ms_sel = nil
+		refiltered = true
+	end
 	-- Enter in a text field submits the form. A client that still has the
 	-- default close-on-enter reports quit along with it, so this has to be
 	-- claimed before the close check reads it. key_enter_field is only sent
 	-- when a text field had the focus - with the focus nowhere or on a
 	-- button, Enter really is a close and key_enter_field is absent.
 	local enter_in_field = fields.key_enter and fields.key_enter_field
+	-- It also names the field it was pressed in, and the tree screen's own
+	-- fields are the ones that submit a tree: Enter in a filter field belongs
+	-- to the list that field filters, on a screen that has no root to submit.
+	local tree_enter = enter_in_field == "root" or enter_in_field == "depth"
 	if fields.quit or fields.close then
 		if not enter_in_field then
 			-- Forget the state *and* tell the client to close the window.
@@ -1023,7 +1153,7 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			return
 		end
 	end
-	if fields.go or enter_in_field then
+	if fields.go or tree_enter then
 		state.sv, state.sh = 0, 0
 		state.root = fields.root
 		local depth = tonumber(fields.depth) or 4
@@ -1077,8 +1207,9 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 		return
 	end
 	-- The storage viewer: a screen of its own, reached from the detail screen.
-	-- Opening it and changing the filter both re-read the rows, because which
-	-- rows are wanted is what the filter decides.
+	-- Opening it and changing the mod both re-read the rows, because which
+	-- rows are wanted is what the dropdown decides; the value filter is then
+	-- applied to them, and survives both.
 	local function refresh_storage()
 		local ok, names, rows = pcall(load_storage, state.node, state.ms_mod)
 		if not ok then
@@ -1087,7 +1218,9 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			state.error = "Internal error"
 			return false
 		end
-		state.ms_names, state.ms_rows = names, rows
+		state.ms_names, state.ms_all_rows = names, rows
+		state.ms_total = #rows
+		apply_storage_filter(state)
 		state.ms_sel = nil
 		return true
 	end
@@ -1106,7 +1239,8 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 	-- The value screen: the picked row's value, with the two conversions that
 	-- make a stored blob readable. Only the display changes, never the row.
 	if fields.ms_full and state.ms_rows then
-		local row = state.ms_rows[(state.ms_sel or 0) - 1]
+		-- the same 1-based index the table reported, as in the panel below it
+		local row = state.ms_rows[state.ms_sel or 0]
 		if row then
 			state.value_row = row
 			state.value_mode = "raw"
@@ -1163,6 +1297,20 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			return
 		end
 	end
+	-- The row of buttons over the decision list: one press decides every
+	-- post-merge identifier at once. It carries the same three actions as the
+	-- rows' own buttons, so the actions are taken from the same table.
+	for action in pairs(DECISION_ACTIONS) do
+		if fields["ad_all_"..action] then
+			if state.info then
+				for _, a in ipairs(state.info.additions) do
+					state.decisions[a.value] = action
+				end
+			end
+			show(state, name)
+			return
+		end
+	end
 	for fieldname, _ in pairs(fields) do
 		local eid, mid = fieldname:match("^node_(%d+)_(%d+)$")
 		if eid then
@@ -1215,6 +1363,12 @@ core.register_on_player_receive_fields(function(player, formname, fields)
 			return
 		end
 	end
+	-- Reaching this point means nothing above claimed the submission, so a
+	-- filter that changed is all it carried: Enter in the field, or the focus
+	-- leaving it, and the list it filters has to be re-drawn.
+	if refiltered then
+		show(state, name)
+	end
 end)
 
 ---@param name string
@@ -1256,15 +1410,22 @@ M.show = function(name, size)
 		sh = 0,
 		-- how far down the rollback decision list is scrolled
 		as = 0,
-		-- identifier list: how it is ordered and the rows currently shown
+		-- identifier list: how it is ordered, the value filter, and the rows
+		-- currently shown - with how many there were before the filter
 		sort = "seen",
 		desc = true,
+		filter = "",
 		rows = {},
+		rows_total = 0,
 		-- whether the rollback actions are explained on the detail screen
 		help = false,
-		-- storage viewer: the filter, the mod names on offer, the rows shown
+		-- storage viewer: the mod chosen, the value filter, the mod names on
+		-- offer, the rows shown and how many of them there were before it
 		ms_mod = nil,
+		ms_filter = "",
 		ms_names = {},
+		ms_all_rows = {},
+		ms_total = 0,
 		ms_rows = {},
 		ms_sel = nil,
 		-- value screen: the row being read, how it is being shown, and what

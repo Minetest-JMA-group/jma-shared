@@ -5,6 +5,8 @@
 
 local M = {}
 
+local unpack = table.unpack or unpack
+
 ----------------------------------------------------------------------------
 -- Just enough JSON to check what the recorder hands to core.write_json
 ----------------------------------------------------------------------------
@@ -217,10 +219,13 @@ local function fire(self, name, ...)
 	end
 end
 
--- One server step: the globalsteps run, as they do at the end of a step.
+-- One server step: due timers run, then the globalsteps do, as they do at the
+-- end of a step.
 local function step(self, dtime)
+	dtime = dtime or 0.1
+	if self.run_timers then self.run_timers(dtime) end
 	for _, func in ipairs(self.callbacks.register_globalstep or {}) do
-		func(dtime or 0.1)
+		func(dtime)
 	end
 end
 
@@ -273,6 +278,31 @@ function M.new(opts)
 	function core.settings.get(self, key) return mock.settings[key] end
 	function core.settings.set(self, key, value) mock.settings[key] = value end
 	function core.settings.get_bool(self, key) return mock.settings[key] == "true" end
+
+	-- Timers run at the start of the next step, which is the ordering the mod
+	-- code relies on when it defers work past an engine callback.
+	mock.timers = {}
+	mock.timer_clock = 0
+	mock.run_timers = function(dtime)
+		mock.timer_clock = mock.timer_clock + dtime
+		local due = {}
+		for i = #mock.timers, 1, -1 do
+			if mock.timers[i].due <= mock.timer_clock then
+				table.insert(due, 1, table.remove(mock.timers, i))
+			end
+		end
+		for _, timer in ipairs(due) do
+			timer.func(unpack(timer.args))
+		end
+	end
+	core.after = function(delay, func, ...)
+		mock.timers[#mock.timers + 1] = {
+			due = mock.timer_clock + (delay or 0),
+			func = func,
+			args = {...},
+		}
+		return true
+	end
 
 	for _, name in ipairs(CALLBACKS) do
 		core[name] = function(func)

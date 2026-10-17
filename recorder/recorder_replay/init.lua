@@ -91,7 +91,16 @@ controls.register(function(kind, player, extra)
 	elseif kind == "seek" then
 		player:show_formspec("recorder_replay:seek", controls.seek_formspec(session))
 	elseif kind == "leave" then
-		sessions.leave(session, player)
+		-- The engine writes the used stack back into its slot after this
+		-- callback returns, and leaving restores the player's own inventory.
+		-- The restore therefore has to run after that write, or the control
+		-- item lands in the restored list.
+		core.after(0, function()
+			local still_here = core.get_player_by_name(name)
+			if still_here then
+				sessions.leave(session, still_here)
+			end
+		end)
 	elseif kind == "seek_value" then
 		local event = core.explode_scrollbar_event((extra and extra.seek) or "")
 		if event.type == "CHG" then

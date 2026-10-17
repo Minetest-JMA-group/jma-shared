@@ -227,12 +227,16 @@ check(ghost_of("Alice").observers.Second == nil, "and not to one who left")
 print("=== leaving and ending ===")
 ----------------------------------------------------------------------------
 
-ok, message = cmd.func("Watcher", "leave")
-check(ok, "the command leaves: " .. tostring(message))
-check(sessions.for_player("Watcher") == nil, "the watcher is out")
+use("leave", watcher)
+check(sessions.for_player("Watcher") ~= nil, "the leave item asks to leave")
+-- The engine writes the used stack back into its slot after on_use returns;
+-- the restore has to win over that write.
+watcher.inventory.main[1] = "recorder_replay:leave"
+mock.step(0.1)
+check(sessions.for_player("Watcher") == nil, "the next step leaves the replay")
 check(next(mock.entities) == nil, "no ghosts are left")
-check(watcher.inventory.main[1] == "default:pick_stone", "the player's things are back: "
-	.. tostring(watcher.inventory.main[1]))
+check(watcher.inventory.main[1] == "default:pick_stone",
+	"the player's things are back after the engine's write: " .. tostring(watcher.inventory.main[1]))
 check(watcher.inventory.main[3] == "default:torch 10", "all of them")
 check(watcher.meta["recorder_replay:stash"] == "", "and the stash is gone")
 

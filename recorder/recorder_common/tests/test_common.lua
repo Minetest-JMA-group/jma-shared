@@ -85,13 +85,13 @@ check(not common.file_exists(dir .. "/nothing.sqlite"), "and does not invent one
 print("=== game hooks ===")
 ----------------------------------------------------------------------------
 check(common.game_hooks.world_persistent == true, "a world is persistent unless the game says otherwise")
-check(common.game_hooks.region == nil and common.game_hooks.arena == nil, "no provider by default")
-local region = function() return nil end
+check(common.game_hooks.arena == nil, "no arena provider by default")
 local arena = function() return nil end
-common.register_game_hooks({region = region, arena = arena, world_persistent = false})
-check(common.game_hooks.region == region and common.game_hooks.arena == arena,
-	"a game adds its providers")
+common.register_game_hooks({arena = arena, world_persistent = false})
+check(common.game_hooks.arena == arena, "a game adds its provider")
 check(common.game_hooks.world_persistent == false, "and its world policy")
+check(common.game_hooks.region == nil,
+	"a recording's region is not a game hook: the caller names it")
 check(common.game_hooks.on_enter == nil, "hooks it does not set keep their defaults")
 
 ----------------------------------------------------------------------------

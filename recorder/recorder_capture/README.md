@@ -66,10 +66,10 @@ The mod exposes a global `recorder` table. `start` returns the recording's id;
 failure otherwise. Several recordings can run at once, each over its own region
 and into its own file, and the id says which one a call is about.
 
-A recording needs a region: one can be given to `start`, marked with
-`/recorder pos1` and `pos2`, or provided by the game through
-`recorder_common.game_hooks.region` (the pack's shared half). Without one,
-`start` fails and says so.
+A recording needs a region, and it is always the caller's: `start` takes one, and
+the chat command uses the marks of the player who asked. There is deliberately
+no provider to fall back on - a recording is about a particular place, and only
+the caller knows which.
 
 ```lua
 local id = recorder.start("ctf-match")      -- an id, or nil and a message
@@ -91,7 +91,7 @@ recorder.stop(id)                           -- nil, or a message
 
 | Function | Behaviour |
 | --- | --- |
-| `recorder.start([name], [region])` | Starts a recording and returns its id, or `nil` and a message. Fails if `recorder.max_recordings` is reached, or if no region can be found. `region` is `{pos1 = , pos2 = }`; without it the game's provider is asked. Returns before the region has been read: the snapshot phase runs in the following server steps (see below). `name` is used to build the file name and defaults to `"unnamed"`. |
+| `recorder.start([name], [region])` | Starts a recording and returns its id, or `nil` and a message. Fails if `recorder.max_recordings` is reached, or if the region is missing or invalid. `region` is `{pos1 = , pos2 = }` and is required. Returns before the region has been read: the snapshot phase runs in the following server steps (see below). `name` is used to build the file name and defaults to `"unnamed"`. |
 | `recorder.stop([id], [reason])` | Stops one recording. With a single recording running the id may be left out; with several it is required. Fails if the last rows could not be written (see *Stopping* below). `reason` is stored in the recording; the automatic stops use their own. |
 | `recorder.add_meta(key, value, [id])` | Stores a string pair about a recording. Works only while recording. Keys starting with `recorder.` describe the recording itself and are refused. |
 | `recorder.log_event(type, fields)` | Records an event of a mod's own making. Offered to every recording; each keeps it if its region says it belongs there. Works only while recording. Use a `modname:what` type to stay clear of the types below. |
@@ -111,8 +111,7 @@ recorder.stop(id)                           -- nil, or a message
   current position. The marks are yours, and are dropped when you disconnect.
 - `/recorder unset` – forget your marks.
 - `/recorder start [name] [x1,y1,z1 x2,y2,z2]` – start recording; the reply
-  carries the new recording's id. Without coordinates it uses your marks, then
-  the region the game provides.
+  carries the new recording's id. Without coordinates it uses your marks.
 - `/recorder stop [id]` – stop a recording. With one running the id may be left
   out.
 - `/recorder meta <key> <value>` – attach a pair to the current recording.

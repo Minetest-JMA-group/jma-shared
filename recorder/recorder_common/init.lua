@@ -18,10 +18,11 @@ recorder_common.DEFAULT_NAME = "unnamed"
 recorder_common.NAME_MAX = 64
 
 -- What the game (rather than the pack) knows about its own world. A game that
--- wants to provide the region a recording covers, or the arena a replay is
--- built in, registers that here - so no code in the pack has to name a game.
+-- wants to provide the arena a replay is built in, or say how a participant
+-- gets back from one, registers that here - so no code in the pack has to name
+-- a game. A recording's region is deliberately not here: it is a choice about
+-- what to record, and the caller of recorder.start() makes it.
 --
---   region                     -> function() -> pos1, pos2; nil = no answer
 --   arena                      -> function(size, taken) -> pos1, pos2; `size`
 --                                 is the volume needed (the region plus its
 --                                 shell), `taken` a list of boxes already in use
@@ -30,7 +31,6 @@ recorder_common.NAME_MAX = 64
 --   on_enter(player, session)  -> a participant entered a replay
 --   on_leave(player, session)  -> a participant left one
 recorder_common.game_hooks = {
-	region = nil,
 	arena = nil,
 	world_persistent = true,
 	on_enter = nil,

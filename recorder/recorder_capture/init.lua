@@ -754,26 +754,19 @@ end
 -- API
 ----------------------------------------------------------------------------
 
--- Resolve the region a recording covers. A region handed in wins; otherwise the
--- game may provide one. Marks are resolved by the chat command, which knows who
--- asked.
+-- Resolve the region a recording covers. It is the caller's choice: a region
+-- handed to start() (a game starting a recording knows exactly where), or the
+-- marks the chat command resolves for the player who asked. There is no
+-- provider to fall back on: a recording is about a particular place, and a
+-- stateless source has no way to know which recording is being started.
 ---@param region_arg table?  -- {pos1 =, pos2 =}
 ---@return table|nil, string?
 local function resolve_region(region_arg)
-	if region_arg then
-		return region_module.normalize(region_arg.pos1, region_arg.pos2)
+	if not region_arg then
+		return nil, "a recording needs a region: mark two corners with /recorder pos1 and /recorder pos2," ..
+			" or pass one to start()"
 	end
-	local provider = recorder_common.game_hooks.region
-	if provider then
-		local ok, pos1, pos2 = pcall(provider)
-		if ok and pos1 and pos2 then
-			local normalized, err = region_module.normalize(pos1, pos2)
-			if normalized then return normalized end
-			return nil, err
-		end
-	end
-	return nil, "a recording needs a region: mark two corners with /recorder pos1 and /recorder pos2," ..
-		" or let the game provide one"
+	return region_module.normalize(region_arg.pos1, region_arg.pos2)
 end
 
 -- The recording did not become one: close the file and take it away, so a
@@ -902,7 +895,7 @@ local function find_recording(arg)
 end
 
 ---@param record_name string?  -- used for the file name; "unnamed" if not given
----@param region_arg table?  -- {pos1 =, pos2 =}; the game may provide one instead
+---@param region_arg table  -- {pos1 =, pos2 =}; every recording names its region
 ---@return string|nil, string?  -- the recording's id, or an error message
 recorder.start = function(record_name, region_arg)
 	local limit = tonumber(core.settings:get("recorder.max_recordings")) or MAX_RECORDINGS_DEFAULT
@@ -1686,7 +1679,7 @@ core.register_chatcommand("recorder", {
 		end
 		if command == "start" then
 			-- An optional name, and optionally two coordinate triples; without
-			-- them the caller's marks, then the game's provider, are used.
+			-- them the caller's own marks are used.
 			local words = {}
 			for word in rest:gmatch("%S+") do words[#words + 1] = word end
 			local function coordinates(text)

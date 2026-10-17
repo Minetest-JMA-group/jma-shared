@@ -45,9 +45,6 @@ local TEST_REGION = {
 	pos1 = {x = -10, y = -5, z = -10},
 	pos2 = {x = 125, y = 12, z = 12},
 }
-recorder_common.register_game_hooks({
-	region = function() return TEST_REGION.pos1, TEST_REGION.pos2 end,
-})
 mock.settings["recorder.snapshot_budget"] = "1000000"
 
 local checks = 0
@@ -63,7 +60,7 @@ end
 -- is synchronous, so one step is enough; in the engine this is where the
 -- snapshot phase reports its progress.
 local function start_recording(name, region)
-	local id, err = recorder.start(name, region)
+	local id, err = recorder.start(name, region or TEST_REGION)
 	if not id then return err end
 	for _ = 1, 10 do
 		if recorder.is_recording() then return nil end
@@ -75,7 +72,7 @@ end
 -- Start one recording and wait until that one is recording, not merely until
 -- something is.
 local function start_and_wait(name, region)
-	local id, err = recorder.start(name, region)
+	local id, err = recorder.start(name, region or TEST_REGION)
 	if not id then return nil, err end
 	for _ = 1, 10 do
 		for _, entry in ipairs(recorder.list()) do
@@ -851,12 +848,10 @@ mock.settings["recorder.directory"] = nil
 print("=== a region is required ===")
 ----------------------------------------------------------------------------
 
--- A table literal cannot carry a nil value, so clear the hook itself.
-recorder_common.game_hooks.region = nil
+-- A recording is about a particular place: there is no provider to fall back on.
 local no_id, no_region = recorder.start("noregion")
 check(no_id == nil and type(no_region) == "string" and no_region:find("region", 1, true) ~= nil,
-	"a start without any region is refused: " .. tostring(no_region))
-recorder_common.game_hooks.region = function() return TEST_REGION.pos1, TEST_REGION.pos2 end
+	"a start without a region is refused: " .. tostring(no_region))
 
 ----------------------------------------------------------------------------
 print("=== the snapshot is in the file ===")
@@ -1048,7 +1043,7 @@ mock.remove_player("Marker")
 print("=== the snapshot phase reports itself ===")
 ----------------------------------------------------------------------------
 
-local phase_id = recorder.start("phasetest")
+local phase_id = recorder.start("phasetest", TEST_REGION)
 check(phase_id ~= nil, "a recording starts directly")
 local chat_before = #mock.chats
 local status_ok = cmd.func("someone", "status")
@@ -1069,7 +1064,7 @@ local ok, message = command.func("someone", "")
 local said = (#mock.chats > 0) and mock.chats[#mock.chats].message or ""
 check(ok and said:find("No recording in progress") ~= nil,
 	"/recorder says nothing is being recorded: " .. tostring(said))
-ok, message = command.func("someone", "start fromchat")
+ok, message = command.func("someone", "start fromchat -6,-6,-6 6,6,6")
 check(ok, "/recorder start accepts the command")
 mock.step(0.1)  -- the snapshot phase runs in server steps
 check(recorder.is_recording(), "/recorder start begins a recording")

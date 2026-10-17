@@ -131,6 +131,7 @@ Settings are read when a recording starts, so a change applies to the next one.
 | `recorder.max_size_mb` | `0` | Stop the recording once the file reaches this size. `0` is no limit. |
 | `recorder.disabled_events` | empty | Comma-separated event types not to record, e.g. `chat, chatcommand, punch_node`. The recording's own markers (`recording_start`, `recording_stop`, `write_error`) and `node_change` cannot be disabled. |
 | `recorder.metadata` | `true` | Record node metadata and inventories (chest contents, sign text, ...). With `false` the recording holds no metadata rows; replay handles both kinds of file the same way. |
+| `recorder.light` | `true` | Record the region's lighting (a byte per node, air included). With `false` the snapshot holds no light layer and replay recalculates the light instead. |
 
 ## The recording file
 
@@ -158,11 +159,12 @@ See `schema.sql` for the same information next to the tables.
 | Table | Holds |
 | --- | --- |
 | `Metadata` | `key`, `value` – what `recorder.add_meta` writes, plus the `recorder.*` keys describing the recording (name, start and stop times, engine version, game, tick count, why it ended, and any player whose row could not be written). |
-| `Snapshot` | One row: the region's low corner and size, the node names it uses, and the compressed body of non-air nodes as the world was when the recording began. |
+| `Snapshot` | One row: the region's low corner and size, the node names it uses, the compressed body of non-air nodes as the world was when the recording began, and optionally the light layer. |
 | `Players` | `id`, `name` – one row per player seen during the recording. |
 | `Movement` | Player kinematics, one row per player per server step in which something about that player changed. |
 | `Events` | One row per action. |
 | `NodeMetadata` | Node metadata and inventories: a baseline at tick 0, then one row whenever the periodic scan sees a change. |
+| `LightChanges` | The light values that changed, one row per diff round. |
 
 ### The region
 
@@ -230,6 +232,24 @@ changes have no engine callback, so the region is scanned once a second
 differences become rows, and their `tick`/`t` are those of the scan that saw
 them. A position whose mapblock is unloaded is left alone rather than mistaken
 for an emptied node. `recorder.metadata = false` turns the whole thing off.
+
+### Lighting
+
+With `recorder.light` on (the default), the snapshot's `light` column holds one
+byte per node of the region, in the same flat order as the node body, and
+`LightChanges` holds the values that change later. A byte is the engine's own
+format: the low 4 bits are skylight and the high 4 bits artificial light.
+
+Air is part of the layer, and it is the important part: a face is shaded by the
+light of the node in front of it, so the values that light a wall live in the
+air beside it. The layer is therefore dense, not sparse like the node body (it
+compresses well because lighting is smooth).
+
+Light changes ride the same mapblock diff as `node_change`: the callback reports
+blocks whose light changed even when no node did, so a torch lighting a room is
+caught. The diff records one row per round, holding the region indexes whose
+light changed and their new values, encoded with the snapshot codec and
+compressed. There is no polling.
 
 ### Movement
 
@@ -398,9 +418,9 @@ rather than reporting a clean stop, and the `-wal` file has to travel with the
 - **Entities.** Mobs, item drops and projectiles are not recorded; the recording
   follows players and the region's nodes, not other objects.
 - **Node timers and their state.** Node metadata and inventories are recorded
-  (see *Node metadata*), but a node timer's state is engine state, not
-  metadata, and is not. A timer's effect on the world is still recorded as the
-  `node_change` it produces.
+  (see *Node metadata*), and the lighting (see *Lighting*), but a node timer's
+  state is engine state, not metadata, and is not. A timer's effect on the
+  world is still recorded as the `node_change` it produces.
 - **Formspec and GUI input**, and anything else a mod does without a callback.
 - **Login and IP data.** `ipdb` is the place for who connected from where.
 

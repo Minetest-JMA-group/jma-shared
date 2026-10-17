@@ -1149,4 +1149,60 @@ check(value(nometa_db, "SELECT COUNT(*) FROM NodeMetadata") == 0,
 nometa_db:close()
 mock.settings["recorder.metadata"] = nil
 
+----------------------------------------------------------------------------
+-- Lighting
+----------------------------------------------------------------------------
+local LIGHT_REGION = {pos1 = {x = 300, y = 0, z = 0}, pos2 = {x = 305, y = 4, z = 5}}
+local dark = {x = 302, y = 1, z = 2}
+local lit = {x = 303, y = 1, z = 2}
+mock.set_node(dark, {name = "default:stone", light = 3})
+mock.set_node(lit, {name = "default:stone", light = 9})
+
+check(start_recording("light", LIGHT_REGION) == nil, "a recording with light starts")
+local light_path = recorder.get_recording_path()
+mock.step(0.1)
+mock.set_node(dark, {name = "default:stone", light = 7})
+mock.fire("register_on_mapblocks_changed",
+	{[core.hash_node_position(dark)] = true}, 1)
+mock.step(0.1)
+check(recorder.stop() == nil, "it stops")
+
+local light_db = open_recording(light_path)
+local snap_light = rows(light_db,
+	"SELECT light, light_encoding FROM Snapshot")[1]
+check(snap_light and snap_light.light ~= nil, "the snapshot holds a light layer")
+local light_region = recorder_common.region.normalize(LIGHT_REGION.pos1, LIGHT_REGION.pos2)
+local light_volume = recorder_common.region.volume(light_region)
+local light_body = snap_light.light
+if snap_light.light_encoding == "deflate" then
+	light_body = core.decompress(light_body, "deflate")
+end
+local base_light = recorder_common.light.decode(light_body, light_volume)
+check(base_light ~= nil, "which decodes to one byte per node")
+local dark_index = recorder_common.region.index(light_region, dark)
+local lit_index = recorder_common.region.index(light_region, lit)
+check(base_light and base_light[dark_index] == 3 and base_light[lit_index] == 9,
+	"with the values the world had")
+local light_changes = rows(light_db, "SELECT data, encoding FROM LightChanges ORDER BY id")
+check(#light_changes == 1, "the light change is one row: " .. #light_changes)
+local change_body = light_changes[1].data
+if light_changes[1].encoding == "deflate" then
+	change_body = core.decompress(change_body, "deflate")
+end
+local changes = recorder_common.snapshot.decode(change_body)
+check(changes and #changes == 1 and changes[1].i == dark_index and changes[1].p == 7,
+	"holding the node that changed and its new light")
+light_db:close()
+
+mock.settings["recorder.light"] = "false"
+check(start_recording("nolight", LIGHT_REGION) == nil, "a recording without light starts")
+local nolight_light_path = recorder.get_recording_path()
+check(recorder.stop() == nil, "it stops")
+local nolight_light_db = open_recording(nolight_light_path)
+check(value(nolight_light_db, "SELECT COUNT(*) FROM Snapshot WHERE light IS NOT NULL") == 0,
+	"with recorder.light = false the snapshot has no light layer")
+check(value(nolight_light_db, "SELECT COUNT(*) FROM LightChanges") == 0, "and no light changes")
+nolight_light_db:close()
+mock.settings["recorder.light"] = nil
+
 print(("\n%d checks passed"):format(checks))

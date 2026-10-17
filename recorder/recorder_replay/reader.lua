@@ -27,7 +27,8 @@ end
 -- schema version without holding them - hand-made, or damaged after the
 -- header - and every query against such a file raises instead of returning an
 -- error, so their presence is checked before anything reads rows.
-local REQUIRED_TABLES = {"Metadata", "Snapshot", "Players", "Movement", "Events", "NodeMetadata"}
+local REQUIRED_TABLES = {"Metadata", "Snapshot", "Players", "Movement", "Events", "NodeMetadata",
+	"LightChanges"}
 
 -- Open a recording and read the facts that do not change during a session.
 ---@param path string
@@ -283,6 +284,37 @@ end
 function reader.last_metadata_id(rec, tick)
 	return tonumber(reader.scalar(rec,
 		string.format("SELECT MAX(id) FROM NodeMetadata WHERE tick <= %d", tick))) or 0
+end
+
+local LIGHT_COLUMNS = "id, tick, t, data, encoding"
+
+---@param rec table
+---@param after_id integer
+---@param limit integer
+---@return table[]
+function reader.light_after(rec, after_id, limit)
+	local rows = {}
+	local sql = string.format(
+		"SELECT %s FROM LightChanges WHERE id > %d ORDER BY id LIMIT %d",
+		LIGHT_COLUMNS, after_id, limit)
+	for row in rec.db:nrows(sql) do
+		rows[#rows + 1] = {
+			id = row.id,
+			tick = row.tick,
+			t = row.t,
+			data = row.data,
+			encoding = row.encoding,
+		}
+	end
+	return rows
+end
+
+---@param rec table
+---@param tick integer
+---@return integer
+function reader.last_light_id(rec, tick)
+	return tonumber(reader.scalar(rec,
+		string.format("SELECT MAX(id) FROM LightChanges WHERE tick <= %d", tick))) or 0
 end
 
 return reader

@@ -183,6 +183,12 @@ controls.register(function(kind, player, extra)
 		show_formspec_later(name, "recorder_replay:seek", function()
 			return controls.seek_formspec(session)
 		end)
+	elseif kind == "light_toggle" then
+		local mode = sessions.toggle_light(session)
+		if not mode then
+			core.chat_send_player(name, "This recording has no recorded lighting.")
+		end
+		return mode
 	elseif kind == "leave" then
 		-- The engine writes the used stack back into its slot after this
 		-- callback returns, and leaving restores the player's own inventory.

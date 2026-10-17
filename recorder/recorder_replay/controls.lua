@@ -23,21 +23,46 @@ controls.ITEMS = {
 		description = "Replay: stop watching"},
 }
 
--- The controls replace the main list, so they sit in the hotbar.
+-- The lighting switch: two items, one for each mode, and using one asks the
+-- session to switch and puts the other in the same slot. The mode belongs to
+-- the session (light is a property of the world), so every viewer sees the
+-- same lighting; each viewer's item shows the mode as of their last switch.
+controls.LIGHT_ITEMS = {
+	recorded = {
+		item = "recorder_replay:light_recorded",
+		image = "recorder_replay_light_recorded.png",
+		description = "Replay lighting: as recorded (use for live lighting)",
+	},
+	live = {
+		item = "recorder_replay:light_live",
+		image = "recorder_replay_light_live.png",
+		description = "Replay lighting: recalculated live (use for recorded lighting)",
+	},
+}
+
+-- The controls replace the main list, so they sit in the hotbar. The lighting
+-- switch is only offered when the recording actually holds light.
 ---@param player ObjectRef
-function controls.fill(player)
+---@param session table?
+function controls.fill(player, session)
 	local inv = player:get_inventory()
 	if not inv then return end
 	local size = inv:get_size("main")
+	local light = session and controls.LIGHT_ITEMS[session.light]
+	local light_slot = #controls.ITEMS + 1
 	local list = {}
 	for i = 1, size do
 		local def = controls.ITEMS[i]
-		list[i] = ItemStack(def and def.item or "")
+		if i == light_slot and light then
+			list[i] = ItemStack(light.item)
+		else
+			list[i] = ItemStack(def and def.item or "")
+		end
 	end
 	inv:set_list("main", list)
 end
 
----@param handle fun(kind: string, player: ObjectRef, extra: any)
+---@param handle fun(kind: string, player: ObjectRef, extra: any): any
 function controls.register(handle)
 	for _, def in ipairs(controls.ITEMS) do
 		core.register_craftitem(def.item, {
@@ -48,6 +73,25 @@ function controls.register(handle)
 			on_drop = function() return ItemStack("") end,
 			on_use = function(itemstack, user)
 				if user and user:is_player() then handle(def.kind, user) end
+				return itemstack
+			end,
+		})
+	end
+	for _, def in pairs(controls.LIGHT_ITEMS) do
+		core.register_craftitem(def.item, {
+			description = def.description,
+			inventory_image = def.image,
+			stack_max = 1,
+			on_drop = function() return ItemStack("") end,
+			on_use = function(itemstack, user)
+				if user and user:is_player() then
+					-- The handler returns the mode now in force; the item for
+					-- that mode goes back into the wielded slot.
+					local mode = handle("light_toggle", user)
+					if mode and controls.LIGHT_ITEMS[mode] then
+						return ItemStack(controls.LIGHT_ITEMS[mode].item)
+					end
+				end
 				return itemstack
 			end,
 		})

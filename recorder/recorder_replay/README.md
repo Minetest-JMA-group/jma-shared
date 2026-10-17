@@ -52,6 +52,7 @@ hotbar:
 | speed | cycle 1x, 2x, 4x, 0.5x |
 | back / forward | move 10 seconds |
 | seek | a window with a slider over the whole recording |
+| lighting | switch between the light the recording holds and the light the arena's world would give the same nodes |
 | leave | stop watching |
 
 A participant's position and main inventory are saved in their own metadata
@@ -73,10 +74,20 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
 - The region is written through a VoxelManip without `update_liquids()`. That
   is what keeps liquids inert: a paused replay holds still, and a seek shows
   the recorded moment rather than a newly started flow.
-- The shell lets sunlight through: it is invisible, not a lid. The arena's
-  light is recalculated in full when it is built, when it is cleared and
-  whenever the clock jumps; node changes during forward playback rely on the
-  light the engine recalculates as the changed blocks are written.
+- A recording made with `recorder.light` carries the region's lighting, air
+  included. The arena shows it by default: the light bytes are written into the
+  blocks and the engine is told not to recalculate them, so a cave stays dark
+  and a lamp-lit room keeps its glow. Changes are applied as the clock crosses
+  them, and a seek rebuilds the layer for that moment. The lighting item
+  switches to live lighting instead - the light the arena's own world would
+  give those nodes, recalculated with `core.fix_light` - and back. Recordings
+  without a light layer always use live lighting, and no switch is shown.
+- In live mode the shell still lets sunlight through (it is invisible, not a
+  lid), and the arena is relit in full when it is built, cleared and whenever
+  the clock jumps. The recorded mode does not recalculate anything.
+- Daylight is rendered using the replay server's current time of day, so the
+  recorded *distribution* of light is exact while the overall brightness
+  follows the arena's sky. Artificial light is exact.
 - Ending the replay - or the last participant leaving - fills the whole arena
   with air, removes the ghosts and restores the participants. The arena's
   bounds are written to mod storage before its first node, so if the server
@@ -107,10 +118,8 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
   appear.
 - Node timers' state is not recorded or replayed; a node timer's `node_change`
   output is replayed because it changes a node.
-- Light values are not recorded. A reconstruction is lit by the replay
-  server's sky and by the nodes themselves, not by the light the recorded
-  world had: a cave, a lamp-lit room or a night-time scene will look
-  different.
+- Daylight is drawn at the replay server's time of day, not the recorded one;
+  see *The reconstruction*.
 - A recording made before the snapshot existed (or one missing it) cannot be
   rebuilt; replay refuses it with that reason.
 

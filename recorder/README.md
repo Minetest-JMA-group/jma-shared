@@ -6,9 +6,10 @@
   holding the world inside a region, the players who were in it, their actions
   and their movement, tick by tick and in order.
 - **`recorder_replay`** plays a recording back inside an arena it builds: the
-  recorded region is reconstructed from the recording's snapshot and node
-  changes, the recorded players appear as ghosts, and the watchers stand on the
-  arena's top face with a remote control for the clock.
+  recorded region is reconstructed from the recording's snapshot, node changes,
+  light and node metadata, the recorded players appear as ghosts, and the
+  watchers stand on the arena's top face with a remote control for the clock
+  and the lighting.
 - **`recorder_common`** holds what the two halves have to agree on: the file's
   identity and paths, the region arithmetic, and the snapshot format.
 

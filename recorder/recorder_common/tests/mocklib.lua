@@ -356,11 +356,15 @@ function M.new(opts)
 
 	mock.set_node = function(pos, node)
 		mock.add_node_name(node.name)
-		mock.nodes[node_key(pos)] = {name = node.name, param2 = node.param2 or 0}
+		mock.nodes[node_key(pos)] = {
+			name = node.name,
+			param2 = node.param2 or 0,
+			light = node.light or 0,
+		}
 	end
 
 	mock.get_node = function(pos)
-		return mock.nodes[node_key(pos)] or {name = "air", param2 = 0}
+		return mock.nodes[node_key(pos)] or {name = "air", param2 = 0, light = 0}
 	end
 
 	core.CONTENT_UNKNOWN = 125
@@ -558,11 +562,22 @@ function M.new(opts)
 	mock.vms = {}
 	mock.liquids_updated = false
 	mock.relit = {}  -- boxes core.fix_light was asked to recalculate
+	-- The engine's lighting pass, stood in for by plain daylight: enough for a
+	-- test to tell a live recalculation from recorded light bytes.
 	core.fix_light = function(p1, p2)
 		mock.relit[#mock.relit + 1] = {
 			pos1 = {x = p1.x, y = p1.y, z = p1.z},
 			pos2 = {x = p2.x, y = p2.y, z = p2.z},
 		}
+		for z = p1.z, p2.z do
+			for y = p1.y, p2.y do
+				for x = p1.x, p2.x do
+					local pos = {x = x, y = y, z = z}
+					local node = mock.get_node(pos)
+					mock.set_node(pos, {name = node.name, param2 = node.param2, light = 15})
+				end
+			end
+		end
 		return true
 	end
 	core.get_voxel_manip = function(p1, p2)
@@ -570,7 +585,7 @@ function M.new(opts)
 		local emerged2 = {x = p2.x, y = p2.y, z = p2.z}
 		local size = {x = p2.x - p1.x + 1, y = p2.y - p1.y + 1, z = p2.z - p1.z + 1}
 		local volume = size.x * size.y * size.z
-		local data, param2 = {}, {}
+		local data, param2, light = {}, {}, {}
 
 		local function index_of(pos)
 			local dx = math.floor(pos.x) - emerged1.x
@@ -598,14 +613,17 @@ function M.new(opts)
 				local node = mock.get_node(position_of(i))
 				data[i] = mock.add_node_name(node.name)
 				param2[i] = node.param2 or 0
+				light[i] = node.light or 0
 			end
 			return emerged1, emerged2
 		end
 		function vm:get_emerged_area() return emerged1, emerged2 end
 		function vm:get_data() return data end
 		function vm:get_param2_data() return param2 end
+		function vm:get_light_data() return light end
 		function vm:set_data(value) data = value end
 		function vm:set_param2_data(value) param2 = value end
+		function vm:set_light_data(value) light = value end
 		function vm:get_node_at(pos)
 			local index = index_of(pos)
 			if not index then return nil end
@@ -617,16 +635,22 @@ function M.new(opts)
 			mock.add_node_name(node.name)
 			data[index] = node_ids[node.name]
 			param2[index] = node.param2 or 0
+			light[index] = node.light or light[index]
 		end
 		function vm:update_liquids()
 			vm.liquids_updated = true
 			mock.liquids_updated = true
 		end
-		function vm:write_to_map()
+		function vm:write_to_map(recalculate)
 			for i = 1, volume do
+				-- The engine recalculates light unless told not to; the stand-in
+				-- uses daylight so recorded bytes are distinguishable in tests.
+				local value = light[i]
+				if recalculate ~= false then value = 15 end
 				mock.set_node(position_of(i), {
 					name = node_names[data[i]] or "air",
 					param2 = param2[i],
+					light = value,
 				})
 			end
 		end

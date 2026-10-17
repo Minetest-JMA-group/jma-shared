@@ -23,8 +23,9 @@ local codec = recorder_common.snapshot
 
 ---@param pos1 table
 ---@param pos2 table
+---@param record_light boolean?  -- false leaves the light layers out
 ---@return table|nil, string?
-function snapshot.new(pos1, pos2)
+function snapshot.new(pos1, pos2, record_light)
 	local normalized, err = region.normalize(pos1, pos2)
 	if not normalized then return nil, err end
 	pos1, pos2 = normalized.pos1, normalized.pos2
@@ -40,6 +41,9 @@ function snapshot.new(pos1, pos2)
 		name_index = {},   -- content id -> index into names
 		ids = {},          -- region flat index -> content id (the known state)
 		param2 = {},       -- region flat index -> param2
+		record_light = record_light ~= false,
+		light = {},        -- region flat index -> light byte, when recorded
+		light_data = nil,  -- the emerged area's light, while walking
 		failure = nil,
 	}
 	core.emerge_area(pos1, pos2, function(blockpos, action, calls_remaining)
@@ -78,8 +82,10 @@ local function begin_walk(snap)
 	local emerged1, emerged2 = vm:get_emerged_area()
 	local data = vm:get_data()
 	local param2 = vm:get_param2_data()
+	local light = snap.record_light and vm:get_light_data() or nil
 	vm:close()
 	snap.data, snap.param2_data = data, param2
+	snap.light_data = light
 	snap.emerged1 = emerged1
 	snap.emerged_size = {
 		x = emerged2.x - emerged1.x + 1,
@@ -94,6 +100,7 @@ local function encode_step(snap, budget)
 	local volume = region.volume(snap.region)
 	local emerged1, emerged_size = snap.emerged1, snap.emerged_size
 	local data, param2 = snap.data, snap.param2_data
+	local light_data = snap.light_data
 	local walked = 0
 
 	while snap.node_index < volume and walked < budget do
@@ -109,6 +116,9 @@ local function encode_step(snap, budget)
 
 		snap.ids[index] = id
 		snap.param2[index] = value
+		if snap.record_light then
+			snap.light[index] = light_data and light_data[lvm_index] or 0
+		end
 
 		if id == core.CONTENT_IGNORE then
 			-- The area did not finish emerging; storing it would put "ignore"
@@ -155,6 +165,7 @@ local function encode_step(snap, budget)
 	end
 	snap.entries = nil
 	snap.data, snap.param2_data = nil, nil
+	snap.light_data = nil
 	snap.phase = "done"
 	return "done", {
 		names = snap.names,
@@ -162,6 +173,7 @@ local function encode_step(snap, budget)
 		data = body,
 		ids = snap.ids,
 		param2 = snap.param2,
+		light = snap.record_light and snap.light or nil,
 	}
 end
 
@@ -204,7 +216,9 @@ end
 function snapshot.free(snap)
 	snap.entries = nil
 	snap.data, snap.param2_data = nil, nil
+	snap.light_data = nil
 	snap.ids, snap.param2 = nil, nil
+	snap.light = nil
 	snap.names = nil
 end
 

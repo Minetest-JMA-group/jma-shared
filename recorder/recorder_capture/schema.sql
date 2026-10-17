@@ -30,6 +30,13 @@ CREATE TABLE Metadata (
 --
 -- Node names are stored, not Content IDs: an id is only stable for one run of
 -- one server, and this file has to be readable anywhere, later.
+--
+-- light is the region's lighting at that moment: one byte per node in the same
+-- flat order, encoded by recorder_common.light (low 4 bits skylight, high 4
+-- bits artificial light), compressed as light_encoding says. It covers air too,
+-- because that is where most of the light that shades faces is stored. Both
+-- columns are NULL when light recording was off; a replay then recalculates
+-- the light instead.
 CREATE TABLE Snapshot (
 	tick INTEGER PRIMARY KEY,
 	t REAL NOT NULL,
@@ -41,7 +48,9 @@ CREATE TABLE Snapshot (
 	size_z INTEGER NOT NULL,
 	names TEXT NOT NULL,
 	encoding TEXT NOT NULL,
-	data BLOB NOT NULL
+	data BLOB NOT NULL,
+	light BLOB,
+	light_encoding TEXT
 ) STRICT;
 
 -- Node metadata and inventories, as they were and as they changed. The row
@@ -62,6 +71,19 @@ CREATE TABLE NodeMetadata (
 	pos_y INTEGER NOT NULL,
 	pos_z INTEGER NOT NULL,
 	data TEXT NOT NULL
+) STRICT;
+
+-- Changes to the region's lighting, one row per diff round. data is a body of
+-- recorder_common.snapshot entries - a flat region index and the light byte it
+-- became - compressed as encoding says. Light changes without any node change
+-- (a torch lighting a room) are reported by the mapblock callback too, so this
+-- rides the same diff that produces node_change rows; there is no polling.
+CREATE TABLE LightChanges (
+	id INTEGER PRIMARY KEY,
+	tick INTEGER NOT NULL,
+	t REAL NOT NULL,
+	data BLOB NOT NULL,
+	encoding TEXT NOT NULL
 ) STRICT;
 
 -- One row per player seen during the recording. Events.subject_player,
@@ -163,3 +185,4 @@ CREATE INDEX idx_events_type ON Events(type);
 CREATE INDEX idx_events_subject ON Events(subject_player);
 CREATE INDEX idx_events_object ON Events(object_player);
 CREATE INDEX idx_node_metadata_tick ON NodeMetadata(tick);
+CREATE INDEX idx_light_changes_tick ON LightChanges(tick);

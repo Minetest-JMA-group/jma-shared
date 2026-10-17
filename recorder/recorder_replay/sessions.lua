@@ -97,14 +97,18 @@ function sessions.seek(session, T)
 	session.reconstruct_dirty = false
 
 	deps.reconstruct.seek(session.reconstruct, session.rec, tick)
-	local rebuilt, rebuild_err = deps.reconstruct.write(session.reconstruct, session.offset)
+	local rebuilt, rebuild_err = deps.reconstruct.write(
+		session.reconstruct, session.offset, session.light)
 	if not rebuilt then
 		core.log("warning", "[replay] cannot rebuild the region: " .. tostring(rebuild_err))
-	else
-		-- A seek rewrites the whole region at once; the light of the blocks
-		-- around it needs the same full pass as the arena itself.
+	elseif session.light ~= "recorded" then
+		-- A seek rewrites the whole region at once; live lighting needs the
+		-- same full pass as the arena itself. Recorded lighting was just
+		-- written and must not be recalculated.
 		deps.arena.relight(session.arena)
 	end
+	session.light_last_id = deps.reader.last_light_id(session.rec, tick)
+	session.light_events = {rows = {}, next = 1}
 
 	-- Metadata is not part of the node write: the arena is wiped of it and
 	-- then told everything the recording had up to this moment, so a seek
@@ -227,6 +231,48 @@ local function advance_metadata(session)
 	end
 end
 
+-- Apply the light changes the clock has reached. Returns whether any row was
+-- applied; the caller decides whether the world needs rewriting (recorded
+-- lighting) or the engine's own write-time lighting is enough (live).
+local function advance_light(session)
+	if not session.reconstruct.has_light then return false end
+	local applied = false
+	local buffer = session.light_events
+	while true do
+		while buffer.next <= #buffer.rows do
+			local row = buffer.rows[buffer.next]
+			if row.t > session.T then return applied end
+			buffer.next = buffer.next + 1
+			if deps.reconstruct.apply_light(session.reconstruct, row.data, row.encoding) then
+				applied = true
+			end
+		end
+		local more = deps.reader.light_after(session.rec, session.light_last_id, 200)
+		if #more == 0 then return applied end
+		session.light_last_id = more[#more].id
+		buffer.rows = more
+		buffer.next = 1
+	end
+end
+
+-- Switch between the light the recording holds and the light the arena's
+-- world would give the same nodes. Returns the new mode, or nil when the
+-- recording has no light to show.
+---@param session table
+---@return string|nil
+function sessions.toggle_light(session)
+	if not session.reconstruct.has_light then return nil end
+	session.light = session.light == "recorded" and "live" or "recorded"
+	local written, err = deps.reconstruct.write(
+		session.reconstruct, session.offset, session.light)
+	if not written then
+		core.log("warning", "[replay] cannot rewrite the region's light: " .. tostring(err))
+	elseif session.light == "live" then
+		deps.arena.relight(session.arena)
+	end
+	return session.light
+end
+
 ---@param session table
 function sessions.start(arg, player)
 	local limit = tonumber(core.settings:get("replay.max_sessions")) or 4
@@ -285,6 +331,9 @@ function sessions.start(arg, player)
 		offset = deps.arena.offset(box, state.region),
 		reconstruct = state,
 		reconstruct_dirty = false,
+		light = state.has_light and "recorded" or "live",
+		light_last_id = 0,
+		light_events = {rows = {}, next = 1},
 		participants = {},
 		ghosts = {},
 		cursors = {},
@@ -387,9 +436,13 @@ function sessions.step_all(dtime)
 			end
 			advance_events(session)
 			advance_metadata(session)
+			if advance_light(session) and session.light == "recorded" then
+				session.reconstruct_dirty = true
+			end
 			if session.reconstruct_dirty then
 				session.reconstruct_dirty = false
-				local written, err = deps.reconstruct.write(session.reconstruct, session.offset)
+				local written, err = deps.reconstruct.write(
+					session.reconstruct, session.offset, session.light)
 				if not written then
 					core.log("warning", "[replay] cannot apply a node change: " .. tostring(err))
 				end

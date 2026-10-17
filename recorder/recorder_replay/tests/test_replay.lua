@@ -65,13 +65,24 @@ end
 local dbmanager = dofile(capturepath .. "/dbmanager.lua")
 
 local fixture_path = world .. "/recordings/fixture-20260101T000000Z.sqlite"
-local function make_fixture()
+local nolight_path = world .. "/recordings/0_nolight-20260101T000000Z.sqlite"
+local function make_fixture(path, with_light)
 	local writer = dbmanager.new(sqlite)
-	local ok, err = writer:open(fixture_path)
+	local ok, err = writer:open(path)
 	assert(ok, err)
 	writer:set_meta("recorder.name", "fixture")
 	local alice = writer:player_id("Alice")
 	local bob = writer:player_id("Bob")
+
+	local volume = 6 * 3 * 6
+	local light_values
+	if with_light then
+		-- Daylight everywhere, a darker glass block and a dim corner.
+		light_values = {}
+		for i = 1, volume do light_values[i] = 15 end
+		light_values[index_of(2, 1, 2)] = 7
+		light_values[index_of(0, 0, 0)] = 12
+	end
 
 	-- A stone floor under Alice and Bob and a glass block with param2 at
 	-- (2,1,2); everything else is air and not stored.
@@ -88,6 +99,8 @@ local function make_fixture()
 			{i = index_of(4, 1, 4), n = 3, p = 0},   -- a node this game will not have
 			{i = index_of(5, 0, 5), n = 1, p = 0},
 		}),
+		light = with_light and common.light.encode(light_values, volume) or nil,
+		light_encoding = with_light and "raw" or nil,
 	})
 	assert(snapshot_ok, snapshot_err)
 
@@ -123,10 +136,16 @@ local function make_fixture()
 		core.serialize({fields = {owner = "alice"},
 			inventory = {main = {"", "", "default:torch 3"}}})})
 	writer:add_metadata({writer:next_id(), 9, 0.9, 3, 1, 3, ""})
+	if with_light then
+		-- The glass block's light changes at 0.8 s.
+		writer:add_light({writer:next_id(), 8, 0.8,
+			common.snapshot.encode({{i = index_of(2, 1, 2), n = 1, p = 3}}), "raw"})
+	end
 	writer:flush()
 	writer:close()
 end
-make_fixture()
+make_fixture(fixture_path, true)
+make_fixture(nolight_path, false)
 
 -- From here on, modules load as the replay mod.
 mock.current_modname = "recorder_replay"
@@ -366,7 +385,7 @@ check(not ok and tostring(message):find("/replay pos1", 1, true) ~= nil,
 	"a bare /replay without an arena says how to make one: " .. tostring(message))
 
 local watcher = add_player("Watcher", {pos = {x = 0, y = 0, z = 0}})
-watcher.inventory = {main = {"default:pick_stone", "", "default:torch 10"}}
+watcher.inventory = {main = {"default:pick_stone", "", "default:torch 10", "", "", "", "", ""}}
 watcher.meta = {}
 
 mark(watcher, WATCHER_ARENA)
@@ -490,7 +509,7 @@ check(barrier_def and barrier_def.sunlight_propagates == true,
 	"the shell lets sunlight through, so the arena is not a dark box")
 check(barrier_def and barrier_def.paramtype == "light", "and takes part in lighting")
 check(#mock.relit > 0 and mock.relit[#mock.relit].pos1.x == 100,
-	"the arena's light is recalculated after the reconstruction")
+	"the arena is relit when it is built")
 check(mock.liquids_updated == false, "the reconstruction does not start liquid flow")
 
 local alice = ghost_of("Alice")
@@ -637,6 +656,45 @@ check(chest() and chest().inventory.main[1] == "",
 	"forward playback applies the metadata change when the clock reaches it")
 mock.step(0.1)
 check(chest() == nil, "and the clearing row when it reaches that")
+
+----------------------------------------------------------------------------
+print("=== lighting ===")
+----------------------------------------------------------------------------
+
+local glass_cell = {x = 103, y = 12, z = 103}
+local stone_cell = {x = 101, y = 11, z = 101}
+sessions.seek(session, 0.3)
+check(session.light == "recorded", "a recording with light starts on its own lighting")
+check(mock.get_node(glass_cell).light == 7, "the recorded light is in the world")
+check(mock.get_node(stone_cell).light == 12, "at the recorded values")
+check(watcher.inventory.main[7] == "recorder_replay:light_recorded",
+	"and the lighting switch is in the hotbar")
+
+local swapped = use("light_recorded", watcher)
+check(swapped and swapped:to_string() == "recorder_replay:light_live",
+	"using it swaps the item for the other mode")
+check(session.light == "live", "the session is on live lighting now")
+check(mock.get_node(glass_cell).light == 15, "and the light is recalculated")
+
+local back = use("light_live", watcher)
+check(back and back:to_string() == "recorder_replay:light_recorded",
+	"using that one swaps back")
+check(session.light == "recorded", "recorded lighting again")
+check(mock.get_node(glass_cell).light == 7, "and the recorded value is back")
+
+sessions.seek(session, 0.9)
+check(session.light == "recorded", "seeking keeps the chosen mode")
+check(mock.get_node(glass_cell).light == 3, "a recorded light change is applied")
+sessions.seek(session, 0.3)
+check(mock.get_node(glass_cell).light == 7, "and seeking back restores the earlier light")
+check(mock.get_node(stone_cell).light == 12, "the rest of the layer is untouched")
+
+sessions.seek(session, 0.5)
+local relit_before = #mock.relit
+mock.step(0.35)
+check(mock.get_node(glass_cell).light == 3,
+	"forward playback applies the light change in recorded mode")
+check(#mock.relit == relit_before, "without recalculating it live")
 
 ----------------------------------------------------------------------------
 print("=== a second viewer ===")
@@ -842,5 +900,21 @@ mock.modstorage["recorder_replay:session"] = core.serialize({
 arena.recover()
 check(box_is_air(one) and box_is_air(two), "every arena of a crashed run is cleared")
 check(mock.modstorage["recorder_replay:session"] == "", "and the flag is erased")
+
+----------------------------------------------------------------------------
+print("=== a recording without light ===")
+----------------------------------------------------------------------------
+
+local NOLIGHT_ARENA = box(400, 40, 400, 407, 44, 407)
+mark(planner, NOLIGHT_ARENA)
+planner.pos = {x = 0, y = 0, z = 0}
+local dark_session, dark_err = sessions.start(nolight_path, planner)
+check(dark_session ~= nil, "a recording without light still starts: " .. tostring(dark_err))
+check(dark_session and dark_session.light == "live", "with live lighting")
+check(dark_session and not dark_session.reconstruct.has_light, "and no recorded layer")
+check(planner.inventory.main == nil or planner.inventory.main[7] == nil
+	or planner.inventory.main[7] == "", "so no lighting switch is offered")
+recorder_replay.end_session(dark_session.id, "test")
+check(sessions.for_player("Planner") == nil, "and it ends cleanly")
 
 print(("\n%d checks passed"):format(checks))

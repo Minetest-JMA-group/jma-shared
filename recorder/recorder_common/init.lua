@@ -162,3 +162,4 @@ end
 
 recorder_common.snapshot = dofile(core.get_modpath("recorder_common") .. "/snapshot.lua")
 recorder_common.region = dofile(core.get_modpath("recorder_common") .. "/region.lua")
+recorder_common.light = dofile(core.get_modpath("recorder_common") .. "/light.lua")

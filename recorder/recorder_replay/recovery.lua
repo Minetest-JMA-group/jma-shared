@@ -44,7 +44,7 @@ function recovery.enter(player, session, already_stashed)
 			}))
 		end
 	end
-	controls.fill(player)
+	controls.fill(player, session)
 	-- The stash above holds the position from before this teleport, which is
 	-- where the player goes back to when they leave.
 	if session.arena then

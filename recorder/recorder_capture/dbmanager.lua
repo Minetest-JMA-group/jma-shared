@@ -29,6 +29,7 @@ local unpack = table.unpack or unpack
 local EVENT_COLUMNS = 13
 local MOVEMENT_COLUMNS = 20
 local METADATA_COLUMNS = 7
+local LIGHT_COLUMNS = 5
 
 -- What schema.sql puts in PRAGMA application_id ('JMAR'), and what tells a
 -- recorder file apart from any other database. The same value is in
@@ -53,10 +54,11 @@ function dbmanager.new(sqlite_lib)
 		events = {},        -- buffered Events rows, in recording order
 		movement = {},      -- buffered Movement rows, in recording order
 		metadata = {},      -- buffered NodeMetadata rows, in recording order
+		light_changes = {}, -- buffered LightChanges rows, in recording order
 		player_ids = {},    -- player name -> Players.id
 		failed = 0,         -- consecutive failed flushes
 		dropped = 0,        -- rows lost to failed flushes
-		written = {events = 0, movement = 0, players = 0, metadata = 0},
+		written = {events = 0, movement = 0, players = 0, metadata = 0, light = 0},
 		in_transaction = false,
 	}, DB)
 end
@@ -182,18 +184,23 @@ function DB:open(path)
 	if not stmt then self.db:close() self.db = nil return nil, serr end
 	self.get_meta_stmt = stmt
 	stmt, serr = prepare_statement(self, "INSERT INTO Snapshot (tick, t, pos1_x, pos1_y, pos1_z, " ..
-		"size_x, size_y, size_z, names, encoding, data) " ..
-		"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		"size_x, size_y, size_z, names, encoding, data, light, light_encoding) " ..
+		"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if not stmt then self.db:close() self.db = nil return nil, serr end
 	self.insert_snapshot = stmt
 	stmt, serr = prepare_statement(self, "INSERT INTO NodeMetadata (id, tick, t, pos_x, pos_y, pos_z, data) " ..
 		"VALUES (?, ?, ?, ?, ?, ?, ?)")
 	if not stmt then self.db:close() self.db = nil return nil, serr end
 	self.insert_metadata = stmt
+	stmt, serr = prepare_statement(self, "INSERT INTO LightChanges (id, tick, t, data, encoding) " ..
+		"VALUES (?, ?, ?, ?, ?)")
+	if not stmt then self.db:close() self.db = nil return nil, serr end
+	self.insert_light = stmt
 
 	self.seq, self.failed, self.dropped, self.in_transaction = 0, 0, 0, false
-	self.events, self.movement, self.metadata, self.player_ids = {}, {}, {}, {}
-	self.written = {events = 0, movement = 0, players = 0, metadata = 0}
+	self.events, self.movement, self.metadata, self.light_changes = {}, {}, {}, {}
+	self.player_ids = {}
+	self.written = {events = 0, movement = 0, players = 0, metadata = 0, light = 0}
 	return true
 end
 
@@ -246,8 +253,9 @@ function DB:close()
 	self.insert_player, self.insert_event, self.insert_movement = nil, nil, nil
 	self.set_meta_stmt, self.get_meta_stmt, self.insert_snapshot = nil, nil, nil
 	self.insert_metadata = nil
+	self.insert_light = nil
 	self.player_ids = {}
-	self.events, self.movement, self.metadata = {}, {}, {}
+	self.events, self.movement, self.metadata, self.light_changes = {}, {}, {}, {}
 	self.in_transaction = false
 	return ok, err
 end
@@ -315,9 +323,14 @@ function DB:add_metadata(row)
 	self.metadata[#self.metadata + 1] = row
 end
 
+---@param row table  -- a LightChanges row, in column order, ids included
+function DB:add_light(row)
+	self.light_changes[#self.light_changes + 1] = row
+end
+
 ---@return integer
 function DB:buffered()
-	return #self.events + #self.movement + #self.metadata
+	return #self.events + #self.movement + #self.metadata + #self.light_changes
 end
 
 ---@return table
@@ -327,7 +340,8 @@ function DB:stats()
 		events = self.written.events,
 		movement = self.written.movement,
 		metadata = self.written.metadata,
-		buffered = #self.events + #self.movement + #self.metadata,
+		light = self.written.light,
+		buffered = #self.events + #self.movement + #self.metadata + #self.light_changes,
 		dropped = self.dropped,
 		failed = self.failed,
 	}
@@ -362,6 +376,36 @@ local function insert_rows(self, stmt, rows, count, columns)
 	return true
 end
 
+-- Light bodies are BLOBs: the codec's output is arbitrary bytes, and a STRICT
+-- BLOB column refuses the TEXT binding insert_rows would use.
+local function insert_light_rows(self, rows, count)
+	local stmt = self.insert_light
+	for i = 1, count do
+		local row = rows[i]
+		local raised, done, err = pcall(function()
+			if stmt:bind(1, row[1]) ~= self.sqlite.OK
+				or stmt:bind(2, row[2]) ~= self.sqlite.OK
+				or stmt:bind(3, row[3]) ~= self.sqlite.OK
+				or stmt:bind_blob(4, row[4]) ~= self.sqlite.OK
+				or stmt:bind(5, row[5]) ~= self.sqlite.OK then
+				return nil, errmsg(self, "cannot bind a light change")
+			end
+			if stmt:step() ~= self.sqlite.DONE then
+				return nil, errmsg(self, "cannot insert a light change")
+			end
+			return true
+		end)
+		stmt:reset()
+		if not raised then
+			return nil, "cannot insert a light change: " .. tostring(done)
+		end
+		if not done then
+			return nil, err
+		end
+	end
+	return true
+end
+
 -- Write everything buffered so far in one transaction.
 --
 -- A batch that cannot be written is dropped: keeping it for a retry would grow
@@ -375,7 +419,8 @@ function DB:flush()
 	end
 	local nevents, nmovement = #self.events, #self.movement
 	local nmetadata = #self.metadata
-	if nevents == 0 and nmovement == 0 and nmetadata == 0 then
+	local nlight = #self.light_changes
+	if nevents == 0 and nmovement == 0 and nmetadata == 0 and nlight == 0 then
 		-- Nothing to write, but the run of failures (if any) ends here.
 		self.failed = 0
 		return true
@@ -403,6 +448,9 @@ function DB:flush()
 	if ok and nmetadata > 0 then
 		ok, err = insert_rows(self, self.insert_metadata, self.metadata, nmetadata, METADATA_COLUMNS)
 	end
+	if ok and nlight > 0 then
+		ok, err = insert_light_rows(self, self.light_changes, nlight)
+	end
 
 	if ok then
 		ret = self.db:exec("COMMIT")
@@ -417,17 +465,18 @@ function DB:flush()
 		self.written.events = self.written.events + nevents
 		self.written.movement = self.written.movement + nmovement
 		self.written.metadata = self.written.metadata + nmetadata
+		self.written.light = self.written.light + nlight
 		self.failed = 0
-		self.events, self.movement, self.metadata = {}, {}, {}
+		self.events, self.movement, self.metadata, self.light_changes = {}, {}, {}, {}
 		return true
 	end
 
 	self.db:exec("ROLLBACK")
 	self.in_transaction = false
-	local lost = nevents + nmovement + nmetadata
+	local lost = nevents + nmovement + nmetadata + nlight
 	self.dropped = self.dropped + lost
 	self.failed = self.failed + 1
-	self.events, self.movement, self.metadata = {}, {}, {}
+	self.events, self.movement, self.metadata, self.light_changes = {}, {}, {}, {}
 	return nil, err, lost
 end
 
@@ -435,7 +484,7 @@ end
 -- the baseline every later change is measured against. It is deliberately not
 -- buffered with the event rows - it is not a row in the timeline, and it has to
 -- be in the file before the first event refers to the world it describes.
----@param row table  -- {tick, t, pos1, size, names, encoding, data}
+---@param row table  -- {tick, t, pos1, size, names, encoding, data, light, light_encoding}
 ---@return boolean|nil, string?
 function DB:set_snapshot(row)
 	-- Bind one by one, because the body has to go in as a BLOB: lsqlite3 binds
@@ -455,6 +504,25 @@ function DB:set_snapshot(row)
 	end
 	if self.insert_snapshot:bind_blob(#values + 1, row.data) ~= self.sqlite.OK then
 		local err = errmsg(self, "cannot bind the snapshot body")
+		self.insert_snapshot:reset()
+		return nil, err
+	end
+	-- The light layer is optional (recording it can be switched off), so its
+	-- two columns are bound as NULL when there is none.
+	local light_index = #values + 2
+	local light_ok
+	if row.light ~= nil then
+		light_ok = self.insert_snapshot:bind_blob(light_index, row.light)
+	else
+		light_ok = self.insert_snapshot:bind(light_index, nil)
+	end
+	if light_ok ~= self.sqlite.OK then
+		local err = errmsg(self, "cannot bind the light layer")
+		self.insert_snapshot:reset()
+		return nil, err
+	end
+	if self.insert_snapshot:bind(light_index + 1, row.light_encoding) ~= self.sqlite.OK then
+		local err = errmsg(self, "cannot bind the light encoding")
 		self.insert_snapshot:reset()
 		return nil, err
 	end

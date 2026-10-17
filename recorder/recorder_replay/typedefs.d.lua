@@ -17,6 +17,9 @@
 ---@field reconstruct_dirty boolean -- node changes waiting to be written
 ---@field metadata_last_id integer -- last metadata row applied
 ---@field metadata_events table -- metadata rows waiting for the clock
+---@field light string          -- "recorded" or "live"
+---@field light_last_id integer -- last light-change row applied
+---@field light_events table    -- light rows waiting for the clock
 
 ---@class ReplayArena
 ---@field init fun(dependencies: table)

@@ -79,6 +79,8 @@ local modpath = core.get_modpath(core.get_current_modname())
 local dbmanager = dofile(modpath .. "/dbmanager.lua")
 local snapshot_module = dofile(modpath .. "/snapshot.lua")
 local region_module = recorder_common.region
+local light_codec = recorder_common.light
+local snapshot_codec = recorder_common.snapshot
 
 -- One recording's state. Everything below that takes a `rec` gets one of these;
 -- nothing about a recording is module-level except the id counter and the
@@ -110,6 +112,8 @@ local function new_state()
 		sampled = {},        -- player id -> name, from the last pass through the region
 		known_ids = nil,     -- region flat index -> content id, what the recording knows
 		known_param2 = nil,  -- and the param2 that goes with it
+		light_enabled = false, -- whether the region's light is recorded
+		known_light = nil,   -- region flat index -> light byte, what the recording knows
 		metadata_enabled = false, -- whether node metadata and inventories are recorded
 		metadata_known = {}, -- position key -> serialized metadata the recording knows
 		next_metadata_poll = 0,
@@ -924,6 +928,8 @@ local function abort_start(rec, reason)
 	rec.snapshot = nil
 	rec.region = nil
 	rec.known_ids, rec.known_param2 = nil, nil
+	rec.light_enabled = false
+	rec.known_light = nil
 	rec.metadata_enabled = false
 	rec.metadata_known = {}
 	rec.pending_blocks = {}
@@ -934,6 +940,17 @@ end
 -- recording proper begins.
 ---@param result table
 local function finish_start(rec, result)
+	local light_body, light_encoding
+	if result.light then
+		light_body = light_codec.encode(result.light, region_module.volume(rec.region))
+		light_encoding = "raw"
+		if core.compress then
+			local packed_ok, packed = pcall(core.compress, light_body, "deflate", 9)
+			if packed_ok and packed then
+				light_body, light_encoding = packed, "deflate"
+			end
+		end
+	end
 	local ok, err = rec.db:set_snapshot({
 		tick = 0,
 		t = 0,
@@ -942,6 +959,8 @@ local function finish_start(rec, result)
 		names = table.concat(result.names, "\n"),
 		encoding = result.encoding,
 		data = result.data,
+		light = light_body,
+		light_encoding = light_encoding,
 	})
 	if not ok then
 		abort_start(rec, err)
@@ -949,6 +968,7 @@ local function finish_start(rec, result)
 	end
 	rec.known_ids = result.ids
 	rec.known_param2 = result.param2
+	rec.known_light = result.light
 
 	-- The schema version is not repeated here: PRAGMA user_version is where the
 	-- file keeps it, and it is the version of the file rather than of the mod.
@@ -1082,6 +1102,8 @@ recorder.start = function(record_name, region_arg)
 	rec.metadata_enabled = enabled_setting("recorder.metadata", true)
 	rec.metadata_known = {}
 	rec.next_metadata_poll = METADATA_INTERVAL
+	rec.light_enabled = enabled_setting("recorder.light", true)
+	rec.known_light = nil
 	rec.disabled = {}
 	for type_name in (core.settings:get("recorder.disabled_events") or ""):gmatch("[^,%s]+") do
 		-- What the recording needs in order to explain itself - where it
@@ -1112,7 +1134,7 @@ recorder.start = function(record_name, region_arg)
 	rec.snapshot_budget = math.max(1,
 		math.floor(tonumber(core.settings:get("recorder.snapshot_budget")) or 20000))
 
-	local snap, snap_err = snapshot_module.new(region.pos1, region.pos2)
+	local snap, snap_err = snapshot_module.new(region.pos1, region.pos2, rec.light_enabled)
 	if not snap then
 		abort_start(rec, snap_err)
 		return nil, snap_err
@@ -1146,6 +1168,8 @@ local function stop(rec, reason)
 		rec.recording = false
 		rec.region = nil
 		rec.known_ids, rec.known_param2 = nil, nil
+		rec.light_enabled = false
+		rec.known_light = nil
 		rec.metadata_enabled = false
 		rec.metadata_known = {}
 		rec.pending_blocks = {}
@@ -1187,6 +1211,8 @@ local function stop(rec, reason)
 	rec.sampled = {}
 	rec.region = nil
 	rec.known_ids, rec.known_param2 = nil, nil
+	rec.light_enabled = false
+	rec.known_light = nil
 	rec.metadata_enabled = false
 	rec.metadata_known = {}
 	rec.pending_start = false
@@ -1596,8 +1622,10 @@ end)
 
 -- Read one mapblock back and compare it with what the recording last knew. Only
 -- nodes that differ become rows; the block's nodes are addressed by arithmetic
--- rather than by building a position table for each of the 4096 of them.
-local function diff_block(rec, block, tick, t)
+-- rather than by building a position table for each of the 4096 of them. Light
+-- is compared the same way: the callback reports blocks whose light changed
+-- even when no node did, so a torch's glow is caught too.
+local function diff_block(rec, block, tick, t, light_changes)
 	local reg = rec.region
 	local size = region_module.size(reg)
 	local p2 = {x = block.x + 15, y = block.y + 15, z = block.z + 15}
@@ -1610,6 +1638,7 @@ local function diff_block(rec, block, tick, t)
 	local emerged1, emerged2 = vm:get_emerged_area()
 	local data = vm:get_data()
 	local param2 = vm:get_param2_data()
+	local light_data = rec.light_enabled and vm:get_light_data() or nil
 	vm:close()
 	local emerged_size = {
 		x = emerged2.x - emerged1.x + 1,
@@ -1654,6 +1683,14 @@ local function diff_block(rec, block, tick, t)
 									},
 								})
 							end
+							if light_data then
+								local light_value = light_data[lvm_index] or 0
+								if light_value ~= rec.known_light[index] then
+									rec.known_light[index] = light_value
+									light_changes[#light_changes + 1] =
+										{i = index, n = 1, p = light_value}
+								end
+							end
 						end
 					end
 				end
@@ -1668,12 +1705,34 @@ local function process_block_changes(rec)
 	rec.pending_blocks = {}
 	local block_min, block_max = region_module.blocks(rec.region)
 	for _, entry in ipairs(pending) do
+		local light_changes = {}
 		for hash in pairs(entry.blocks) do
 			local block = core.get_position_from_hash(hash)
 			if block and block.x >= block_min.x and block.x <= block_max.x
 				and block.y >= block_min.y and block.y <= block_max.y
 				and block.z >= block_min.z and block.z <= block_max.z then
-				diff_block(rec, block, entry.tick, entry.t)
+				diff_block(rec, block, entry.tick, entry.t, light_changes)
+			end
+		end
+		if #light_changes > 0 then
+			-- The blocks are visited in hash order, so the entries are sorted
+			-- into the codec's increasing-index order before encoding.
+			table.sort(light_changes, function(a, b) return a.i < b.i end)
+			local body, encode_err = snapshot_codec.encode(light_changes)
+			if body then
+				local encoding = "raw"
+				if core.compress then
+					local packed_ok, packed = pcall(core.compress, body, "deflate", 9)
+					if packed_ok and packed then
+						body, encoding = packed, "deflate"
+					end
+				end
+				rec.db:add_light({
+					rec.db:next_id(), entry.tick, entry.t, body, encoding,
+				})
+			else
+				complain(rec, "encode light changes",
+					"cannot encode light changes: " .. tostring(encode_err))
 			end
 		end
 	end

@@ -39,8 +39,8 @@ function reconstruct.load(rec)
 	local row
 	local queried, query_err = pcall(function()
 		for candidate in rec.db:nrows(
-			"SELECT pos1_x, pos1_y, pos1_z, size_x, size_y, size_z, names, encoding, data " ..
-			"FROM Snapshot WHERE tick = 0") do
+			"SELECT pos1_x, pos1_y, pos1_z, size_x, size_y, size_z, names, encoding, data, " ..
+			"light, light_encoding FROM Snapshot WHERE tick = 0") do
 			row = candidate
 		end
 	end)
@@ -86,6 +86,40 @@ function reconstruct.load(rec)
 	end
 
 	local volume = size.x * size.y * size.z
+
+	-- The light layer is optional: a recording made with recorder.light off
+	-- has none, and replay then recalculates the light instead. A layer that
+	-- cannot be read is treated the same way rather than costing the session.
+	local light_base
+	if row.light ~= nil and #row.light > 0 then
+		local light_body = row.light
+		local encoding_ok = true
+		if row.light_encoding == "deflate" then
+			if core.decompress then
+				local decompressed, unpacked = pcall(core.decompress, light_body, "deflate")
+				if decompressed and type(unpacked) == "string" then
+					light_body = unpacked
+				else
+					encoding_ok = false
+				end
+			else
+				encoding_ok = false
+			end
+		elseif row.light_encoding ~= "raw" then
+			encoding_ok = false
+		end
+		local values, light_err
+		if encoding_ok then
+			values, light_err = recorder_common.light.decode(light_body, volume)
+		end
+		if values then
+			light_base = values
+		else
+			core.log("warning", "[replay] the recording's light layer is unusable" ..
+				(light_err and (": " .. tostring(light_err)) or ""))
+		end
+	end
+
 	local resolved = {}
 	for _, entry in ipairs(entries) do
 		local name = names[entry.n]
@@ -104,6 +138,9 @@ function reconstruct.load(rec)
 		entries = resolved,  -- the non-air baseline, in flat-array order
 		ids = nil,           -- region flat index -> content id, for the current moment
 		param2 = nil,        -- and the param2 that goes with it
+		light_base = light_base, -- the light at tick 0, or nil when not recorded
+		has_light = light_base ~= nil,
+		light = nil,         -- and the light for the current moment
 	}
 end
 
@@ -147,6 +184,21 @@ function reconstruct.seek(state, rec, tick)
 		param2[entry.i] = entry.p
 	end
 
+	-- Light is rebuilt from its own baseline and its own changes; the node
+	-- changes above say nothing about it.
+	if state.has_light then
+		local light = {}
+		for i = 1, state.volume do light[i] = state.light_base[i] end
+		state.light = light
+		local sql = string.format(
+			"SELECT data, encoding FROM LightChanges WHERE tick <= %d ORDER BY id", tick)
+		for row in rec.db:nrows(sql) do
+			reconstruct.apply_light(state, row.data, row.encoding)
+		end
+	else
+		state.light = nil
+	end
+
 	-- tick is a number this module produced, so it is safe to put into SQL.
 	local sql = string.format(
 		"SELECT pos_x, pos_y, pos_z, node, param2 FROM Events " ..
@@ -154,6 +206,36 @@ function reconstruct.seek(state, rec, tick)
 	for row in rec.db:nrows(sql) do
 		reconstruct.change(state, {x = row.pos_x, y = row.pos_y, z = row.pos_z}, row.node, row.param2)
 	end
+end
+
+-- Apply one stored light-change body to the state. Returns whether anything
+-- was applied; a body that cannot be read is reported and skipped.
+---@param state table
+---@param body string
+---@param encoding string
+---@return boolean
+function reconstruct.apply_light(state, body, encoding)
+	if not state.light then return false end
+	local decoded_body = body
+	if encoding == "deflate" then
+		if not core.decompress then return false end
+		local ok, unpacked = pcall(core.decompress, body, "deflate")
+		if not ok or type(unpacked) ~= "string" then return false end
+		decoded_body = unpacked
+	elseif encoding ~= "raw" then
+		return false
+	end
+	local entries, err = codec.decode(decoded_body)
+	if not entries then
+		core.log("warning", "[replay] cannot read light changes: " .. tostring(err))
+		return false
+	end
+	for _, entry in ipairs(entries) do
+		if entry.i >= 1 and entry.i <= state.volume then
+			state.light[entry.i] = entry.p
+		end
+	end
+	return true
 end
 
 -- Put one recorded metadata row into the arena. An empty data string is a
@@ -188,10 +270,16 @@ end
 -- Write the whole region into the arena in one VoxelManip operation. The VM
 -- pre-loads a mapblock-aligned area that can be larger than the region, so the
 -- cells are addressed through the emerged area's origin.
+--
+-- `mode` is "recorded" to write the light the recording holds (with the engine
+-- told not to recalculate it) or "live" to let the engine work it out. Without
+-- recorded light the mode falls back to live.
 ---@param state table
 ---@param offset table
+---@param mode string?  -- "recorded" or "live"
 ---@return boolean|nil, string?
-function reconstruct.write(state, offset)
+function reconstruct.write(state, offset, mode)
+	local recorded = mode == "recorded" and state.has_light and state.light ~= nil
 	local pos1 = {
 		x = state.region.pos1.x + offset.x,
 		y = state.region.pos1.y + offset.y,
@@ -209,6 +297,7 @@ function reconstruct.write(state, offset)
 	local emerged1, emerged2 = vm:get_emerged_area()
 	local ids = vm:get_data()
 	local param2 = vm:get_param2_data()
+	local light = recorded and vm:get_light_data() or nil
 	local emerged_size = {
 		x = emerged2.x - emerged1.x + 1,
 		y = emerged2.y - emerged1.y + 1,
@@ -225,15 +314,23 @@ function reconstruct.write(state, offset)
 			for x = 1, size.x do
 				ids[map_row + x] = state.ids[state_row + x]
 				param2[map_row + x] = state.param2[state_row + x]
+				if light then
+					light[map_row + x] = state.light[state_row + x]
+				end
 			end
 		end
 	end
 	vm:set_data(ids)
 	vm:set_param2_data(param2)
+	if light then
+		vm:set_light_data(light)
+	end
 	-- update_liquids() is deliberately never called: it is what makes the
 	-- engine start flowing whatever liquids were written, while a replay has to
 	-- hold still when paused and show exactly the recorded moment when seeking.
-	vm:write_to_map()
+	-- write_to_map(false) is the other half of recorded lighting: it keeps the
+	-- engine from recalculating the light that was just put in.
+	vm:write_to_map(not recorded)
 	vm:close()
 	return true
 end

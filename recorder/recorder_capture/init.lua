@@ -9,11 +9,9 @@
 -- or just reading it with the sqlite3 shell. See README.md for the schema, the
 -- recorded event types and the API.
 
-local DEFAULT_NAME = "unnamed"
 local FLUSH_DEFAULT = 2.0         -- seconds of server time between commits
 local MAX_BUFFERED_DEFAULT = 20000
 local MAX_FAILURES = 10           -- failed commits in a row before giving up
-local NAME_MAX = 64
 -- Everything the recorder writes about the recording itself lives under this
 -- prefix, so mods cannot overwrite it by accident and the recorder knows which
 -- keys are its own.
@@ -522,50 +520,8 @@ end
 -- The recording file
 ----------------------------------------------------------------------------
 
--- Where recordings are written. A directory named in the setting is taken
--- relative to the world unless it is an absolute path: the working directory is
--- a property of how the server was started - a systemd unit, the shell somebody
--- ran it from - and a recording has no business landing somewhere else because
--- of it.
-local function recordings_dir()
-	local dir = core.settings:get("recorder.directory")
-	if not dir or dir == "" then
-		return core.get_worldpath() .. "/recordings"
-	end
-	if dir:sub(1, 1) == "/" then
-		return dir
-	end
-	return core.get_worldpath() .. "/" .. dir
-end
-
--- A recording name ends up in a file name, so anything that is not plainly a
--- word character is replaced, and leading dots (which would walk out of the
--- recordings directory) are dropped.
-local function sanitize_name(name)
-	local clean = tostring(name or ""):gsub("[^%w%-%._]", "_"):gsub("^%.+", "")
-	clean = clean:sub(1, NAME_MAX)
-	if clean == "" then return DEFAULT_NAME end
-	return clean
-end
-
-local function file_exists(path)
-	local f = io.open(path, "rb")
-	if not f then return false end
-	f:close()
-	return true
-end
-
--- Never write into a file that is already there: opening an existing recording
--- would append to it, and a name is not worth that.
-local function unique_path(dir, base)
-	local path = dir .. "/" .. base .. ".sqlite"
-	if not file_exists(path) then return path end
-	for i = 2, 1000 do
-		local candidate = string.format("%s/%s-%d.sqlite", dir, base, i)
-		if not file_exists(candidate) then return candidate end
-	end
-	return nil
-end
+-- Where recordings live, how they are named and how a reader opens one are
+-- shared with the replay half; see recorder_common.
 
 -- Size a reader would care about: the file plus the pages still in the
 -- write-ahead log, since those are part of the recording too.
@@ -649,13 +605,13 @@ recorder.start = function(record_name)
 	if state.recording then
 		return "a recording is already in progress: " .. tostring(state.path)
 	end
-	local name = sanitize_name(record_name)
-	local dir = recordings_dir()
+	local name = recorder_common.sanitize_name(record_name)
+	local dir = recorder_common.recordings_dir()
 	local now = os.time()
 	-- An already existing directory is not an error, and the open below is
 	-- what actually decides whether the directory is usable.
 	core.mkdir(dir)
-	local path = unique_path(dir, name .. "-" .. os.date("!%Y%m%dT%H%M%SZ", now))
+	local path = recorder_common.unique_path(dir, name .. "-" .. os.date("!%Y%m%dT%H%M%SZ", now))
 	if not path then
 		return "too many recordings named " .. name .. " in " .. dir
 	end

@@ -15,6 +15,7 @@ end
 
 local testdir = script_dir()
 local modpath = testdir:gsub("/tests$", "")
+local commonpath = modpath:gsub("/recorder_capture$", "/recorder_common")
 local tmpbase = os.getenv("TMPDIR") or "/tmp"
 local world = tmpbase .. "/recorder_tests/recorder"
 
@@ -22,9 +23,14 @@ os.execute("rm -rf " .. world)
 os.execute("mkdir -p " .. world)
 
 local sqlite = require("lsqlite3")
-local mocklib = dofile(testdir .. "/mocklib.lua")
-local mock = mocklib.new({ modpath = modpath, world = world })
+local mocklib = dofile(commonpath .. "/tests/mocklib.lua")
+local mock = mocklib.new({
+	modpaths = {recorder_capture = modpath, recorder_common = commonpath},
+	world = world,
+})
 core = mock.core
+-- The pack's shared half loads before the mod that depends on it.
+dofile(commonpath .. "/init.lua")
 algorithms = {
 	require = function(name)
 		if name == "lsqlite3" then return sqlite end

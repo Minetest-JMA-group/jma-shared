@@ -26,8 +26,9 @@ local EVENT_COLUMNS = 13
 local MOVEMENT_COLUMNS = 20
 
 -- What schema.sql puts in PRAGMA application_id ('JMAR'), and what tells a
--- recorder file apart from any other database.
-local APPLICATION_ID = 0x4A4D4152
+-- recorder file apart from any other database. The same value is in
+-- recorder_common, which is what a reader checks before trusting a file.
+local APPLICATION_ID = recorder_common.APPLICATION_ID
 
 -- How long a statement waits for a lock before it gives up. See open().
 local BUSY_TIMEOUT_MS = 250

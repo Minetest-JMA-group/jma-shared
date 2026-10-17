@@ -14,6 +14,7 @@ end
 
 local testdir = script_dir()
 local modpath = testdir:gsub("/tests$", "")
+local commonpath = modpath:gsub("/recorder_capture$", "/recorder_common")
 local tmpbase = os.getenv("TMPDIR") or "/tmp"
 local world = tmpbase .. "/recorder_tests/dbmanager"
 
@@ -25,7 +26,10 @@ local sqlite = require("lsqlite3")
 local logs = {}
 core = {
 	get_current_modname = function() return "recorder_capture" end,
-	get_modpath = function() return modpath end,
+	get_modpath = function(name)
+		if name == "recorder_common" then return commonpath end
+		return modpath
+	end,
 	get_worldpath = function() return world end,
 	log = function(level, msg)
 		if type(level) == "string" and msg ~= nil then
@@ -36,6 +40,8 @@ core = {
 	end,
 }
 
+-- The pack's shared half loads before the mod that depends on it.
+dofile(commonpath .. "/init.lua")
 local dbmanager = dofile(modpath .. "/dbmanager.lua")
 dbmanager.init(sqlite)
 

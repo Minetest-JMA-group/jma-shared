@@ -209,7 +209,10 @@ function M.new(opts)
 	local core = {}
 
 	core.get_current_modname = function() return "recorder_capture" end
-	core.get_modpath = function() return opts.modpath end
+	core.get_modpath = function(name)
+		if type(opts.modpaths) == "table" then return opts.modpaths[name] end
+		return opts.modpath
+	end
 	core.get_worldpath = function() return mock.world end
 	core.mkdir = function(path) return os.execute("mkdir -p '" .. path .. "'") end
 	core.get_version = function() return { project = "Luanti", string = "5.14.0-mock" } end

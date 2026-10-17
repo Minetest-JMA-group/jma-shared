@@ -17,14 +17,15 @@ local codec = recorder_common.snapshot
 local region = recorder_common.region
 
 -- Content ids belong to this run of this server, so the recording only names
--- nodes and every name is resolved again here. A node the game does not have
--- becomes CONTENT_UNKNOWN rather than whatever id the recording's server had
--- for it.
+-- nodes and every name is resolved again here. The engine raises for a name it
+-- does not know - a node from a mod the server no longer has - and that node
+-- becomes CONTENT_UNKNOWN. Id 0 is a valid id (the first registered node), so
+-- it must not be mistaken for a missing one.
 ---@param name string
 ---@return integer
 local function content_id(name)
-	local id = core.get_content_id(name)
-	if not id or id == 0 then
+	local ok, id = pcall(core.get_content_id, name)
+	if not ok or id == nil or id == core.CONTENT_UNKNOWN then
 		return core.CONTENT_UNKNOWN
 	end
 	return id

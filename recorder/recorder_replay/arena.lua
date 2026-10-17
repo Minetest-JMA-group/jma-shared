@@ -290,8 +290,10 @@ end
 ---@param box table
 ---@return boolean|nil, string?
 function arena.prepare(box)
-	local barrier = core.get_content_id(BARRIER)
-	if not barrier or barrier == 0 then
+	-- Id 0 is the first node the game registered, not a missing one, so the
+	-- registration is confirmed by resolving the name rather than by a value.
+	local called, barrier = pcall(core.get_content_id, BARRIER)
+	if not called or barrier == nil or barrier == core.CONTENT_UNKNOWN then
 		return nil, "the replay barrier node is not registered"
 	end
 	local size = region.size(box)

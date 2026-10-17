@@ -80,11 +80,12 @@ local function make_fixture()
 		t = 0,
 		pos1 = {x = 0, y = 0, z = 0},
 		size = {x = 6, y = 3, z = 6},
-		names = "default:stone\ndefault:glass",
+		names = "default:stone\ndefault:glass\nlost:block",
 		encoding = "raw",
 		data = common.snapshot.encode({
 			{i = index_of(0, 0, 0), n = 1, p = 0},
 			{i = index_of(2, 1, 2), n = 2, p = 7},
+			{i = index_of(4, 1, 4), n = 3, p = 0},   -- a node this game will not have
 			{i = index_of(5, 0, 5), n = 1, p = 0},
 		}),
 	})
@@ -118,15 +119,16 @@ local function make_fixture()
 end
 make_fixture()
 
--- Names the reconstruction has to resolve. The mock assigns ids the way the
--- engine does; the arena's barrier was registered when the replay mod loaded.
-mock.add_node_name("default:stone")
-mock.add_node_name("default:glass")
-mock.add_node_name("default:dirt")
-
 -- From here on, modules load as the replay mod.
 mock.current_modname = "recorder_replay"
 dofile(modpath .. "/init.lua")
+
+-- Names the reconstruction resolves. They are registered after the mod loads,
+-- so the barrier takes content id 0, as the first node registered on a real
+-- server does. Treating 0 as "unknown" was a real bug this order catches.
+mock.add_node_name("default:stone")
+mock.add_node_name("default:glass")
+mock.add_node_name("default:dirt")
 local sessions = recorder_replay.sessions
 local arena = recorder_replay.arena
 
@@ -421,6 +423,8 @@ check(mock.get_node({x = 106, y = 11, z = 106}).name == "default:stone",
 	"and the node at the far corner")
 check(mock.get_node({x = 101, y = 12, z = 101}).name == "air",
 	"nodes the snapshot does not name stay air")
+check(mock.get_node({x = 105, y = 12, z = 105}).name == "unknown",
+	"a node name this game does not have becomes unknown, not an error")
 check(mock.liquids_updated == false, "the reconstruction does not start liquid flow")
 
 local alice = ghost_of("Alice")

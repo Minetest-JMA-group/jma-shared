@@ -332,8 +332,13 @@ function M.new(opts)
 	-- A tiny world behind the engine stand-in: nodes by position, content ids,
 	-- emerge and a VoxelManip, so the snapshot and reconstruction paths can be
 	-- driven without a server.
-	local node_names = {"air", "ignore"}
-	local node_ids = {air = 1, ignore = 2}
+	--
+	-- The numbering follows the engine: a registered node gets an id from 0
+	-- upwards, and the three special ids sit above them. That matters because
+	-- 0 is a perfectly valid id for the first node registered.
+	local node_names = {[125] = "unknown", [126] = "air", [127] = "ignore"}
+	local node_ids = {unknown = 125, air = 126, ignore = 127}
+	local next_node_id = 0
 	mock.nodes = {}
 
 	local function node_key(pos)
@@ -341,9 +346,10 @@ function M.new(opts)
 	end
 
 	mock.add_node_name = function(name)
-		if not node_ids[name] then
-			node_names[#node_names + 1] = name
-			node_ids[name] = #node_names
+		if node_ids[name] == nil then
+			node_ids[name] = next_node_id
+			node_names[next_node_id] = name
+			next_node_id = next_node_id + 1
 		end
 		return node_ids[name]
 	end
@@ -357,10 +363,18 @@ function M.new(opts)
 		return mock.nodes[node_key(pos)] or {name = "air", param2 = 0}
 	end
 
-	core.CONTENT_AIR = 1
-	core.CONTENT_IGNORE = 2
 	core.CONTENT_UNKNOWN = 125
-	core.get_content_id = function(name) return node_ids[name] or 0 end
+	core.CONTENT_AIR = 126
+	core.CONTENT_IGNORE = 127
+	-- The engine raises for a name it does not know; anything resolving a name
+	-- from a recording has to survive that, so the mock raises too.
+	core.get_content_id = function(name)
+		local id = node_ids[name]
+		if id == nil then
+			error("Unknown node: " .. tostring(name), 2)
+		end
+		return id
+	end
 	core.get_name_from_content_id = function(id) return node_names[id] end
 	core.set_node = function(pos, node) mock.set_node(pos, node) end
 	core.get_node = function(pos) return mock.get_node(pos) end
@@ -463,7 +477,7 @@ function M.new(opts)
 		function vm:read_from_map()
 			for i = 1, volume do
 				local node = mock.get_node(position_of(i))
-				data[i] = node_ids[node.name] or 0
+				data[i] = mock.add_node_name(node.name)
 				param2[i] = node.param2 or 0
 			end
 			return emerged1, emerged2

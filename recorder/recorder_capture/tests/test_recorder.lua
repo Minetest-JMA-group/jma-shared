@@ -63,13 +63,27 @@ end
 -- is synchronous, so one step is enough; in the engine this is where the
 -- snapshot phase reports its progress.
 local function start_recording(name, region)
-	local err = recorder.start(name, region)
-	if err then return err end
+	local id, err = recorder.start(name, region)
+	if not id then return err end
 	for _ = 1, 10 do
 		if recorder.is_recording() then return nil end
 		mock.step(0.1)
 	end
 	return "the snapshot did not finish"
+end
+
+-- Start one recording and wait until that one is recording, not merely until
+-- something is.
+local function start_and_wait(name, region)
+	local id, err = recorder.start(name, region)
+	if not id then return nil, err end
+	for _ = 1, 10 do
+		for _, entry in ipairs(recorder.list()) do
+			if entry.id == id and entry.recording then return id end
+		end
+		mock.step(0.1)
+	end
+	return nil, "the snapshot did not finish"
 end
 
 local function recordings_dir()
@@ -171,24 +185,43 @@ print("=== starting and stopping ===")
 
 check(start_recording("first") == nil, "start() returns nil on success")
 check(recorder.is_recording() == true, "is_recording() agrees")
-check(recorder.get_recording_name() == "first", "the recording knows its name")
-local first_path = recorder.get_recording_path()
+local running = recorder.list()
+check(#running == 1, "one recording is running")
+local first_id = running[1].id
+check(recorder.get_recording_name(first_id) == "first", "the recording knows its name")
+local first_path = recorder.get_recording_path(first_id)
 check(first_path == recordings_dir() .. "/first-" .. os.date("!%Y%m%dT%H%M%SZ") .. ".sqlite",
 	"the file is named after the recording and the UTC time: " .. tostring(first_path))
-check(type(start_recording("second")) == "string", "starting a second recording fails")
-check(type(start_recording()) == "string", "starting while recording fails even without a name")
-check(recorder.stop() == nil, "stop() returns nil on success")
-check(recorder.is_recording() == false, "the recording is over")
-check(type(recorder.stop()) == "string", "stopping twice fails the second time")
+
+-- A second recording over its own region runs at the same time.
+local second_id, second_err = start_and_wait("second")
+check(second_id ~= nil, "a second recording starts while the first runs" ..
+	(second_id and "" or (": " .. tostring(second_err))))
+running = recorder.list()
+check(#running == 2, "two recordings are running")
+check(recorder.get_recording_name(second_id) == "second",
+	"each recording has its own id and name")
+check(recorder.get_recording_path("not-a-recording") == nil, "an unknown id has no path")
+
+check(recorder.stop(first_id) == nil, "one recording stops on its own")
+running = recorder.list()
+check(#running == 1 and running[1].id == second_id, "the other keeps running")
+check(recorder.is_recording() == true, "and is still recording")
+check(recorder.stop(second_id) == nil, "the second stops too")
+check(recorder.is_recording() == false, "the recordings are over")
+check(type(recorder.stop()) == "string", "stopping with nothing running fails")
 
 local started = list_recordings()
-check(#started == 1 and started[1]:find("^first%-") ~= nil, "exactly one file was written: " .. table.concat(started, ", "))
+check(#started == 2, "both files were written: " .. table.concat(started, ", "))
+local started_names = table.concat(started, ",")
+check(started_names:find("first-", 1, true) ~= nil and started_names:find("second-", 1, true) ~= nil,
+	"named after their recordings: " .. started_names)
 
 -- A recording that is started with no name still gets one
 check(start_recording() == nil, "start() without a name works")
 check(recorder.get_recording_name() == "unnamed", "the name defaults to 'unnamed'")
 check(recorder.stop() == nil, "it stops again")
-check(#list_recordings() == 2, "two files now")
+check(#list_recordings() == 3, "a third file now")
 
 -- Same name in the same second must not overwrite the first file
 check(start_recording("first") == nil, "the same name can be used again")
@@ -680,7 +713,9 @@ check(complaint ~= nil, "the failure is logged: " .. tostring(complaint))
 -- A run of failed commits is the one thing an operator looking at the status
 -- has to be told about, because it is the difference between a recording that
 -- is whole and one whose last seconds are missing.
-local status_ok, status_message = mock.chatcommands.recorder.func("someone", "status")
+local chat_before = #mock.chats
+local status_ok = mock.chatcommands.recorder.func("someone", "status")
+local status_message = (#mock.chats > chat_before) and mock.chats[#mock.chats].message or ""
 check(status_ok and status_message:find("failed write", 1, true) ~= nil,
 	"the status says the writes are failing: " .. tostring(status_message))
 blocker:exec("ROLLBACK")
@@ -818,8 +853,8 @@ print("=== a region is required ===")
 
 -- A table literal cannot carry a nil value, so clear the hook itself.
 recorder_common.game_hooks.region = nil
-local no_region = recorder.start("noregion")
-check(type(no_region) == "string" and no_region:find("region", 1, true) ~= nil,
+local no_id, no_region = recorder.start("noregion")
+check(no_id == nil and type(no_region) == "string" and no_region:find("region", 1, true) ~= nil,
 	"a start without any region is refused: " .. tostring(no_region))
 recorder_common.game_hooks.region = function() return TEST_REGION.pos1, TEST_REGION.pos2 end
 
@@ -936,6 +971,53 @@ check(value(cdb, "SELECT COUNT(*) FROM Events WHERE type = 'node_change' AND pos
 cdb:close()
 
 ----------------------------------------------------------------------------
+print("=== two recordings over two regions ===")
+----------------------------------------------------------------------------
+
+-- A match map and a practice area, in miniature: two recordings at the same
+-- time, each keeping only what happened inside its own region.
+local in_a = mock.add_player("InA", {pos = {x = -5, y = 0, z = 0}})
+local in_b = mock.add_player("InB", {pos = {x = 100, y = 0, z = 0}})
+local region_a = {pos1 = {x = -10, y = -5, z = -10}, pos2 = {x = 0, y = 12, z = 12}}
+local region_b = {pos1 = {x = 90, y = -5, z = -10}, pos2 = {x = 110, y = 12, z = 12}}
+local id_a, err_a = start_and_wait("area_a", region_a)
+local id_b, err_b = start_and_wait("area_b", region_b)
+check(id_a ~= nil and id_b ~= nil,
+	"two recordings run over two regions: " .. tostring(err_a or err_b))
+check(id_a ~= id_b, "with different ids")
+local path_a, path_b = recorder.get_recording_path(id_a), recorder.get_recording_path(id_b)
+
+-- An action by each player, and a node change inside the first region.
+mock.fire("register_on_dignode", {x = -5, y = 0, z = 1}, {name = "default:stone", param2 = 0}, in_a)
+mock.fire("register_on_dignode", {x = 100, y = 0, z = 1}, {name = "default:stone", param2 = 0}, in_b)
+mock.set_node({x = -5, y = 5, z = 0}, {name = "default:stone"})
+mock.fire("register_on_mapblocks_changed",
+	{[core.hash_node_position({x = -5, y = 5, z = 0})] = true}, 1)
+mock.step(0.1)
+mock.step(0.1)
+check(recorder.stop(id_a) == nil and recorder.stop(id_b) == nil, "both stop")
+
+local db_a, db_b = open_recording(path_a), open_recording(path_b)
+check(value(db_a, "SELECT COUNT(*) FROM Players WHERE name = 'InA'") == 1,
+	"the first recording knows the player in its region")
+check(value(db_a, "SELECT COUNT(*) FROM Players WHERE name = 'InB'") == 0,
+	"and not the one outside it")
+check(value(db_b, "SELECT COUNT(*) FROM Players WHERE name = 'InB'") == 1,
+	"the second knows its own player")
+check(value(db_b, "SELECT COUNT(*) FROM Players WHERE name = 'InA'") == 0,
+	"and not the other")
+check(value(db_a, "SELECT P.name FROM Events e JOIN Players P ON P.id = e.subject_player " ..
+	"WHERE e.type = 'dig'") == "InA", "the first recording kept the first player's dig")
+check(value(db_b, "SELECT P.name FROM Events e JOIN Players P ON P.id = e.subject_player " ..
+	"WHERE e.type = 'dig'") == "InB", "the second kept the second player's dig")
+check(value(db_a, "SELECT COUNT(*) FROM Events WHERE type = 'node_change'") == 1,
+	"the node changed inside the first region")
+check(value(db_b, "SELECT COUNT(*) FROM Events WHERE type = 'node_change'") == 0,
+	"and not inside the second")
+db_a:close()
+db_b:close()
+
+----------------------------------------------------------------------------
 print("=== marking a region by hand ===")
 ----------------------------------------------------------------------------
 
@@ -966,9 +1048,12 @@ mock.remove_player("Marker")
 print("=== the snapshot phase reports itself ===")
 ----------------------------------------------------------------------------
 
-check(recorder.start("phasetest") == nil, "a recording starts directly")
-local status_ok, status_msg = cmd.func("someone", "status")
-check(status_ok and status_msg:find("Snapshotting", 1, true) ~= nil,
+local phase_id = recorder.start("phasetest")
+check(phase_id ~= nil, "a recording starts directly")
+local chat_before = #mock.chats
+local status_ok = cmd.func("someone", "status")
+local status_msg = (#mock.chats > chat_before) and mock.chats[#mock.chats].message or ""
+check(status_ok and status_msg:find("snapshotting", 1, true) ~= nil,
 	"the status says what the phase is doing: " .. tostring(status_msg))
 mock.step(0.1)
 check(recorder.is_recording(), "and the recording begins when it is done")
@@ -981,15 +1066,20 @@ local command = mock.chatcommands.recorder
 check(command ~= nil, "the /recorder command is registered")
 check(command.privs.server == true, "and needs the server privilege")
 local ok, message = command.func("someone", "")
-check(ok and message:find("No recording in progress") ~= nil, "/recorder says nothing is being recorded")
+local said = (#mock.chats > 0) and mock.chats[#mock.chats].message or ""
+check(ok and said:find("No recording in progress") ~= nil,
+	"/recorder says nothing is being recorded: " .. tostring(said))
 ok, message = command.func("someone", "start fromchat")
 check(ok, "/recorder start accepts the command")
 mock.step(0.1)  -- the snapshot phase runs in server steps
 check(recorder.is_recording(), "/recorder start begins a recording")
 ok, message = command.func("someone", "meta mode survival")
 check(ok and recorder.add_meta("mode", "survival") == nil, "/recorder meta attaches metadata")
-ok, message = command.func("someone", "status")
-check(ok and message:find("Recording 'fromchat'") ~= nil, "/recorder status describes it: " .. tostring(message))
+local before_status = #mock.chats
+ok = command.func("someone", "status")
+local status_line = (#mock.chats > before_status) and mock.chats[#mock.chats].message or ""
+check(ok and status_line:find("fromchat", 1, true) ~= nil,
+	"/recorder status describes it: " .. tostring(status_line))
 ok, message = command.func("someone", "stop")
 check(ok and not recorder.is_recording(), "/recorder stop ends it")
 

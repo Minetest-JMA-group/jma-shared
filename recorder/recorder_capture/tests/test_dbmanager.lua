@@ -43,7 +43,7 @@ core = {
 -- The pack's shared half loads before the mod that depends on it.
 dofile(commonpath .. "/init.lua")
 local dbmanager = dofile(modpath .. "/dbmanager.lua")
-dbmanager.init(sqlite)
+local manager = dbmanager.new(sqlite)
 
 local checks = 0
 local function check(condition, message)
@@ -81,8 +81,8 @@ end
 local path = world .. "/test.sqlite"
 
 print("=== opening a fresh recording ===")
-check(dbmanager.open(path) == true, "open() creates the file")
-check(dbmanager.is_open(), "is_open() reports the open database")
+check(manager:open(path) == true, "open() creates the file")
+check(manager:is_open(), "is_open() reports the open database")
 
 local reader = sqlite.open(path)  -- a second connection, as an analyst would
 check(reader ~= nil, "a second connection can be opened while recording")
@@ -100,26 +100,26 @@ check(tables.Movement == "table" and tables.Events == "table", "Movement and Eve
 check(tables.Timeline == "view", "the Timeline view exists")
 
 print("=== players ===")
-check(dbmanager.player_id("Alice") == 1, "the first player gets id 1")
-check(dbmanager.player_id("Bob") == 2, "the next player gets id 2")
-check(dbmanager.player_id("Alice") == 1, "a known player is not inserted twice")
+check(manager:player_id("Alice") == 1, "the first player gets id 1")
+check(manager:player_id("Bob") == 2, "the next player gets id 2")
+check(manager:player_id("Alice") == 1, "a known player is not inserted twice")
 check(scalar(reader, "SELECT COUNT(*) FROM Players") == 2, "two Players rows")
 
 print("=== writing rows ===")
 -- Movement row 1: the first sample of a player has no acceleration to derive
-dbmanager.add_movement({ dbmanager.next_id(), 1, 0.1, 0.1, 1,
+manager:add_movement({ manager:next_id(), 1, 0.1, 0.1, 1,
 	1.0, 2.0, 3.0, 0.25, 1.5, 0.0, 0.0, 5.0, nil, nil, nil, 5.0, 1 + 4, 0.0, 1.0 })
-dbmanager.add_event({ dbmanager.next_id(), 1, 0.1, "dig", 1, nil, 10.0, 11.0, 12.0,
+manager:add_event({ manager:next_id(), 1, 0.1, "dig", 1, nil, 10.0, 11.0, 12.0,
 	"default:stone", 3, "default:pick_stone", nil })
 -- Movement row 2, with acceleration derived from row 1
-dbmanager.add_movement({ dbmanager.next_id(), 2, 0.2, 0.1, 1,
+manager:add_movement({ manager:next_id(), 2, 0.2, 0.1, 1,
 	1.0, 2.0, 3.0, 0.25, 1.5, 0.0, 1.0, 5.0, 0.0, 10.0, 0.0, math.sqrt(26), 5, 0.0, 1.0 })
-check(dbmanager.buffered() == 3, "three rows are buffered")
-check(dbmanager.stats().movement == 0, "nothing is counted as written before the flush")
+check(manager:buffered() == 3, "three rows are buffered")
+check(manager:stats().movement == 0, "nothing is counted as written before the flush")
 
-check(dbmanager.flush() == true, "flush() writes the batch")
-check(dbmanager.buffered() == 0, "the buffer is empty after the flush")
-local stats = dbmanager.stats()
+check(manager:flush() == true, "flush() writes the batch")
+check(manager:buffered() == 0, "the buffer is empty after the flush")
+local stats = manager:stats()
 check(stats.movement == 2 and stats.events == 1, "the written rows are counted")
 check(scalar(reader, "SELECT COUNT(*) FROM Movement") == 2, "the movement rows are there")
 check(scalar(reader, "SELECT COUNT(*) FROM Events") == 1, "the event row is there")
@@ -148,15 +148,15 @@ check(timeline[1].kind == "movement" and timeline[2].kind == "event" and timelin
 check(timeline[2].type == "dig", "the view carries the event type")
 
 print("=== metadata ===")
-check(dbmanager.set_meta("ctf:map", "forge") == true, "set_meta writes")
-check(dbmanager.get_meta("ctf:map") == "forge", "get_meta reads back")
-check(dbmanager.get_meta("nothing") == nil, "an unknown key reads as nil")
-check(dbmanager.set_meta("ctf:map", "second") == true, "a key can be written again")
-check(dbmanager.get_meta("ctf:map") == "second", "the second value replaces the first")
+check(manager:set_meta("ctf:map", "forge") == true, "set_meta writes")
+check(manager:get_meta("ctf:map") == "forge", "get_meta reads back")
+check(manager:get_meta("nothing") == nil, "an unknown key reads as nil")
+check(manager:set_meta("ctf:map", "second") == true, "a key can be written again")
+check(manager:get_meta("ctf:map") == "second", "the second value replaces the first")
 
 print("=== the region snapshot ===")
 local blob = "\0\1\2\255\0"
-local snapshot_ok, snapshot_err = dbmanager.set_snapshot({
+local snapshot_ok, snapshot_err = manager:set_snapshot({
 	tick = 0,
 	t = 0,
 	pos1 = {x = 10, y = 20, z = 30},
@@ -180,24 +180,24 @@ check(snapshot_row.data == blob, "and the body round-trips byte for byte, NULs i
 check(scalar(reader, "SELECT COUNT(*) FROM Snapshot") == 1, "one snapshot row")
 
 print("=== rejected rows and dropped batches ===")
-dbmanager.add_event({ dbmanager.next_id(), 3, 0.3, "dig", 999, nil,
+manager:add_event({ manager:next_id(), 3, 0.3, "dig", 999, nil,
 	nil, nil, nil, nil, nil, nil, nil })
-local ok, err, lost = dbmanager.flush()
+local ok, err, lost = manager:flush()
 check(ok == nil, "a row pointing at a player that does not exist fails the flush")
 check(lost == 1, "the failed batch reports how many rows were lost")
 check(tostring(err):find("FOREIGN KEY constraint failed") ~= nil,
 	"foreign keys are enforced: " .. tostring(err))
-check(dbmanager.buffered() == 0, "a failed batch is dropped instead of retried forever")
-check(dbmanager.stats().dropped == 1, "the dropped rows are counted")
-check(dbmanager.stats().failed == 1, "the failure is counted")
+check(manager:buffered() == 0, "a failed batch is dropped instead of retried forever")
+check(manager:stats().dropped == 1, "the dropped rows are counted")
+check(manager:stats().failed == 1, "the failure is counted")
 check(scalar(reader, "SELECT COUNT(*) FROM Events") == 1, "the failed row is not in the file")
 
-check(dbmanager.flush() == true, "the next flush works again")
-check(dbmanager.stats().failed == 0, "a successful flush clears the failure count")
+check(manager:flush() == true, "the next flush works again")
+check(manager:stats().failed == 0, "a successful flush clears the failure count")
 
 print("=== closing ===")
-check(dbmanager.close() == true, "close() folds the log back in")
-check(not dbmanager.is_open(), "the database is closed")
+check(manager:close() == true, "close() folds the log back in")
+check(not manager:is_open(), "the database is closed")
 check(scalar(reader, "SELECT COUNT(*) FROM Movement") == 2, "the open connection still reads the recording")
 reader:close()
 -- The log file goes away once nothing holds the recording open
@@ -215,26 +215,26 @@ check(#timeline_after == 3, "the view works on the finished file")
 
 print("=== refusing to reuse a file ===")
 final:close()
-check(select(1, dbmanager.open(path)) == nil, "opening a finished recording is refused")
+check(select(1, manager:open(path)) == nil, "opening a finished recording is refused")
 local not_a_db = world .. "/garbage.sqlite"
 local f = io.open(not_a_db, "wb")
 f:write("this is not a database at all")
 f:close()
-local opened, open_err = dbmanager.open(not_a_db)
+local opened, open_err = manager:open(not_a_db)
 check(opened == nil, "opening a file that is not a database is refused")
 check(tostring(open_err):find("not a SQLite database") ~= nil, "and says so: " .. tostring(open_err))
 
 print("=== closing while something else is reading ===")
 local busy_path = world .. "/read-while-closing.sqlite"
-check(dbmanager.open(busy_path) == true, "a recording opens")
-dbmanager.player_id("Reader")
-dbmanager.add_event({ dbmanager.next_id(), 1, 0.1, "test", 1, nil, nil, nil, nil, nil, nil, nil, nil })
-check(dbmanager.flush() == true, "a row is written")
+check(manager:open(busy_path) == true, "a recording opens")
+manager:player_id("Reader")
+manager:add_event({ manager:next_id(), 1, 0.1, "test", 1, nil, nil, nil, nil, nil, nil, nil, nil })
+check(manager:flush() == true, "a row is written")
 local busy_reader = sqlite.open(busy_path)
 local reader_stmt = busy_reader:prepare("SELECT COUNT(*) FROM Events")
 check(reader_stmt:step() == sqlite.ROW, "another connection reads the recording and holds its snapshot")
 local logs_before = #logs
-check(dbmanager.close() == true, "the recording still closes")
+check(manager:close() == true, "the recording still closes")
 local told = false
 for i = logs_before + 1, #logs do
 	if logs[i]:find("write-ahead log", 1, true) then told = true end
@@ -250,7 +250,7 @@ local fdb = sqlite.open(foreign_path)
 fdb:exec("CREATE TABLE Notes (id INTEGER PRIMARY KEY, text TEXT) STRICT")
 fdb:exec("INSERT INTO Notes (text) VALUES ('somebody else''s data')")
 fdb:close()
-local refused, refused_err = dbmanager.open(foreign_path)
+local refused, refused_err = manager:open(foreign_path)
 check(refused == nil, "a database belonging to something else is refused")
 check(tostring(refused_err):find("not empty") ~= nil, "and says why: " .. tostring(refused_err))
 local foreign = sqlite.open(foreign_path)
@@ -262,16 +262,16 @@ foreign:close()
 print("=== a batch of movement with no events ===")
 -- Players moving and nobody doing anything is the ordinary shape of a batch
 local only_path = world .. "/movement-only.sqlite"
-check(dbmanager.open(only_path) == true, "a recording opens")
-dbmanager.player_id("Walker")
-dbmanager.add_movement({ dbmanager.next_id(), 1, 0.1, 0.1, 1,
+check(manager:open(only_path) == true, "a recording opens")
+manager:player_id("Walker")
+manager:add_movement({ manager:next_id(), 1, 0.1, 0.1, 1,
 	0, 0, 0, 0, 0, 1, 0, 0, nil, nil, nil, 1, 0, 0, 0 })
-dbmanager.add_movement({ dbmanager.next_id(), 2, 0.2, 0.1, 1,
+manager:add_movement({ manager:next_id(), 2, 0.2, 0.1, 1,
 	1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0 })
-check(dbmanager.flush() == true, "a batch holding only movement rows is written")
-check(dbmanager.stats().movement == 2, "both rows are counted as written")
-check(dbmanager.stats().dropped == 0, "nothing was dropped")
-check(dbmanager.close() == true, "the recording closes")
+check(manager:flush() == true, "a batch holding only movement rows is written")
+check(manager:stats().movement == 2, "both rows are counted as written")
+check(manager:stats().dropped == 0, "nothing was dropped")
+check(manager:close() == true, "the recording closes")
 local only = sqlite.open(only_path)
 check(scalar(only, "SELECT COUNT(*) FROM Movement") == 2, "both movement rows are in the file")
 check(scalar(only, "SELECT COUNT(*) FROM Events") == 0, "and no event row was invented")
@@ -279,17 +279,17 @@ only:close()
 
 print("=== a value the database refuses ===")
 local bad_path = world .. "/bad-value.sqlite"
-check(dbmanager.open(bad_path) == true, "a recording opens")
-dbmanager.player_id("Writer")
+check(manager:open(bad_path) == true, "a recording opens")
+manager:player_id("Writer")
 -- lsqlite3 raises rather than returning a code for a value it cannot bind; a
 -- raise must not leave the transaction open for every later batch to stumble on
-dbmanager.add_event({ dbmanager.next_id(), 1, 0.1, "test", 1, nil, nil, nil, nil, nil, nil, {}, nil })
-local rejected, reject_err = dbmanager.flush()
+manager:add_event({ manager:next_id(), 1, 0.1, "test", 1, nil, nil, nil, nil, nil, nil, {}, nil })
+local rejected, reject_err = manager:flush()
 check(rejected == nil, "the batch fails")
 check(tostring(reject_err):find("cannot insert row") ~= nil, "with a message: " .. tostring(reject_err))
-dbmanager.add_event({ dbmanager.next_id(), 2, 0.2, "test", 1, nil, nil, nil, nil, nil, nil, "fine", nil })
-check(dbmanager.flush() == true, "the next batch writes, so no transaction was left open")
-check(dbmanager.close() == true, "the recording closes")
+manager:add_event({ manager:next_id(), 2, 0.2, "test", 1, nil, nil, nil, nil, nil, nil, "fine", nil })
+check(manager:flush() == true, "the next batch writes, so no transaction was left open")
+check(manager:close() == true, "the recording closes")
 local bad = sqlite.open(bad_path)
 check(scalar(bad, "SELECT COUNT(*) FROM Events") == 1, "only the good row is in the file")
 check(scalar(bad, "SELECT item FROM Events") == "fine", "and it is the one that was expected")
@@ -297,16 +297,42 @@ bad:close()
 
 print("=== a player row that cannot be written ===")
 local locked_path = world .. "/locked-player.sqlite"
-check(dbmanager.open(locked_path) == true, "a recording opens")
+check(manager:open(locked_path) == true, "a recording opens")
 local blocker = sqlite.open(locked_path)
 check(blocker:exec("BEGIN IMMEDIATE") == sqlite.OK, "another connection takes the write lock")
-local player, player_err = dbmanager.player_id("Locked")
+local player, player_err = manager:player_id("Locked")
 check(player == nil, "the player row is not written while the database is locked")
 check(tostring(player_err):find("cannot add player") ~= nil, "and the failure is reported, not raised: " ..
 	tostring(player_err))
 blocker:exec("ROLLBACK")
 blocker:close()
-check(dbmanager.player_id("Locked") ~= nil, "the same player is picked up once the lock is gone")
-check(dbmanager.close() == true, "the recording closes")
+check(manager:player_id("Locked") ~= nil, "the same player is picked up once the lock is gone")
+check(manager:close() == true, "the recording closes")
+
+print("=== two recordings at once ===")
+-- The point of the refactor: two files, two connections, two id sequences.
+local first = dbmanager.new(sqlite)
+local second = dbmanager.new(sqlite)
+local first_path = world .. "/first.sqlite"
+local second_path = world .. "/second.sqlite"
+check(first:open(first_path) == true, "the first recording opens")
+check(second:open(second_path) == true, "the second recording opens at the same time")
+local first_alice = first:player_id("Alice")
+local second_bob = second:player_id("Bob")
+check(first_alice == 1 and second_bob == 1, "each file numbers its own players")
+check(first:next_id() == 1 and second:next_id() == 1, "and its own rows")
+first:add_event({1, 0, 0, "one", first_alice, nil, nil, nil, nil, nil, nil, nil, nil})
+second:add_event({1, 0, 0, "two", second_bob, nil, nil, nil, nil, nil, nil, nil, nil})
+check(first:flush() == true and second:flush() == true, "both flush")
+check(first:close() == true and second:close() == true, "both close")
+
+local first_reader = sqlite.open(first_path)
+local second_reader = sqlite.open(second_path)
+check(scalar(first_reader, "SELECT type FROM Events") == "one", "the first file holds the first recording")
+check(scalar(second_reader, "SELECT type FROM Events") == "two", "the second holds the second")
+check(scalar(first_reader, "SELECT name FROM Players") == "Alice", "with its own players")
+check(scalar(second_reader, "SELECT name FROM Players") == "Bob", "and its own")
+first_reader:close()
+second_reader:close()
 
 print(("\n%d checks passed"):format(checks))

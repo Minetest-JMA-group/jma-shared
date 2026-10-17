@@ -8,10 +8,16 @@
 -- attach. The file is meant to be read back later: replaying it, analysing it
 -- or just reading it with the sqlite3 shell. See README.md for the schema, the
 -- recorded event types and the API.
+--
+-- Several recordings can run at once, each over its own region and into its own
+-- file: a game may record a match while someone records a practice area. Every
+-- recording has an id; events are offered to all of them and each one keeps
+-- what its own region says belongs to it.
 
 local FLUSH_DEFAULT = 2.0         -- seconds of server time between commits
 local MAX_BUFFERED_DEFAULT = 20000
 local MAX_FAILURES = 10           -- failed commits in a row before giving up
+local MAX_RECORDINGS_DEFAULT = 4  -- 0 = no limit
 -- Everything the recorder writes about the recording itself lives under this
 -- prefix, so mods cannot overwrite it by accident and the recorder knows which
 -- keys are its own.
@@ -46,18 +52,18 @@ if not sqlite then
 	core.log("error", msg)
 	local unavailable = "recorder is unavailable: " .. msg
 	---@param record_name string?
-	recorder.start = function(record_name) return unavailable end
-	---@param reason string?
-	recorder.stop = function(reason) return unavailable end
+	recorder.start = function(record_name) return nil, unavailable end
+	recorder.stop = function(id, reason) return unavailable end
 	---@param key string
 	---@param value string
-	recorder.add_meta = function(key, value) return unavailable end
+	recorder.add_meta = function(key, value, id) return unavailable end
 	---@param event_type string
 	---@param fields table?
 	recorder.log_event = function(event_type, fields) return unavailable end
 	recorder.is_recording = function() return false end
 	recorder.get_recording_name = function() return nil end
 	recorder.get_recording_path = function() return nil end
+	recorder.list = function() return {} end
 	-- The command is registered all the same: an operator typing /recorder is
 	-- owed the reason it does nothing, rather than "unknown command".
 	core.register_chatcommand("recorder", {
@@ -70,42 +76,56 @@ if not sqlite then
 end
 
 local modpath = core.get_modpath(core.get_current_modname())
----@type DBManager
 local dbmanager = dofile(modpath .. "/dbmanager.lua")
-dbmanager.init(sqlite)
 local snapshot_module = dofile(modpath .. "/snapshot.lua")
 local region_module = recorder_common.region
 
-local state = {
-	recording = false,
-	name = nil,          -- sanitized recording name
-	path = nil,          -- path of the SQLite file
-	started_at = nil,    -- os.time() when the recording was asked for
-	tick = 0,            -- server steps since the recording started
-	elapsed = 0,         -- server seconds since the recording started
-	last_flush = 0,
-	flush_interval = FLUSH_DEFAULT,
-	max_buffered = MAX_BUFFERED_DEFAULT,
-	max_duration = 0,    -- server seconds; 0 = no limit
-	max_size = 0,        -- bytes; 0 = no limit
-	disabled = {},       -- event types not to record
-	complaints = {},     -- what has already been reported, so it is said once
-	player_errors = {},  -- players whose row could not be written (said once)
-	troubles = {},       -- what to write down about them, for the file
-	troubles_dirty = false,
-	pending_start = false,   -- the opening state is taken at the next step
-	region = nil,        -- the cuboid this recording covers
-	snapshot = nil,      -- the snapshot phase, while it runs
-	snapshot_budget = 20000,  -- region nodes examined per step while snapshotting
-	sampled = {},        -- player id -> name, from the last pass through the region
-	known_ids = nil,     -- region flat index -> content id, what the recording knows
-	known_param2 = nil,  -- and the param2 that goes with it
-	pending_blocks = {}, -- mapblock changes waiting to be diffed, with their tick
-	prev = {},           -- player id -> last sample, for deriving acceleration
-	written = {},        -- player id -> last sample written, to spot no-ops
-	wield = {},          -- player id -> last wielded itemstring
-	joined = {},         -- player ids that are in the recording as present
-}
+-- One recording's state. Everything below that takes a `rec` gets one of these;
+-- nothing about a recording is module-level except the id counter and the
+-- marks.
+local function new_state()
+	return {
+		id = nil,            -- the handle the API and the commands use
+		db = nil,            -- this recording's DBManager instance
+		recording = false,
+		name = nil,          -- sanitized recording name
+		path = nil,          -- path of the SQLite file
+		started_at = nil,    -- os.time() when the recording was asked for
+		tick = 0,            -- server steps since the recording started
+		elapsed = 0,         -- server seconds since the recording started
+		last_flush = 0,
+		flush_interval = FLUSH_DEFAULT,
+		max_buffered = MAX_BUFFERED_DEFAULT,
+		max_duration = 0,    -- server seconds; 0 = no limit
+		max_size = 0,        -- bytes; 0 = no limit
+		disabled = {},       -- event types not to record
+		complaints = {},     -- what has already been reported, so it is said once
+		player_errors = {},  -- players whose row could not be written (said once)
+		troubles = {},       -- what to write down about them, for the file
+		troubles_dirty = false,
+		pending_start = false,   -- the opening state is taken at the next step
+		region = nil,        -- the cuboid this recording covers
+		snapshot = nil,      -- the snapshot phase, while it runs
+		snapshot_budget = 20000,  -- region nodes examined per step while snapshotting
+		sampled = {},        -- player id -> name, from the last pass through the region
+		known_ids = nil,     -- region flat index -> content id, what the recording knows
+		known_param2 = nil,  -- and the param2 that goes with it
+		pending_blocks = {}, -- mapblock changes waiting to be diffed, with their tick
+		prev = {},           -- player id -> last sample, for deriving acceleration
+		written = {},        -- player id -> last sample written, to spot no-ops
+		wield = {},          -- player id -> last wielded itemstring
+		joined = {},         -- player ids that are in the recording as present
+	}
+end
+
+-- Recordings being written or snapshotted right now, by id.
+local recordings = {}
+local recording_counter = 0
+
+local function new_recording_id()
+	recording_counter = recording_counter + 1
+	return string.format("%08x%04x", os.time(), recording_counter)
+end
 
 -- Per-player region marks, kept between recordings. A mark dies with the
 -- player's connection, so one that is forgotten cannot surprise the next person.
@@ -132,18 +152,18 @@ end
 
 -- One report per kind of trouble per recording: a callback that fires every
 -- tick must not turn a single problem into a log full of them.
-local function complain(label, message)
-	if state.complaints[label] then return end
-	state.complaints[label] = true
+local function complain(rec, label, message)
+	if rec.complaints[label] then return end
+	rec.complaints[label] = true
 	log_error(message)
 end
 
 -- Something the engine hands over can always turn out to be unreadable, and one
 -- player that cannot be dealt with must not cost the rest of the recording.
-local function guarded(label, func, ...)
+local function guarded(rec, label, func, ...)
 	local ok, err = pcall(func, ...)
 	if not ok then
-		complain(label, "cannot " .. label .. ": " .. tostring(err))
+		complain(rec, label, "cannot " .. label .. ": " .. tostring(err))
 	end
 end
 
@@ -156,18 +176,18 @@ local record_event
 -- metadata rather than into the event buffer, so that it does not share the
 -- fate of a batch that fails later, and it is attempted again after every
 -- commit that goes through in case the trouble stopped the note too.
-local function write_troubles()
-	if not state.troubles_dirty then return end
-	local ok = dbmanager.set_meta(META_PREFIX .. "player_errors", table.concat(state.troubles, "; "))
+local function write_troubles(rec)
+	if not rec.troubles_dirty then return end
+	local ok = rec.db:set_meta(META_PREFIX .. "player_errors", table.concat(rec.troubles, "; "))
 	if ok then
-		state.troubles_dirty = false
+		rec.troubles_dirty = false
 	end
 end
 
-local function note_player_error(name, message)
-	state.troubles[#state.troubles + 1] = string.format("%s (%s)", name, tostring(message))
-	state.troubles_dirty = true
-	write_troubles()
+local function note_player_error(rec, name, message)
+	rec.troubles[#rec.troubles + 1] = string.format("%s (%s)", name, tostring(message))
+	rec.troubles_dirty = true
+	write_troubles(rec)
 end
 
 ----------------------------------------------------------------------------
@@ -198,14 +218,14 @@ end
 -- written. It is asked again the next time they are seen, so a database that
 -- was busy for a moment does not cost the recording a player for good.
 ---@return integer|nil
-local function player_id(obj)
+local function player_id(rec, obj)
 	local name = player_name(obj)
 	if not name then return nil end
-	local id, err = dbmanager.player_id(name)
-	if not id and not state.player_errors[name] then
-		state.player_errors[name] = true
+	local id, err = rec.db:player_id(name)
+	if not id and not rec.player_errors[name] then
+		rec.player_errors[name] = true
 		log_error(tostring(err))
-		note_player_error(name, err)
+		note_player_error(rec, name, err)
 	end
 	return id
 end
@@ -268,8 +288,8 @@ end
 -- cannot be read any more is left out rather than guessed at.
 ---@param ev table
 ---@return boolean
-local function event_in_region(ev)
-	local reg = state.region
+local function event_in_region(rec, ev)
+	local reg = rec.region
 	if not reg then return true end
 	if ev.subject == nil and ev.object == nil then
 		-- Nothing in it is a player. A position, when there is one, decides; an
@@ -415,18 +435,18 @@ end
 -- to fit the column it goes into right here: a value SQLite refuses would cost
 -- not just this event but every row buffered beside it.
 ---@param ev table
-record_event = function(ev)
-	if not state.recording then return end
+record_event = function(rec, ev)
+	if not rec.recording then return end
 	if type(ev.type) ~= "string" or ev.type == "" then
-		complain("event without a type", "cannot record an event whose type is not a name")
+		complain(rec, "event without a type", "cannot record an event whose type is not a name")
 		return
 	end
-	if not REGION_EXEMPT[ev.type] and not event_in_region(ev) then return end
-	if state.disabled[ev.type] then return end
+	if not REGION_EXEMPT[ev.type] and not event_in_region(rec, ev) then return end
+	if rec.disabled[ev.type] then return end
 	local x, y, z = position_of(ev.pos)
-	dbmanager.add_event({
-		dbmanager.next_id(), ev.tick or state.tick, ev.t or state.elapsed, ev.type,
-		player_id(ev.subject), player_id(ev.object),
+	rec.db:add_event({
+		rec.db:next_id(), ev.tick or rec.tick, ev.t or rec.elapsed, ev.type,
+		player_id(rec, ev.subject), player_id(rec, ev.object),
 		x, y, z,
 		type(ev.node) == "string" and ev.node or nil,
 		param2_of(ev.param2), stack_string(ev.item),
@@ -434,15 +454,23 @@ record_event = function(ev)
 	})
 end
 
+-- Offer an event to every recording; each keeps it if its own region says it
+-- belongs there. A recording that fails on it does not cost the others.
+local function broadcast_event(ev)
+	for _, rec in pairs(recordings) do
+		guarded(rec, "record an event", record_event, rec, ev)
+	end
+end
+
 ----------------------------------------------------------------------------
 -- Per-tick sampling
 ----------------------------------------------------------------------------
 
-local function sample_state(player, pid, dtime)
+local function sample_state(rec, player, pid, dtime)
 	local pos = player:get_pos()
 	if not pos then return nil end
 	local vel = player:get_velocity() or { x = 0, y = 0, z = 0 }
-	local prev = state.prev[pid]
+	local prev = rec.prev[pid]
 	local acc_x, acc_y, acc_z
 	if prev and dtime > 0 then
 		acc_x = (vel.x - prev[S_VEL_X]) / dtime
@@ -461,7 +489,7 @@ local function sample_state(player, pid, dtime)
 		controls.movement_x or 0,
 		controls.movement_y or 0,
 	}
-	state.prev[pid] = sample
+	rec.prev[pid] = sample
 	return sample
 end
 
@@ -476,27 +504,27 @@ end
 -- are left out - a reader carries the previous row forward, and acceleration
 -- is part of the comparison, so a sample only disappears when it says nothing
 -- new. That is what keeps a recording from growing while players stand still.
-local function record_player(player, dtime)
+local function record_player(rec, player, dtime)
 	local name = player_name(player)
 	if not name then return end
-	local pid = dbmanager.player_id(name)
+	local pid = rec.db:player_id(name)
 	if not pid then return end
-	local sample = sample_state(player, pid, dtime)
+	local sample = sample_state(rec, player, pid, dtime)
 	if not sample then return end
 
 	local wield = wielded(player)
-	if state.wield[pid] ~= wield then
-		state.wield[pid] = wield
+	if rec.wield[pid] ~= wield then
+		rec.wield[pid] = wield
 		-- Tools wear out as they are used, so this is also where a degrading
 		-- tool shows up.
-		record_event({ type = "wield", subject = name, item = stack_string(wield) })
+		record_event(rec, { type = "wield", subject = name, item = stack_string(wield) })
 	end
 
-	local last = state.written[pid]
+	local last = rec.written[pid]
 	if last and same_state(sample, last) then return end
-	state.written[pid] = sample
-	dbmanager.add_movement({
-		dbmanager.next_id(), state.tick, state.elapsed, dtime, pid,
+	rec.written[pid] = sample
+	rec.db:add_movement({
+		rec.db:next_id(), rec.tick, rec.elapsed, dtime, pid,
 		sample[S_POS_X], sample[S_POS_Y], sample[S_POS_Z],
 		sample[S_PITCH], sample[S_YAW],
 		sample[S_VEL_X], sample[S_VEL_Y], sample[S_VEL_Z],
@@ -531,27 +559,27 @@ end
 -- A player enters the recording: by joining the game inside the region, by
 -- being online in it when the recording starts (at_start), or by walking into
 -- it (reason "region").
-local function on_join(player, last_login, at_start, reason)
+local function on_join(rec, player, last_login, at_start, reason)
 	local name = player_name(player)
 	if not name then return end
 	-- A player who joins the game outside the region is not in the recording
 	-- yet; the next pass through the region will join them there.
 	local pos = position_of_object(player)
-	if state.region and not (pos and region_module.contains(state.region, pos)) then
+	if rec.region and not (pos and region_module.contains(rec.region, pos)) then
 		return
 	end
-	local pid = dbmanager.player_id(name)
+	local pid = rec.db:player_id(name)
 	local wield = wielded(player)
 	if pid then
 		-- The join event itself carries the wielded stack, so this only records
 		-- the baseline that later changes are compared against.
-		state.wield[pid] = wield
+		rec.wield[pid] = wield
 	end
 	local snapshot = player_snapshot(player)
 	if pid then
-		state.joined[pid] = true
+		rec.joined[pid] = true
 	end
-	record_event({
+	record_event(rec, {
 		type = "join",
 		subject = name,
 		pos = snapshot.pos,
@@ -570,18 +598,18 @@ local function on_join(player, last_login, at_start, reason)
 	})
 end
 
-local function on_leave(player, timed_out)
+local function on_leave(rec, player, timed_out)
 	local name = player_name(player)
 	if not name then return end
-	local pid = dbmanager.player_id(name)
+	local pid = rec.db:known_player_id(name)
 	-- A player who was never in the recording (they stayed outside the region)
-	-- has nothing to leave from.
-	if not pid or not state.joined[pid] then return end
+	-- has nothing to leave from, and is not added to it just to say so.
+	if not pid or not rec.joined[pid] then return end
 	-- Where they were when they left is what a reader following their trail
 	-- has to end on. The engine is free to have let go of the object by now, so
 	-- a player that cannot be read is recorded without a position.
 	local read, pos = pcall(function() return player:get_pos() end)
-	record_event({
+	record_event(rec, {
 		type = "leave",
 		subject = name,
 		pos = read and pos or nil,
@@ -589,58 +617,58 @@ local function on_leave(player, timed_out)
 	})
 	-- Whatever the player does after rejoining has no relation to these,
 	-- and the first sample after a rejoin has no previous velocity.
-	state.prev[pid] = nil
-	state.written[pid] = nil
-	state.wield[pid] = nil
-	state.joined[pid] = nil
+	rec.prev[pid] = nil
+	rec.written[pid] = nil
+	rec.wield[pid] = nil
+	rec.joined[pid] = nil
 end
 
 -- One pass through the region: sample the players in it, and note who walked
 -- in or out since the last pass. Everything in a recording is inside the
 -- region, so a player who leaves it leaves the recording until they return.
-local function observe_region(dtime)
-	local reg = state.region
+local function observe_region(rec, dtime)
+	local reg = rec.region
 	local seen = {}
 	for player in core.objects_in_area(reg.pos1, reg.pos2) do
 		if core.is_player(player) then
 			local name = player_name(player)
 			if name then
-				local pid = player_id(name)
+				local pid = player_id(rec, name)
 				if pid then
 					seen[pid] = name
-					if not state.joined[pid] then
+					if not rec.joined[pid] then
 						-- They were outside when the recording started, or have
 						-- walked in since; either way they enter the recording here.
-						guarded("record a join", on_join, player, nil, false, "region")
+						guarded(rec, "record a join", on_join, rec, player, nil, false, "region")
 					end
 					-- A player who could not be joined is not sampled either: a
 					-- movement trail that begins without a join would leave a
 					-- reader without the state the trail starts from.
-					if state.joined[pid] then
-						guarded("sample a player", record_player, player, dtime)
+					if rec.joined[pid] then
+						guarded(rec, "sample a player", record_player, rec, player, dtime)
 					end
 				end
 			end
 		end
 	end
-	for pid, name in pairs(state.sampled) do
-		if not seen[pid] and state.joined[pid] then
+	for pid, name in pairs(rec.sampled) do
+		if not seen[pid] and rec.joined[pid] then
 			-- They are still in the game but out of the region: their trail
 			-- ends where it was last sampled.
-			local last = state.prev[pid]
-			record_event({
+			local last = rec.prev[pid]
+			record_event(rec, {
 				type = "leave",
 				subject = name,
 				pos = last and {x = last[S_POS_X], y = last[S_POS_Y], z = last[S_POS_Z]} or nil,
 				data = { reason = "region" },
 			})
-			state.joined[pid] = nil
-			state.prev[pid] = nil
-			state.written[pid] = nil
-			state.wield[pid] = nil
+			rec.joined[pid] = nil
+			rec.prev[pid] = nil
+			rec.written[pid] = nil
+			rec.wield[pid] = nil
 		end
 	end
-	state.sampled = seen
+	rec.sampled = seen
 end
 
 ----------------------------------------------------------------------------
@@ -664,9 +692,9 @@ local function recording_size(path)
 	return total
 end
 
-local function write_meta(key, value)
+local function write_meta(rec, key, value)
 	if value == nil then return end
-	local ok, err = dbmanager.set_meta(key, value)
+	local ok, err = rec.db:set_meta(key, value)
 	if not ok then
 		log_error(string.format("cannot write metadata %s: %s", key, tostring(err)))
 	end
@@ -676,49 +704,49 @@ end
 -- Committing
 ----------------------------------------------------------------------------
 
--- Assigned once the API exists; a stop triggered from inside the sampling can
+-- Assigned once stop() exists; a stop triggered from inside the sampling can
 -- reach it from here.
 local stop_recording
 
 -- Buffered rows are committed in batches: one transaction a couple of seconds
 -- instead of one per action. The same rows end up on disk, but the server is
 -- not made to wait for a disk synchronization for each of them.
-local function maybe_flush()
-	if state.max_duration > 0 and state.elapsed >= state.max_duration then
-		stop_recording("limit_duration")
+local function maybe_flush(rec)
+	if rec.max_duration > 0 and rec.elapsed >= rec.max_duration then
+		stop_recording(rec, "limit_duration")
 		return
 	end
-	if state.max_size > 0 and recording_size(state.path) >= state.max_size then
-		stop_recording("limit_size")
+	if rec.max_size > 0 and recording_size(rec.path) >= rec.max_size then
+		stop_recording(rec, "limit_size")
 		return
 	end
 	-- 0 means the interval alone decides when to commit
-	local crowded = state.max_buffered > 0 and dbmanager.buffered() >= state.max_buffered
-	if not crowded and (state.elapsed - state.last_flush) < state.flush_interval then
+	local crowded = rec.max_buffered > 0 and rec.db:buffered() >= rec.max_buffered
+	if not crowded and (rec.elapsed - rec.last_flush) < rec.flush_interval then
 		return
 	end
-	state.last_flush = state.elapsed
-	local ok, err, lost = dbmanager.flush()
+	rec.last_flush = rec.elapsed
+	local ok, err, lost = rec.db:flush()
 	if ok then
-		write_troubles()
+		write_troubles(rec)
 		return
 	end
-	log_error(string.format("cannot write %d rows to %s: %s", lost or 0, tostring(state.path), tostring(err)))
+	log_error(string.format("cannot write %d rows to %s: %s", lost or 0, tostring(rec.path), tostring(err)))
 	-- The rows are gone, so what was last written is no longer what a reader
 	-- would carry forward: every player's next sample is written again rather
 	-- than looking like a quiet tick, and a held item that changed in the lost
 	-- rows is announced again instead of going unmentioned.
-	state.written, state.wield = {}, {}
-	record_event({
+	rec.written, rec.wield = {}, {}
+	record_event(rec, {
 		type = "write_error",
 		data = { dropped_rows = lost, message = err },
 	})
 	-- The database counts the failed commits itself, and clears the count on the
 	-- first one that goes through, so there is one answer to "is this recording
 	-- in trouble" rather than two that can drift apart.
-	if dbmanager.stats().failed >= MAX_FAILURES then
+	if rec.db:stats().failed >= MAX_FAILURES then
 		log_error("giving up on the recording after repeated write failures")
-		stop_recording("write_error")
+		stop_recording(rec, "write_error")
 	end
 end
 
@@ -751,95 +779,144 @@ end
 -- The recording did not become one: close the file and take it away, so a
 -- failed start leaves nothing behind that looks like a recording.
 ---@param reason string
-local function abort_start(reason)
-	local path = state.path
+local function abort_start(rec, reason)
+	local path = rec.path
 	log_error(string.format("cannot start a recording in %s: %s", tostring(path), tostring(reason)))
-	dbmanager.close()
+	rec.db:close()
 	if path then
 		os.remove(path)
 		os.remove(path .. "-wal")
 		os.remove(path .. "-shm")
 	end
-	state.recording = false
-	state.snapshot = nil
-	state.region = nil
-	state.known_ids, state.known_param2 = nil, nil
-	state.pending_blocks = {}
-	state.name, state.path = nil, nil
+	recordings[rec.id] = nil
+	rec.recording = false
+	rec.snapshot = nil
+	rec.region = nil
+	rec.known_ids, rec.known_param2 = nil, nil
+	rec.pending_blocks = {}
+	rec.name, rec.path = nil, nil
 end
 
 -- The snapshot is done: the file can say what the world looked like, and the
 -- recording proper begins.
 ---@param result table
-local function finish_start(result)
-	local ok, err = dbmanager.set_snapshot({
+local function finish_start(rec, result)
+	local ok, err = rec.db:set_snapshot({
 		tick = 0,
 		t = 0,
-		pos1 = state.region.pos1,
-		size = region_module.size(state.region),
+		pos1 = rec.region.pos1,
+		size = region_module.size(rec.region),
 		names = table.concat(result.names, "\n"),
 		encoding = result.encoding,
 		data = result.data,
 	})
 	if not ok then
-		abort_start(err)
+		abort_start(rec, err)
 		return
 	end
-	state.known_ids = result.ids
-	state.known_param2 = result.param2
+	rec.known_ids = result.ids
+	rec.known_param2 = result.param2
 
 	-- The schema version is not repeated here: PRAGMA user_version is where the
 	-- file keeps it, and it is the version of the file rather than of the mod.
-	write_meta(META_PREFIX .. "name", state.name)
-	write_meta(META_PREFIX .. "started_at", os.date("!%Y-%m-%dT%H:%M:%SZ", state.started_at))
+	write_meta(rec, META_PREFIX .. "name", rec.name)
+	write_meta(rec, META_PREFIX .. "started_at", os.date("!%Y-%m-%dT%H:%M:%SZ", rec.started_at))
 	local version = core.get_version()
-	write_meta(META_PREFIX .. "server_version", version and version.string or nil)
+	write_meta(rec, META_PREFIX .. "server_version", version and version.string or nil)
 	local game = core.get_game_info()
-	write_meta(META_PREFIX .. "game", game and game.id or nil)
-	state.recording = true
-	state.snapshot = nil
-	record_event({ type = "recording_start" })
+	write_meta(rec, META_PREFIX .. "game", game and game.id or nil)
+	rec.recording = true
+	rec.snapshot = nil
+	record_event(rec, { type = "recording_start" })
 	-- Who is online and what the world time is has to wait for the first server
 	-- step: a mod is allowed to start a recording while it loads, and the
 	-- engine refuses those questions before the server is running.
-	state.pending_start = true
-	local flushed, flush_err = dbmanager.flush()
+	rec.pending_start = true
+	local flushed, flush_err = rec.db:flush()
 	if not flushed then
-		abort_start(flush_err)
+		abort_start(rec, flush_err)
 		return
 	end
-	core.log("action", "[recorder] recording " .. state.name .. " started, writing to " .. state.path)
+	core.log("action", string.format("[recorder] recording %s (%s) started, writing to %s",
+		rec.name, rec.id, rec.path))
 end
 
 -- One step of the snapshot phase. The recording is not active yet, so events
 -- and samples are dropped by the same gate that drops them when nothing is
 -- being recorded.
-local function advance_snapshot()
-	local snap = state.snapshot
+local function advance_snapshot(rec)
+	local snap = rec.snapshot
 	if not snap then return end
-	local status, result = snapshot_module.step(snap, state.snapshot_budget)
+	local status, result = snapshot_module.step(snap, rec.snapshot_budget)
 	if status == "working" then return end
 	if status == "failed" then
 		snapshot_module.free(snap)
-		state.snapshot = nil
-		abort_start(result)
+		rec.snapshot = nil
+		abort_start(rec, result)
 		return
 	end
-	state.snapshot = nil
+	rec.snapshot = nil
 	snapshot_module.free(snap)
-	finish_start(result)
+	finish_start(rec, result)
+end
+
+-- Find a recording by id, by name, or by a unique id prefix. Without an
+-- argument this answers with the only recording, and says so when there is not
+-- exactly one.
+---@param arg string?
+---@return table|nil, string?
+local function find_recording(arg)
+	if arg == nil or arg == "" then
+		local only, count = nil, 0
+		for _, rec in pairs(recordings) do
+			only = rec
+			count = count + 1
+		end
+		if count == 1 then return only end
+		if count == 0 then return nil, "no recording is in progress" end
+		return nil, "several recordings are running; give an id (see /recorder status)"
+	end
+	local exact = recordings[arg]
+	if exact then return exact end
+	local named, name_count = nil, 0
+	for _, rec in pairs(recordings) do
+		if rec.name == arg then
+			named = rec
+			name_count = name_count + 1
+		end
+	end
+	if name_count == 1 then return named end
+	if name_count > 1 then
+		return nil, "more than one recording is named " .. arg .. "; give an id"
+	end
+	local prefixed, prefix_count = nil, 0
+	for id, rec in pairs(recordings) do
+		if id:sub(1, #arg) == arg then
+			prefixed = rec
+			prefix_count = prefix_count + 1
+		end
+	end
+	if prefix_count == 1 then return prefixed end
+	if prefix_count > 1 then return nil, "more than one recording matches " .. arg end
+	return nil, "no recording " .. arg
 end
 
 ---@param record_name string?  -- used for the file name; "unnamed" if not given
 ---@param region_arg table?  -- {pos1 =, pos2 =}; the game may provide one instead
----@return nil|string  -- nil on success, an error message on failure
+---@return string|nil, string?  -- the recording's id, or an error message
 recorder.start = function(record_name, region_arg)
-	if state.recording or state.snapshot then
-		return "a recording is already in progress: " .. tostring(state.path)
+	local limit = tonumber(core.settings:get("recorder.max_recordings")) or MAX_RECORDINGS_DEFAULT
+	if limit > 0 then
+		local running = 0
+		for _ in pairs(recordings) do running = running + 1 end
+		if running >= limit then
+			return nil, string.format("too many recordings are running (%d); see recorder.max_recordings",
+				running)
+		end
 	end
 	local region, region_err = resolve_region(region_arg)
 	if not region then
-		return region_err
+		return nil, region_err
 	end
 	local name = recorder_common.sanitize_name(record_name)
 	local dir = recorder_common.recordings_dir()
@@ -849,139 +926,160 @@ recorder.start = function(record_name, region_arg)
 	core.mkdir(dir)
 	local path = recorder_common.unique_path(dir, name .. "-" .. os.date("!%Y%m%dT%H%M%SZ", now))
 	if not path then
-		return "too many recordings named " .. name .. " in " .. dir
+		return nil, "too many recordings named " .. name .. " in " .. dir
 	end
-	local ok, err = dbmanager.open(path)
+	local rec = new_state()
+	rec.id = new_recording_id()
+	rec.db = dbmanager.new(sqlite)
+	local ok, err = rec.db:open(path)
 	if not ok then
 		log_error(tostring(err))
-		return err
+		return nil, err
 	end
 
 	-- Read here rather than at load time, so that a setting changed between two
 	-- recordings applies to the next one.
-	state.flush_interval = tonumber(core.settings:get("recorder.flush_interval")) or FLUSH_DEFAULT
-	state.max_buffered = tonumber(core.settings:get("recorder.max_buffered")) or MAX_BUFFERED_DEFAULT
-	state.max_duration = tonumber(core.settings:get("recorder.max_duration")) or 0
-	state.max_size = (tonumber(core.settings:get("recorder.max_size_mb")) or 0) * 1024 * 1024
-	state.disabled = {}
+	rec.flush_interval = tonumber(core.settings:get("recorder.flush_interval")) or FLUSH_DEFAULT
+	rec.max_buffered = tonumber(core.settings:get("recorder.max_buffered")) or MAX_BUFFERED_DEFAULT
+	rec.max_duration = tonumber(core.settings:get("recorder.max_duration")) or 0
+	rec.max_size = (tonumber(core.settings:get("recorder.max_size_mb")) or 0) * 1024 * 1024
+	rec.disabled = {}
 	for type_name in (core.settings:get("recorder.disabled_events") or ""):gmatch("[^,%s]+") do
 		-- What the recording needs in order to explain itself - where it
 		-- starts and stops, and where a gap is - is not a matter of taste.
 		if MANDATORY_EVENTS[type_name] then
 			log_error("the " .. type_name .. " event is always recorded; ignoring the setting for it")
 		else
-			state.disabled[type_name] = true
+			rec.disabled[type_name] = true
 		end
 	end
 
 	-- The recording proper starts when the snapshot is done; until then
-	-- state.recording stays false and the existing gate drops events.
-	state.recording = false
-	state.name = name
-	state.path = path
-	state.started_at = now
-	state.region = region
-	state.tick = 0
-	state.elapsed = 0
-	state.last_flush = 0
-	state.complaints, state.player_errors = {}, {}
-	state.troubles, state.troubles_dirty = {}, false
-	state.prev, state.written, state.wield, state.joined = {}, {}, {}, {}
-	state.sampled = {}
-	state.known_ids, state.known_param2 = nil, nil
-	state.pending_blocks = {}
-	state.snapshot_budget = math.max(1,
+	-- rec.recording stays false and the existing gate drops events.
+	rec.recording = false
+	rec.name = name
+	rec.path = path
+	rec.started_at = now
+	rec.region = region
+	rec.tick = 0
+	rec.elapsed = 0
+	rec.last_flush = 0
+	rec.complaints, rec.player_errors = {}, {}
+	rec.troubles, rec.troubles_dirty = {}, false
+	rec.prev, rec.written, rec.wield, rec.joined = {}, {}, {}, {}
+	rec.sampled = {}
+	rec.known_ids, rec.known_param2 = nil, nil
+	rec.pending_blocks = {}
+	rec.snapshot_budget = math.max(1,
 		math.floor(tonumber(core.settings:get("recorder.snapshot_budget")) or 20000))
 
 	local snap, snap_err = snapshot_module.new(region.pos1, region.pos2)
 	if not snap then
-		abort_start(snap_err)
-		return snap_err
+		abort_start(rec, snap_err)
+		return nil, snap_err
 	end
-	state.snapshot = snap
-	core.log("action", string.format("[recorder] snapshotting %s .. %s for %s, writing to %s",
-		core.pos_to_string(region.pos1), core.pos_to_string(region.pos2), name, path))
-	return nil
+	rec.snapshot = snap
+	recordings[rec.id] = rec
+	core.log("action", string.format("[recorder] snapshotting %s .. %s for %s (%s), writing to %s",
+		core.pos_to_string(region.pos1), core.pos_to_string(region.pos2), name, rec.id, path))
+	return rec.id
 end
 
--- Stop the recording in progress. The optional reason is stored in the
--- recording (and is what the automatic stops use).
+-- Stop one recording. The optional reason is stored in the recording (and is
+-- what the automatic stops use).
+---@param rec table
 ---@param reason string?
 ---@return nil|string  -- nil on success, an error message on failure
-recorder.stop = function(reason)
-	if state.snapshot then
+local function stop(rec, reason)
+	if rec.snapshot then
 		-- The recording never became one: there is nothing to mark in the file,
 		-- and a file that was never a recording should not be left behind.
-		local path = state.path
-		snapshot_module.free(state.snapshot)
-		state.snapshot = nil
-		dbmanager.close()
+		local path = rec.path
+		snapshot_module.free(rec.snapshot)
+		rec.snapshot = nil
+		rec.db:close()
 		if path then
 			os.remove(path)
 			os.remove(path .. "-wal")
 			os.remove(path .. "-shm")
 		end
-		state.recording = false
-		state.region = nil
-		state.known_ids, state.known_param2 = nil, nil
-		state.pending_blocks = {}
-		state.sampled = {}
-		state.name, state.path = nil, nil
-		core.log("action", "[recorder] recording abandoned while snapshotting; the file is gone")
+		recordings[rec.id] = nil
+		rec.recording = false
+		rec.region = nil
+		rec.known_ids, rec.known_param2 = nil, nil
+		rec.pending_blocks = {}
+		rec.sampled = {}
+		rec.name, rec.path = nil, nil
+		core.log("action", "[recorder] recording " .. tostring(rec.id) ..
+			" abandoned while snapshotting; the file is gone")
 		return nil
 	end
-	if not state.recording then
+	if not rec.recording then
 		return "no recording is in progress"
 	end
-	record_event({ type = "recording_stop", data = { reason = reason or "api" } })
-	local name, path = state.name, state.path
-	state.recording = false
+	record_event(rec, { type = "recording_stop", data = { reason = reason or "api" } })
+	local name, path = rec.name, rec.path
+	rec.recording = false
 	-- The end marker and the last rows go out first, and the metadata only
 	-- follows if they made it: a file whose events have no ending must not
 	-- claim, in its own metadata, that it stopped cleanly.
-	local ok, err = dbmanager.flush()
+	local ok, err = rec.db:flush()
 	if ok then
-		write_meta(META_PREFIX .. "stopped_at", os.date("!%Y-%m-%dT%H:%M:%SZ", os.time()))
-		write_meta(META_PREFIX .. "ticks", tostring(state.tick))
-		write_meta(META_PREFIX .. "end_reason", reason or "api")
+		write_meta(rec, META_PREFIX .. "stopped_at", os.date("!%Y-%m-%dT%H:%M:%SZ", os.time()))
+		write_meta(rec, META_PREFIX .. "ticks", tostring(rec.tick))
+		write_meta(rec, META_PREFIX .. "end_reason", reason or "api")
 	end
-	local closed, close_err = dbmanager.close()
+	local closed, close_err = rec.db:close()
 	-- Counted after the last batch, so the numbers cover the whole recording
-	local stats = dbmanager.stats()
+	local stats = rec.db:stats()
 	if ok and closed then
 		core.log("action", string.format(
-			"[recorder] recording %s stopped: %d events, %d movement rows, %d dropped (%s)",
-			name, stats.events, stats.movement, stats.dropped, path))
+			"[recorder] recording %s (%s) stopped: %d events, %d movement rows, %d dropped (%s)",
+			name, tostring(rec.id), stats.events, stats.movement, stats.dropped, path))
 	else
 		err = err or close_err
 		log_error(string.format("recording %s could not be written out completely: %s", name, tostring(err)))
 	end
-	state.name, state.path = nil, nil
-	state.prev, state.written, state.wield, state.joined = {}, {}, {}, {}
-	state.sampled = {}
-	state.region = nil
-	state.known_ids, state.known_param2 = nil, nil
-	state.pending_start = false
-	state.pending_blocks = {}
+	recordings[rec.id] = nil
+	rec.name, rec.path = nil, nil
+	rec.prev, rec.written, rec.wield, rec.joined = {}, {}, {}, {}
+	rec.sampled = {}
+	rec.region = nil
+	rec.known_ids, rec.known_param2 = nil, nil
+	rec.pending_start = false
+	rec.pending_blocks = {}
 	if ok and closed then return nil end
 	return tostring(err)
 end
 
-stop_recording = function(reason)
-	local err = recorder.stop(reason)
+stop_recording = function(rec, reason)
+	local err = stop(rec, reason)
 	if err then
 		log_error(err)
 	end
 end
 
--- Attach a key/value pair to the recording. Mods can use this to say what was
--- going on ("ctf:map" = "forge", "weather" = "storm", ...).
+---@param id string?
+---@param reason string?
+---@return nil|string
+recorder.stop = function(id, reason)
+	local rec, err = find_recording(id)
+	if not rec then return err end
+	return stop(rec, reason)
+end
+
+-- Attach a key/value pair to a recording. Mods can use this to say what was
+-- going on ("ctf:map" = "forge", "weather" = "storm", ...). With several
+-- recordings running, the id says which one; without it there must be only one.
 ---@param key string
 ---@param value string
+---@param id string?
 ---@return nil|string
-recorder.add_meta = function(key, value)
-	if not state.recording then
-		return "no recording is in progress"
+recorder.add_meta = function(key, value, id)
+	local rec, err = find_recording(id)
+	if not rec then return err end
+	if not rec.recording then
+		return "the recording is still taking its snapshot"
 	end
 	if type(key) ~= "string" or type(value) ~= "string" then
 		return "key and value must both be strings"
@@ -992,22 +1090,27 @@ recorder.add_meta = function(key, value)
 	if key:sub(1, #META_PREFIX) == META_PREFIX then
 		return "keys starting with '" .. META_PREFIX .. "' describe the recording itself"
 	end
-	local ok, err = dbmanager.set_meta(key, value)
+	local ok, werr = rec.db:set_meta(key, value)
 	if not ok then
-		log_error(string.format("cannot write metadata %s: %s", key, tostring(err)))
-		return tostring(err)
+		log_error(string.format("cannot write metadata %s: %s", key, tostring(werr)))
+		return tostring(werr)
 	end
 	return nil
 end
 
 -- Record an event of a mod's own making, e.g. a flag capture. Type names are
 -- free-form; a "modname:what happened" shape keeps them out of the way of the
--- types the recorder writes itself (see README.md).
+-- types the recorder writes itself (see README.md). Every recording is offered
+-- the event and keeps it if its own region says it belongs there.
 ---@param event_type string
 ---@param fields table?  -- subject/object/pos/node/param2/item/data
 ---@return nil|string
 recorder.log_event = function(event_type, fields)
-	if not state.recording then
+	local any = false
+	for _, rec in pairs(recordings) do
+		if rec.recording then any = true break end
+	end
+	if not any then
 		return "no recording is in progress"
 	end
 	if type(event_type) ~= "string" or event_type == "" then
@@ -1028,7 +1131,7 @@ recorder.log_event = function(event_type, fields)
 	if fields and fields.param2 ~= nil and tonumber(fields.param2) == nil then
 		return "event param2 must be a number"
 	end
-	local ev = {
+	broadcast_event({
 		type = event_type,
 		subject = fields and fields.subject,
 		object = fields and fields.object,
@@ -1037,24 +1140,49 @@ recorder.log_event = function(event_type, fields)
 		node = fields and fields.node,
 		param2 = fields and fields.param2,
 		data = fields and fields.data,
-	}
-	record_event(ev)
+	})
 	return nil
 end
 
 ---@return boolean
 recorder.is_recording = function()
-	return state.recording
+	for _, rec in pairs(recordings) do
+		if rec.recording then return true end
+	end
+	return false
 end
 
+---@param id string?
 ---@return string|nil  -- the name this recording was started with
-recorder.get_recording_name = function()
-	return (state.recording or state.snapshot) and state.name or nil
+recorder.get_recording_name = function(id)
+	local rec = find_recording(id)
+	return rec and rec.name or nil
 end
 
+---@param id string?
 ---@return string|nil  -- full path of the file being written
-recorder.get_recording_path = function()
-	return (state.recording or state.snapshot) and state.path or nil
+recorder.get_recording_path = function(id)
+	local rec = find_recording(id)
+	return rec and rec.path or nil
+end
+
+-- What is running right now, as plain data.
+---@return table[]
+recorder.list = function()
+	local list = {}
+	for id, rec in pairs(recordings) do
+		list[#list + 1] = {
+			id = id,
+			name = rec.name,
+			path = rec.path,
+			recording = rec.recording,
+			snapshotting = rec.snapshot ~= nil,
+			elapsed = rec.elapsed,
+			region = rec.region,
+		}
+	end
+	table.sort(list, function(a, b) return a.id < b.id end)
+	return list
 end
 
 ----------------------------------------------------------------------------
@@ -1071,35 +1199,62 @@ end
 -- complaint, and the actions after it still get recorded. Inside a body, the
 -- individual reads keep pcalls of their own: losing a field is better than
 -- losing the event that carries it.
+local hook_complaints = {}
+local function any_recording()
+	for _, rec in pairs(recordings) do
+		if rec.recording then return true end
+	end
+	return false
+end
 local function hook(label, register, func)
 	if not register then return end
 	register(function(...)
-		if not state.recording then return end
+		if not any_recording() then return end
 		local ok, err = pcall(func, ...)
-		if not ok then
-			complain(label, "cannot record a " .. label .. ": " .. tostring(err))
+		if not ok and not hook_complaints[label] then
+			hook_complaints[label] = true
+			log_error("cannot record a " .. label .. ": " .. tostring(err))
 		end
 	end)
 end
 
+-- A player joining or leaving the game is offered to every recording; each
+-- joins them only if they are inside its region.
+local function broadcast_join(player, last_login, at_start, reason)
+	for _, rec in pairs(recordings) do
+		if rec.recording then
+			guarded(rec, "record a join", on_join, rec, player, last_login, at_start, reason)
+		end
+	end
+end
+
+local function broadcast_leave(player, timed_out)
+	for _, rec in pairs(recordings) do
+		if rec.recording then
+			guarded(rec, "record a leave", on_leave, rec, player, timed_out)
+		end
+	end
+end
+
 hook("join", core.register_on_joinplayer, function(player, last_login)
-	on_join(player, last_login, false)
+	broadcast_join(player, last_login, false)
 end)
 
 hook("leave", core.register_on_leaveplayer, function(player, timed_out)
-	on_leave(player, timed_out)
+	broadcast_leave(player, timed_out)
 end)
 
 hook("die", core.register_on_dieplayer, function(player, reason)
-	record_event({ type = "die", subject = player, pos = player:get_pos(), data = { reason = describe_reason(reason) } })
+	broadcast_event({ type = "die", subject = player, pos = player:get_pos(),
+		data = { reason = describe_reason(reason) } })
 end)
 
 hook("respawn", core.register_on_respawnplayer, function(player)
-	record_event({ type = "respawn", subject = player, pos = player:get_pos() })
+	broadcast_event({ type = "respawn", subject = player, pos = player:get_pos() })
 end)
 
 hook("hp_change", core.register_on_player_hpchange, function(player, hp_change, reason)
-	record_event({
+	broadcast_event({
 		type = "hp_change",
 		subject = player,
 		pos = player:get_pos(),
@@ -1120,7 +1275,7 @@ hook("punch_player", core.register_on_punchplayer, function(player, hitter, time
 		},
 	}
 	set_actor(ev, hitter)
-	record_event(ev)
+	broadcast_event(ev)
 end)
 
 hook("punch_node", core.register_on_punchnode, function(pos, node, puncher, pointed_thing)
@@ -1132,7 +1287,7 @@ hook("punch_node", core.register_on_punchnode, function(pos, node, puncher, poin
 		item = stack_string(wielded(puncher)),
 	}
 	set_actor(ev, puncher)
-	record_event(ev)
+	broadcast_event(ev)
 end)
 
 hook("dig", core.register_on_dignode, function(pos, oldnode, digger)
@@ -1144,7 +1299,7 @@ hook("dig", core.register_on_dignode, function(pos, oldnode, digger)
 		item = stack_string(wielded(digger)),
 	}
 	set_actor(ev, digger)
-	record_event(ev)
+	broadcast_event(ev)
 end)
 
 hook("place", core.register_on_placenode, function(pos, newnode, placer, oldnode, itemstack, pointed_thing)
@@ -1158,7 +1313,7 @@ hook("place", core.register_on_placenode, function(pos, newnode, placer, oldnode
 		data = { old_node = oldnode and oldnode.name, old_param2 = oldnode and oldnode.param2 },
 	}
 	set_actor(ev, placer)
-	record_event(ev)
+	broadcast_event(ev)
 end)
 
 hook("rightclick_player", core.register_on_rightclickplayer, function(player, clicker)
@@ -1169,7 +1324,7 @@ hook("rightclick_player", core.register_on_rightclickplayer, function(player, cl
 		item = stack_string(wielded(clicker)),
 	}
 	set_actor(ev, clicker)
-	record_event(ev)
+	broadcast_event(ev)
 end)
 
 hook("craft", core.register_on_craft, function(itemstack, player, old_craft_grid, craft_inv)
@@ -1179,7 +1334,7 @@ hook("craft", core.register_on_craft, function(itemstack, player, old_craft_grid
 			grid[i] = stack_string(stack) or ""
 		end
 	end
-	record_event({
+	broadcast_event({
 		type = "craft",
 		subject = player,
 		item = stack_string(itemstack),
@@ -1194,13 +1349,13 @@ hook("item_eat", core.register_on_item_eat, function(hp_change, replace_with_ite
 		data = { hp_change = hp_change, replace_with = stack_string(replace_with_item) },
 	}
 	set_actor(ev, user)
-	record_event(ev)
+	broadcast_event(ev)
 end)
 
 hook("item_pickup", core.register_on_item_pickup, function(itemstack, picker, pointed_thing)
 	local ev = { type = "item_pickup", item = stack_string(itemstack) }
 	set_actor(ev, picker)
-	record_event(ev)
+	broadcast_event(ev)
 end)
 
 -- What an inventory action moved: a take and a put say so themselves, while a
@@ -1237,12 +1392,12 @@ hook("inventory action", core.register_on_player_inventory_action, function(play
 		data = data,
 	}
 	set_actor(ev, player)
-	record_event(ev)
+	broadcast_event(ev)
 end)
 
 hook("chat", core.register_on_chat_message, function(name, message)
 	local player = core.get_player_by_name(name)
-	record_event({
+	broadcast_event({
 		type = "chat",
 		subject = name,
 		pos = player and player:get_pos() or nil,
@@ -1252,7 +1407,7 @@ end)
 
 hook("chatcommand", core.register_on_chatcommand, function(name, command, params)
 	local player = core.get_player_by_name(name)
-	record_event({
+	broadcast_event({
 		type = "chatcommand",
 		subject = name,
 		pos = player and player:get_pos() or nil,
@@ -1261,11 +1416,11 @@ hook("chatcommand", core.register_on_chatcommand, function(name, command, params
 end)
 
 hook("protection_violation", core.register_on_protection_violation, function(pos, name)
-	record_event({ type = "protection_violation", subject = name, pos = pos })
+	broadcast_event({ type = "protection_violation", subject = name, pos = pos })
 end)
 
 hook("cheat", core.register_on_cheat, function(player, cheat)
-	record_event({
+	broadcast_event({
 		type = "cheat",
 		subject = player,
 		pos = player:get_pos(),
@@ -1278,26 +1433,29 @@ end)
 ----------------------------------------------------------------------------
 
 -- The engine calls this at most once per server step, with the mapblocks in
--- which anything changed. The changes are collected here and diffed against the
--- recording's known state in the next step: a node that differs becomes a
--- node_change row. This is what catches changes no callback announces - an
--- explosion, flowing water, an ABM, a mod's set_node - because it watches the
--- world instead of asking mods to report.
+-- which anything changed. The changes are collected per recording, with the
+-- tick that recording was on, and diffed against its known state in the next
+-- step: a node that differs becomes a node_change row. This is what catches
+-- changes no callback announces - an explosion, flowing water, an ABM, a mod's
+-- set_node - because it watches the world instead of asking mods to report.
 core.register_on_mapblocks_changed(function(modified_blocks, count)
-	if not (state.recording or state.snapshot) then return end
 	if not modified_blocks or not count or count == 0 then return end
-	state.pending_blocks[#state.pending_blocks + 1] = {
-		tick = state.tick,     -- the step the change belongs to, which may be
-		t = state.elapsed,     -- one before the step that diffs it
-		blocks = modified_blocks,
-	}
+	for _, rec in pairs(recordings) do
+		if rec.recording or rec.snapshot then
+			rec.pending_blocks[#rec.pending_blocks + 1] = {
+				tick = rec.tick,     -- the step the change belongs to, which may
+				t = rec.elapsed,     -- be one before the step that diffs it
+				blocks = modified_blocks,
+			}
+		end
+	end
 end)
 
 -- Read one mapblock back and compare it with what the recording last knew. Only
 -- nodes that differ become rows; the block's nodes are addressed by arithmetic
 -- rather than by building a position table for each of the 4096 of them.
-local function diff_block(block, tick, t)
-	local reg = state.region
+local function diff_block(rec, block, tick, t)
+	local reg = rec.region
 	local size = region_module.size(reg)
 	local p2 = {x = block.x + 15, y = block.y + 15, z = block.z + 15}
 	local vm = core.get_voxel_manip(block, p2)
@@ -1335,12 +1493,12 @@ local function diff_block(block, tick, t)
 								+ (world_x - emerged1.x) + 1
 							local id = data[lvm_index]
 							local value = param2[lvm_index]
-							local old_id = state.known_ids[index]
-							local old_param2 = state.known_param2[index]
+							local old_id = rec.known_ids[index]
+							local old_param2 = rec.known_param2[index]
 							if id ~= old_id or value ~= old_param2 then
-								state.known_ids[index] = id
-								state.known_param2[index] = value
-								record_event({
+								rec.known_ids[index] = id
+								rec.known_param2[index] = value
+								record_event(rec, {
 									type = "node_change",
 									tick = tick,
 									t = t,
@@ -1361,18 +1519,18 @@ local function diff_block(block, tick, t)
 	end
 end
 
-local function process_block_changes()
-	local pending = state.pending_blocks
+local function process_block_changes(rec)
+	local pending = rec.pending_blocks
 	if #pending == 0 then return end
-	state.pending_blocks = {}
-	local block_min, block_max = region_module.blocks(state.region)
+	rec.pending_blocks = {}
+	local block_min, block_max = region_module.blocks(rec.region)
 	for _, entry in ipairs(pending) do
 		for hash in pairs(entry.blocks) do
 			local block = core.get_position_from_hash(hash)
 			if block and block.x >= block_min.x and block.x <= block_max.x
 				and block.y >= block_min.y and block.y <= block_max.y
 				and block.z >= block_min.z and block.z <= block_max.z then
-				diff_block(block, entry.tick, entry.t)
+				diff_block(rec, block, entry.tick, entry.t)
 			end
 		end
 	end
@@ -1384,43 +1542,57 @@ core.register_on_leaveplayer(function(player)
 	if name then marks[name] = nil end
 end)
 
-core.register_globalstep(function(dtime)
-	if state.snapshot then
-		advance_snapshot()
-		-- Whether it is still running or only just finished, the recording's
-		-- first step is the next one.
-		return
-	end
-	if not state.recording then return end
-	if state.pending_start then
+-- One recording's server step.
+local function step_recording(rec, dtime)
+	if rec.pending_start then
 		-- Still tick 0: this is the state the recording opens with, and it
 		-- belongs with the marker start() already wrote. The flag is cleared
 		-- afterwards, so players missed by a failure here are picked up by the
 		-- next step instead of being lost for the rest of the recording.
 		local gametime = core.get_gametime()
-		write_meta(META_PREFIX .. "gametime", gametime and tostring(gametime) or nil)
-		for player in core.objects_in_area(state.region.pos1, state.region.pos2) do
+		write_meta(rec, META_PREFIX .. "gametime", gametime and tostring(gametime) or nil)
+		for player in core.objects_in_area(rec.region.pos1, rec.region.pos2) do
 			if core.is_player(player) then
-				local pid = player_id(player)
+				local pid = player_id(rec, player)
 				-- Someone who joined in the moment between start() and this step
 				-- is already in the recording and does not need joining again.
-				if not (pid and state.joined[pid]) then
-					guarded("record a join", on_join, player, nil, true)
+				if not (pid and rec.joined[pid]) then
+					guarded(rec, "record a join", on_join, rec, player, nil, true)
 				end
 			end
 		end
-		state.pending_start = false
+		rec.pending_start = false
 	end
-	state.tick = state.tick + 1
-	state.elapsed = state.elapsed + dtime
-	observe_region(dtime)
-	process_block_changes()
-	maybe_flush()
+	rec.tick = rec.tick + 1
+	rec.elapsed = rec.elapsed + dtime
+	observe_region(rec, dtime)
+	process_block_changes(rec)
+	maybe_flush(rec)
+end
+
+core.register_globalstep(function(dtime)
+	-- A recording whose snapshot finishes in this step does not also take its
+	-- first recording step: the first recording step is the next one.
+	local snapshotting = {}
+	for id, rec in pairs(recordings) do
+		if rec.snapshot then
+			snapshotting[id] = true
+			advance_snapshot(rec)
+		end
+	end
+	for id, rec in pairs(recordings) do
+		if rec.recording and not snapshotting[id] then
+			step_recording(rec, dtime)
+		end
+	end
 end)
 
 core.register_on_shutdown(function()
-	if state.snapshot or state.recording then
-		stop_recording("shutdown")
+	local ids = {}
+	for id in pairs(recordings) do ids[#ids + 1] = id end
+	for _, id in ipairs(ids) do
+		local rec = recordings[id]
+		if rec then stop_recording(rec, "shutdown") end
 	end
 end)
 
@@ -1428,51 +1600,72 @@ end)
 -- Chat commands
 ----------------------------------------------------------------------------
 
-local function status_string()
-	if state.snapshot then
-		return string.format(
-			"Snapshotting the region for '%s' into %s: %d%% (the recording starts when it is done)",
-			state.name, state.path,
-			math.floor(snapshot_module.progress(state.snapshot) * 100))
+local function limits_of(rec)
+	local limit = ""
+	if rec.max_duration > 0 then
+		limit = limit .. string.format(", stops at %d s", math.floor(rec.max_duration))
 	end
-	if not state.recording then
-		return "No recording in progress."
+	if rec.max_size > 0 then
+		limit = limit .. string.format(", stops at %.1f MB", rec.max_size / (1024 * 1024))
 	end
-	local stats = dbmanager.stats()
+	return limit
+end
+
+local function status_line(rec)
+	if rec.snapshot then
+		return string.format("%s  '%s'  snapshotting %d%% (%s)", rec.id, rec.name,
+			math.floor(snapshot_module.progress(rec.snapshot) * 100), rec.path)
+	end
+	local stats = rec.db:stats()
 	-- Commits that are failing right now are the difference between a recording
 	-- that is whole and one whose last seconds are missing, so they are said out
 	-- loud - and not said at all when there are none, which is the usual state.
 	local failing = ""
 	if stats.failed > 0 then
-		failing = string.format(", %d failed write%s in a row", stats.failed, stats.failed == 1 and "" or "s")
+		failing = string.format(", %d failed write%s in a row", stats.failed,
+			stats.failed == 1 and "" or "s")
 	end
-	local limit = ""
-	if state.max_duration > 0 then
-		limit = limit .. string.format(", stops at %d s", math.floor(state.max_duration))
-	end
-	if state.max_size > 0 then
-		limit = limit .. string.format(", stops at %.1f MB", state.max_size / (1024 * 1024))
-	end
-	local size = region_module.size(state.region)
+	local size = region_module.size(rec.region)
 	return string.format(
-		"Recording '%s' to %s: %d s, tick %d, %d events, %d movement rows, " ..
-		"%d buffered, %d dropped%s, %.1f MB on disk, region %dx%dx%d%s",
-		state.name, state.path, math.floor(state.elapsed), state.tick,
+		"%s  '%s'  %d s, tick %d, %d events, %d movement rows, %d buffered, %d dropped%s, " ..
+		"%.1f MB on disk, region %dx%dx%d%s",
+		rec.id, rec.name, math.floor(rec.elapsed), rec.tick,
 		stats.events, stats.movement, stats.buffered, stats.dropped,
-		failing, recording_size(state.path) / (1024 * 1024),
-		size.x, size.y, size.z, limit)
+		failing, recording_size(rec.path) / (1024 * 1024),
+		size.x, size.y, size.z, limits_of(rec))
+end
+
+---@param arg string?
+---@return string[]
+local function status_lines(arg)
+	if arg == nil or arg == "" then
+		local list = recorder.list()
+		if #list == 0 then return {"No recording in progress."} end
+		local lines = {}
+		for _, entry in ipairs(list) do
+			lines[#lines + 1] = status_line(recordings[entry.id])
+		end
+		return lines
+	end
+	local rec, err = find_recording(arg)
+	if not rec then return {err} end
+	return {status_line(rec)}
 end
 
 core.register_chatcommand("recorder", {
 	description = "Control the action recorder",
-	params = "[start [name] [x1,y1,z1 x2,y2,z2] | stop | status | pos1 | pos2 | unset | meta <key> <value>]",
+	params = "[start [name] [x1,y1,z1 x2,y2,z2] | stop [id] | status [id] | pos1 | pos2 | unset | " ..
+		"meta [id] <key> <value>]",
 	privs = { server = true },
 	---@param name string
 	---@param params string
 	func = function(name, params)
 		local command, rest = params:match("^(%S+)%s*(.-)%s*$")
 		if command == nil or command == "" or command == "status" then
-			return true, status_string()
+			for _, line in ipairs(status_lines(rest ~= "" and rest or nil)) do
+				core.chat_send_player(name, line)
+			end
+			return true
 		end
 		if command == "pos1" or command == "pos2" then
 			local player = core.get_player_by_name(name)
@@ -1514,26 +1707,36 @@ core.register_chatcommand("recorder", {
 			local mark = marks[name]
 			local region = explicit
 				or ((mark and mark.pos1 and mark.pos2) and {pos1 = mark.pos1, pos2 = mark.pos2} or nil)
-			local err = recorder.start(#words > 0 and table.concat(words, " ") or nil, region)
-			if err then return false, err end
-			return true, "Snapshotting the region; the recording starts when it is done " ..
-				"(see /recorder status)"
+			local id, err = recorder.start(#words > 0 and table.concat(words, " ") or nil, region)
+			if not id then return false, err end
+			return true, string.format(
+				"Recording %s: snapshotting the region; it starts when that is done " ..
+				"(see /recorder status)", id)
 		end
 		if command == "stop" then
-			local err = recorder.stop()
+			local err = recorder.stop(rest ~= "" and rest or nil)
 			if err then return false, err end
 			return true, "Recording stopped."
 		end
 		if command == "meta" then
+			local first, remainder = rest:match("^(%S+)%s+(.+)$")
+			if first and remainder then
+				local key, value = remainder:match("^(%S+)%s+(.+)$")
+				if key and recordings[first] then
+					local err = recorder.add_meta(key, value, first)
+					if err then return false, err end
+					return true, string.format("Recorded metadata %s for %s.", key, first)
+				end
+			end
 			local key, value = rest:match("^(%S+)%s+(.+)$")
 			if not key then
-				return false, "Usage: /recorder meta <key> <value>"
+				return false, "Usage: /recorder meta [id] <key> <value>"
 			end
 			local err = recorder.add_meta(key, value)
 			if err then return false, err end
 			return true, string.format("Recorded metadata %s.", key)
 		end
-		return false, "Usage: /recorder [start [name] [x1,y1,z1 x2,y2,z2] | stop | status | " ..
-			"pos1 | pos2 | unset | meta <key> <value>]"
+		return false, "Usage: /recorder [start [name] [x1,y1,z1 x2,y2,z2] | stop [id] | " ..
+			"status [id] | pos1 | pos2 | unset | meta [id] <key> <value>]"
 	end,
 })

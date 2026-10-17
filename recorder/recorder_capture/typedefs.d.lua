@@ -12,13 +12,14 @@
 ---@field data table|nil  -- JSON-encoded into the event
 
 ---@class RecorderAPI
----@field start fun(record_name: string?): string?  -- nil on success, message on failure
----@field stop fun(reason: string?): string?  -- nil on success, message on failure
----@field add_meta fun(key: string, value: string): string?
+---@field start fun(record_name: string?, region: table?): string?, string?  -- id on success
+---@field stop fun(id: string?, reason: string?): string?  -- nil on success, message on failure
+---@field add_meta fun(key: string, value: string, id: string?): string?
 ---@field log_event fun(event_type: string, fields: RecorderEventFields?): string?
 ---@field is_recording fun(): boolean
----@field get_recording_name fun(): string?
----@field get_recording_path fun(): string?
+---@field list fun(): table[]
+---@field get_recording_name fun(id: string?): string?
+---@field get_recording_path fun(id: string?): string?
 
 ---@type RecorderAPI
 recorder = {}

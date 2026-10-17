@@ -19,6 +19,8 @@ recording, not the game's map files.
 - **One region per recording**: a cuboid, decided when the recording starts.
   Only players and actions inside it are recorded, so a recording of a match
   does not carry the rest of the world.
+- **Several recordings at once**: each over its own region and into its own
+  file - a match and a practice area, say - with a shared limit on how many.
 - **Self-contained**: the world inside the region is stored as a snapshot
   before the recording begins, so a replay does not need the original game's
   map files.
@@ -59,8 +61,10 @@ recording, not the game's map files.
 
 ## API
 
-The mod exposes a global `recorder` table. `start`, `stop` and `add_meta` return
-`nil` on success and a string describing the failure otherwise.
+The mod exposes a global `recorder` table. `start` returns the recording's id;
+`stop` and `add_meta` return `nil` on success and a string describing the
+failure otherwise. Several recordings can run at once, each over its own region
+and into its own file, and the id says which one a call is about.
 
 A recording needs a region: one can be given to `start`, marked with
 `/recorder pos1` and `pos2`, or provided by the game through
@@ -68,11 +72,11 @@ A recording needs a region: one can be given to `start`, marked with
 `start` fails and says so.
 
 ```lua
-local err = recorder.start("ctf-match")     -- nil, or a message
-if err then core.log("error", err) end
+local id = recorder.start("ctf-match")      -- an id, or nil and a message
+if not id then core.log("error", "no recording") end
 
-recorder.add_meta("ctf:map", "forge")       -- only while a recording is in progress
-recorder.add_meta("ctf:teams", "red:blue")
+recorder.add_meta("ctf:map", "forge", id)   -- only while a recording is in progress
+recorder.add_meta("ctf:teams", "red:blue", id)
 
 -- Another mod can put its own happenings into the same timeline
 recorder.log_event("ctf:capture", {
@@ -82,31 +86,35 @@ recorder.log_event("ctf:capture", {
 	data = { team = "red", score = 3 },
 })
 
-recorder.stop()                             -- nil, or a message
+recorder.stop(id)                           -- nil, or a message
 ```
 
 | Function | Behaviour |
 | --- | --- |
-| `recorder.start([name], [region])` | Starts a recording. Fails if one is already running, or if no region can be found. `region` is `{pos1 = , pos2 = }`; without it the game's provider is asked. Returns before the region has been read: the snapshot phase runs in the following server steps (see below). `name` is used to build the file name and defaults to `"unnamed"`. |
-| `recorder.stop([reason])` | Stops the recording in progress. Fails if there is none, or if its last rows could not be written (see *Stopping* below). `reason` is stored in the recording; the automatic stops use their own. |
-| `recorder.add_meta(key, value)` | Stores a string pair about the recording. Works only while recording. Keys starting with `recorder.` describe the recording itself and are refused. |
-| `recorder.log_event(type, fields)` | Records an event of a mod's own making. Works only while recording. Use a `modname:what` type to stay clear of the types below. |
-| `recorder.is_recording()` | `true` while a recording is in progress. |
-| `recorder.get_recording_name()` / `get_recording_path()` | The name and the file of the recording in progress, or `nil`. |
+| `recorder.start([name], [region])` | Starts a recording and returns its id, or `nil` and a message. Fails if `recorder.max_recordings` is reached, or if no region can be found. `region` is `{pos1 = , pos2 = }`; without it the game's provider is asked. Returns before the region has been read: the snapshot phase runs in the following server steps (see below). `name` is used to build the file name and defaults to `"unnamed"`. |
+| `recorder.stop([id], [reason])` | Stops one recording. With a single recording running the id may be left out; with several it is required. Fails if the last rows could not be written (see *Stopping* below). `reason` is stored in the recording; the automatic stops use their own. |
+| `recorder.add_meta(key, value, [id])` | Stores a string pair about a recording. Works only while recording. Keys starting with `recorder.` describe the recording itself and are refused. |
+| `recorder.log_event(type, fields)` | Records an event of a mod's own making. Offered to every recording; each keeps it if its region says it belongs there. Works only while recording. Use a `modname:what` type to stay clear of the types below. |
+| `recorder.is_recording()` | `true` while any recording is in progress. |
+| `recorder.list()` | What is running now: id, name, path, whether it is recording or still snapshotting, elapsed time and region. |
+| `recorder.get_recording_name([id])` / `get_recording_path([id])` | The name and the file of a recording, or `nil`. With one recording the id may be left out. |
 
 ## Chat commands
 
 `/recorder` needs the `server` privilege.
 
-- `/recorder` or `/recorder status` – what is being recorded, for how long, how
-  much has been written, how much was lost, and how big the file is. While the
-  snapshot is being taken it reports that instead, with its progress.
+- `/recorder` or `/recorder status [id]` – what is being recorded, for how long,
+  how much has been written, how much was lost, and how big the file is. With no
+  id it describes every running recording. While the snapshot is being taken it
+  reports that instead, with its progress.
 - `/recorder pos1` / `/recorder pos2` – mark a corner of the region at your
   current position. The marks are yours, and are dropped when you disconnect.
 - `/recorder unset` – forget your marks.
-- `/recorder start [name] [x1,y1,z1 x2,y2,z2]` – start recording. Without
-  coordinates it uses your marks, then the region the game provides.
-- `/recorder stop` – stop recording.
+- `/recorder start [name] [x1,y1,z1 x2,y2,z2]` – start recording; the reply
+  carries the new recording's id. Without coordinates it uses your marks, then
+  the region the game provides.
+- `/recorder stop [id]` – stop a recording. With one running the id may be left
+  out.
 - `/recorder meta <key> <value>` – attach a pair to the current recording.
 
 ## Settings
@@ -116,6 +124,7 @@ Settings are read when a recording starts, so a change applies to the next one.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `recorder.directory` | empty | Where recordings are written. A relative path is taken from the world directory, an absolute path as it is. Empty means `world/recordings/`. |
+| `recorder.max_recordings` | `4` | How many recordings may run at once; `0` is no limit. |
 | `recorder.snapshot_budget` | `20000` | Region nodes examined per server step while the snapshot is taken. Lower it on a server that must stay responsive while snapshotting a large region. |
 | `recorder.flush_interval` | `2.0` | Seconds of server time between commits. |
 | `recorder.max_buffered` | `20000` | Rows buffered before a commit is forced early. `0` leaves the timing to `flush_interval` alone. |

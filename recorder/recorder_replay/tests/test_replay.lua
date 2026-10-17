@@ -52,34 +52,34 @@ player_api = {
 -- The fixture is written with capture's own database layer, so the reader is
 -- tested against the format the writer actually produces.
 local dbmanager = dofile(capturepath .. "/dbmanager.lua")
-dbmanager.init(sqlite)
 
 local fixture_path = world .. "/recordings/fixture-20260101T000000Z.sqlite"
 local function make_fixture()
-	local ok, err = dbmanager.open(fixture_path)
+	local writer = dbmanager.new(sqlite)
+	local ok, err = writer:open(fixture_path)
 	assert(ok, err)
-	dbmanager.set_meta("recorder.name", "fixture")
-	local alice = dbmanager.player_id("Alice")
-	local bob = dbmanager.player_id("Bob")
-	dbmanager.add_event({dbmanager.next_id(), 0, 0, "recording_start", nil, nil,
+	writer:set_meta("recorder.name", "fixture")
+	local alice = writer:player_id("Alice")
+	local bob = writer:player_id("Bob")
+	writer:add_event({writer:next_id(), 0, 0, "recording_start", nil, nil,
 		nil, nil, nil, nil, nil, nil, nil})
-	dbmanager.add_event({dbmanager.next_id(), 0, 0, "join", alice, nil, 0, 0, 0, nil, nil,
+	writer:add_event({writer:next_id(), 0, 0, "join", alice, nil, 0, 0, 0, nil, nil,
 		"default:stone", '{"at_start":true,"textures":["character.png"]}'})
-	dbmanager.add_event({dbmanager.next_id(), 0, 0, "join", bob, nil, 5, 0, 5, nil, nil,
+	writer:add_event({writer:next_id(), 0, 0, "join", bob, nil, 5, 0, 5, nil, nil,
 		nil, '{"at_start":true}'})
 	-- Alice walks one node per 0.1 s; on even ticks she holds the dig button.
 	for tick = 1, 10 do
 		local t = tick / 10
-		dbmanager.add_movement({dbmanager.next_id(), tick, t, 0.1, alice,
+		writer:add_movement({writer:next_id(), tick, t, 0.1, alice,
 			t, 0, 0, 0, 0, 1, 0, 0, nil, nil, nil, 1, tick % 2 == 0 and 128 or 0, 0, 0})
 	end
-	dbmanager.add_movement({dbmanager.next_id(), 1, 0.1, 0.1, bob,
+	writer:add_movement({writer:next_id(), 1, 0.1, 0.1, bob,
 		5, 0, 5, 0, 0, 0, 0, 0, nil, nil, nil, 0, 0, 0, 0})
 	-- Bob leaves at half a second.
-	dbmanager.add_event({dbmanager.next_id(), 5, 0.5, "leave", bob, nil, 5, 0, 5,
+	writer:add_event({writer:next_id(), 5, 0.5, "leave", bob, nil, 5, 0, 5,
 		nil, nil, nil, nil})
-	dbmanager.flush()
-	dbmanager.close()
+	writer:flush()
+	writer:close()
 end
 make_fixture()
 

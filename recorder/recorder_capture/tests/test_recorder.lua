@@ -331,6 +331,8 @@ check(joins[2].item == "default:sword_wood", "a join carries what the player was
 check(joins[1].item == nil, "a player holding nothing has no item")
 check(joins[1].data:find('"main":%["default:pick_stone","","default:torch 10"%]') ~= nil,
 	"a join carries the player's inventory, slot for slot: " .. tostring(joins[1].data))
+check(joins[1].data:find('"textures":%["character.png"%]') ~= nil,
+	"and the textures the player was wearing: " .. tostring(joins[1].data))
 local stops = events_of("recording_stop")
 check(#stops == 1 and stops[1].data:find('"reason":"api"') ~= nil, "the recording closes with its reason")
 

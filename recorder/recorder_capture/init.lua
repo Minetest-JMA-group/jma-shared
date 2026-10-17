@@ -512,12 +512,15 @@ end
 -- recording.
 local function player_snapshot(player)
 	local ok, snapshot = pcall(function()
+		local properties = player:get_properties()
 		return {
 			pos = player:get_pos(),
 			hp = player:get_hp(),
 			breath = player:get_breath(),
 			pitch = player:get_look_vertical(),
 			yaw = player:get_look_horizontal(),
+			-- What the player looks like, so a replay can wear the same skin.
+			textures = properties and properties.textures or nil,
 			inventory = inventory_snapshot(player),
 		}
 	end)
@@ -561,6 +564,7 @@ local function on_join(player, last_login, at_start, reason)
 			breath = snapshot.breath,
 			pitch = snapshot.pitch,
 			yaw = snapshot.yaw,
+			textures = snapshot.textures,
 			inventory = snapshot.inventory,
 		},
 	})

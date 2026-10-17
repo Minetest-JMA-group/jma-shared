@@ -89,15 +89,36 @@ local function new_player(name)
 		hp = 20,
 		breath = 10,
 		inventory = {},
+		meta = {},
 	}
 	player.get_player_name = function(self) return self.name end
+	player.is_player = function(self) return true end
 	player.get_pos = function(self) return { x = self.pos.x, y = self.pos.y, z = self.pos.z } end
+	player.set_pos = function(self, pos)
+		self.pos = { x = pos.x, y = pos.y, z = pos.z }
+	end
 	player.get_velocity = function(self) return { x = self.vel.x, y = self.vel.y, z = self.vel.z } end
 	player.get_look_vertical = function(self) return self.pitch end
 	player.get_look_horizontal = function(self) return self.yaw end
 	player.get_player_control = function(self) return self.controls end
 	player.get_hp = function(self) return self.hp end
 	player.get_breath = function(self) return self.breath end
+	player.get_properties = function(self)
+		return {
+			visual = "mesh",
+			mesh = "character.b3d",
+			textures = { self.texture or "character.png" },
+		}
+	end
+	player.get_meta = function(self)
+		return {
+			set_string = function(_, key, value) self.meta[key] = value end,
+			get_string = function(_, key) return self.meta[key] or "" end,
+		}
+	end
+	player.show_formspec = function(self, formname, formspec)
+		self.formspec = { name = formname, formspec = formspec }
+	end
 	player.get_wielded_item = function(self)
 		local who = self
 		return { to_string = function() return who.wield end }
@@ -125,6 +146,23 @@ local function new_player(name)
 				local stacks = who.inventory[listname]
 				return wrap(stacks and stacks[index])
 			end,
+			get_size = function(_, listname)
+				return #(who.inventory[listname] or {})
+			end,
+			get_list = function(_, listname)
+				local out = {}
+				for i, stack in ipairs(who.inventory[listname] or {}) do
+					out[i] = wrap(stack)
+				end
+				return out
+			end,
+			set_list = function(_, listname, list)
+				local stacks = {}
+				for i, stack in ipairs(list) do
+					stacks[i] = stack:to_string()
+				end
+				who.inventory[listname] = stacks
+			end,
 		}
 	end
 	return player
@@ -143,6 +181,7 @@ local CALLBACKS = {
 	"register_on_chat_message", "register_on_chatcommand",
 	"register_on_protection_violation", "register_on_cheat",
 	"register_on_mapblocks_changed",
+	"register_on_player_receive_fields",
 	"register_globalstep", "register_on_shutdown",
 }
 
@@ -209,7 +248,7 @@ function M.new(opts)
 	}
 	local core = {}
 
-	core.get_current_modname = function() return "recorder_capture" end
+	core.get_current_modname = function() return mock.current_modname or "recorder_capture" end
 	core.get_modpath = function(name)
 		if type(opts.modpaths) == "table" then return opts.modpaths[name] end
 		return opts.modpath
@@ -404,6 +443,200 @@ function M.new(opts)
 		end
 		function vm:close() end
 		return vm
+	end
+
+	-- Entities, items, chat, metadata-friendly serialisers: what the replay
+	-- suites drive ghosts and participants with.
+	mock.entity_defs = {}
+	mock.entities = {}
+	mock.items = {}
+	mock.chats = {}
+	local entity_id = 0
+
+	core.register_entity = function(name, def)
+		mock.entity_defs[name] = def
+	end
+	core.add_entity = function(pos, name)
+		entity_id = entity_id + 1
+		local obj = {
+			id = entity_id,
+			name = name,
+			pos = {x = pos.x, y = pos.y, z = pos.z},
+			properties = {},
+			removed = false,
+		}
+		function obj:set_properties(values)
+			for key, value in pairs(values) do self.properties[key] = value end
+		end
+		function obj:set_observers(set) self.observers = set end
+		function obj:move_to(target) self.pos = {x = target.x, y = target.y, z = target.z} end
+		function obj:set_yaw(value) self.yaw = value end
+		function obj:set_velocity(value) self.velocity = value end
+		function obj:set_animation(frames, speed)
+			self.animation = frames
+			self.animation_speed = speed
+		end
+		function obj:set_bone_override(bone, override)
+			self.bones = self.bones or {}
+			self.bones[bone] = override
+		end
+		function obj:remove()
+			self.removed = true
+			mock.entities[self.id] = nil
+		end
+		mock.entities[entity_id] = obj
+		return obj
+	end
+
+	core.register_craftitem = function(name, def)
+		mock.items[name] = def
+	end
+	core.chat_send_player = function(name, message)
+		mock.chats[#mock.chats + 1] = {name = name, message = message}
+	end
+	core.formspec_escape = function(text)
+		return tostring(text)
+	end
+	core.explode_scrollbar_event = function(value)
+		local kind, number = tostring(value):match("^(%a+):(%-?%d+)")
+		return {type = kind or "INV", value = tonumber(number)}
+	end
+	core.get_dir_list = function(path, want_dirs)
+		if want_dirs then return nil end
+		local names = {}
+		local pipe = io.popen("ls -1 '" .. path .. "' 2>/dev/null")
+		if pipe then
+			for line in pipe:lines() do names[#names + 1] = line end
+			pipe:close()
+		end
+		return names
+	end
+
+	-- Just enough JSON for the event data the recorder writes.
+	local function parse_json(text)
+		local pos = 1
+		local function fail() error("bad json at " .. pos) end
+		local function skip()
+			while pos <= #text and text:find("^%s", pos) do pos = pos + 1 end
+		end
+		local parse_value
+		local function parse_string()
+			pos = pos + 1
+			local out = {}
+			while true do
+				local c = text:sub(pos, pos)
+				if c == "" then fail() end
+				if c == '"' then
+					pos = pos + 1
+					return table.concat(out)
+				end
+				if c == "\\" then
+					local esc = text:sub(pos + 1, pos + 1)
+					local map = {n = "\n", t = "\t", r = "\r", b = "\b", f = "\f",
+						['"'] = '"', ["\\"] = "\\", ["/"] = "/"}
+					if esc == "u" then
+						out[#out + 1] = string.char((tonumber(text:sub(pos + 2, pos + 5), 16) or 63) % 256)
+						pos = pos + 6
+					else
+						out[#out + 1] = map[esc] or esc
+						pos = pos + 2
+					end
+				else
+					out[#out + 1] = c
+					pos = pos + 1
+				end
+			end
+		end
+		local function parse_number()
+			local number = text:match("^-?%d+%.?%d*[eE]?[-+]?%d*", pos)
+			if not number or number == "" then fail() end
+			pos = pos + #number
+			return tonumber(number)
+		end
+		local function parse_array()
+			pos = pos + 1
+			local out = {}
+			skip()
+			if text:sub(pos, pos) == "]" then
+				pos = pos + 1
+				return out
+			end
+			while true do
+				out[#out + 1] = parse_value()
+				skip()
+				local c = text:sub(pos, pos)
+				pos = pos + 1
+				if c == "]" then return out end
+				if c ~= "," then fail() end
+			end
+		end
+		local function parse_object()
+			pos = pos + 1
+			local out = {}
+			skip()
+			if text:sub(pos, pos) == "}" then
+				pos = pos + 1
+				return out
+			end
+			while true do
+				skip()
+				if text:sub(pos, pos) ~= '"' then fail() end
+				local key = parse_string()
+				skip()
+				if text:sub(pos, pos) ~= ":" then fail() end
+				pos = pos + 1
+				out[key] = parse_value()
+				skip()
+				local c = text:sub(pos, pos)
+				pos = pos + 1
+				if c == "}" then return out end
+				if c ~= "," then fail() end
+			end
+		end
+		parse_value = function()
+			skip()
+			local c = text:sub(pos, pos)
+			if c == "{" then return parse_object() end
+			if c == "[" then return parse_array() end
+			if c == '"' then return parse_string() end
+			if text:sub(pos, pos + 3) == "true" then pos = pos + 4 return true end
+			if text:sub(pos, pos + 4) == "false" then pos = pos + 5 return false end
+			if text:sub(pos, pos + 3) == "null" then pos = pos + 4 return nil end
+			return parse_number()
+		end
+		return parse_value()
+	end
+	core.parse_json = function(text)
+		local ok, value = pcall(parse_json, text)
+		if ok then return value end
+		return nil
+	end
+
+	local function serialize_value(value)
+		local kind = type(value)
+		if kind == "string" then return string.format("%q", value) end
+		if kind == "number" or kind == "boolean" then return tostring(value) end
+		if kind == "table" then
+			local parts = {}
+			for key, item in pairs(value) do
+				parts[#parts + 1] = "[" .. serialize_value(key) .. "]=" .. serialize_value(item)
+			end
+			return "{" .. table.concat(parts, ",") .. "}"
+		end
+		return "nil"
+	end
+	core.serialize = serialize_value
+	core.deserialize = function(text)
+		local loader = loadstring or load
+		local chunk = loader("return " .. tostring(text))
+		if not chunk then return nil end
+		local ok, value = pcall(chunk)
+		if ok then return value end
+		return nil
+	end
+
+	ItemStack = function(itemstring)
+		return {to_string = function() return itemstring or "" end}
 	end
 
 	-- Asking for a callback the mock does not have is a bug in the mock, and

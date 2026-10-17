@@ -3,7 +3,7 @@
 set -e
 cd "$(dirname "$0")"
 
-for suite in recorder_common recorder_capture; do
+for suite in recorder_common recorder_capture recorder_replay; do
 	echo "######## $suite ########"
 	"$suite/tests/run_tests.sh"
 done

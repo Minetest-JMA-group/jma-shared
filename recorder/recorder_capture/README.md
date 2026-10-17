@@ -247,7 +247,7 @@ SQLite's JSON functions can dig into it, e.g.
 | `recording_start` | – | – | – | – |
 | `recording_stop` | – | – | – | `reason` (`api`, `shutdown`, `limit_duration`, `limit_size`, `write_error`) |
 | `write_error` | – | – | – | `dropped_rows`, `message` – a gap in the recording, see below |
-| `join` | player | – | `pos`, `item` (wielded) | `at_start`, `last_login`, `reason` (`region` for a walk-in), `hp`, `breath`, `pitch`, `yaw`, `inventory` |
+| `join` | player | – | `pos`, `item` (wielded) | `at_start`, `last_login`, `reason` (`region` for a walk-in), `hp`, `breath`, `pitch`, `yaw`, `textures`, `inventory` |
 | `leave` | player | – | `pos` (where they were, if the engine still answers for them) | `timed_out`, `reason` (`region` for a walk-out) |
 | `die` | player | – | `pos` | `reason` |
 | `respawn` | player | – | `pos` (before being moved) | – |

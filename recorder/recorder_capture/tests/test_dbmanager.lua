@@ -154,6 +154,31 @@ check(dbmanager.get_meta("nothing") == nil, "an unknown key reads as nil")
 check(dbmanager.set_meta("ctf:map", "second") == true, "a key can be written again")
 check(dbmanager.get_meta("ctf:map") == "second", "the second value replaces the first")
 
+print("=== the region snapshot ===")
+local blob = "\0\1\2\255\0"
+local snapshot_ok, snapshot_err = dbmanager.set_snapshot({
+	tick = 0,
+	t = 0,
+	pos1 = {x = 10, y = 20, z = 30},
+	size = {x = 2, y = 3, z = 4},
+	names = "default:stone\ndefault:dirt",
+	encoding = "deflate",
+	data = blob,
+})
+check(snapshot_ok == true, "the snapshot row is written" ..
+	(snapshot_ok and "" or (": " .. tostring(snapshot_err))))
+local snapshot_row = query(reader, "SELECT * FROM Snapshot WHERE tick = 0")[1]
+check(snapshot_row ~= nil, "and is in the file")
+check(snapshot_row.pos1_x == 10 and snapshot_row.pos1_y == 20 and snapshot_row.pos1_z == 30,
+	"with the region's low corner")
+check(snapshot_row.size_x == 2 and snapshot_row.size_y == 3 and snapshot_row.size_z == 4,
+	"and its size")
+check(snapshot_row.names == "default:stone\ndefault:dirt",
+	"the name table keeps its newlines")
+check(snapshot_row.encoding == "deflate", "the encoding is stored")
+check(snapshot_row.data == blob, "and the body round-trips byte for byte, NULs included")
+check(scalar(reader, "SELECT COUNT(*) FROM Snapshot") == 1, "one snapshot row")
+
 print("=== rejected rows and dropped batches ===")
 dbmanager.add_event({ dbmanager.next_id(), 3, 0.3, "dig", 999, nil,
 	nil, nil, nil, nil, nil, nil, nil })

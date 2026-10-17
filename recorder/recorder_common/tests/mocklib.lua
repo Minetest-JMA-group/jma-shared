@@ -142,6 +142,7 @@ local CALLBACKS = {
 	"register_on_item_pickup", "register_on_player_inventory_action",
 	"register_on_chat_message", "register_on_chatcommand",
 	"register_on_protection_violation", "register_on_cheat",
+	"register_on_mapblocks_changed",
 	"register_globalstep", "register_on_shutdown",
 }
 
@@ -245,6 +246,161 @@ function M.new(opts)
 	end
 	core.register_privilege = function(name, definition)
 		mock.privs[name] = definition
+	end
+
+	-- A tiny world behind the engine stand-in: nodes by position, content ids,
+	-- emerge and a VoxelManip, so the snapshot and reconstruction paths can be
+	-- driven without a server.
+	local node_names = {"air", "ignore"}
+	local node_ids = {air = 1, ignore = 2}
+	mock.nodes = {}
+
+	local function node_key(pos)
+		return pos.x .. "," .. pos.y .. "," .. pos.z
+	end
+
+	mock.add_node_name = function(name)
+		if not node_ids[name] then
+			node_names[#node_names + 1] = name
+			node_ids[name] = #node_names
+		end
+		return node_ids[name]
+	end
+
+	mock.set_node = function(pos, node)
+		mock.add_node_name(node.name)
+		mock.nodes[node_key(pos)] = {name = node.name, param2 = node.param2 or 0}
+	end
+
+	mock.get_node = function(pos)
+		return mock.nodes[node_key(pos)] or {name = "air", param2 = 0}
+	end
+
+	core.CONTENT_AIR = 1
+	core.CONTENT_IGNORE = 2
+	core.get_content_id = function(name) return node_ids[name] or 0 end
+	core.get_name_from_content_id = function(id) return node_names[id] end
+	core.set_node = function(pos, node) mock.set_node(pos, node) end
+	core.get_node = function(pos) return mock.get_node(pos) end
+	core.pos_to_string = function(pos)
+		return string.format("(%s,%s,%s)", tostring(pos.x), tostring(pos.y), tostring(pos.z))
+	end
+	core.compress = function(data) return data end
+	core.decompress = function(data) return data end
+
+	core.EMERGE_GENERATED = 1
+	core.EMERGE_FROM_MEMORY = 2
+	core.EMERGE_FROM_DISK = 3
+	core.EMERGE_CANCELLED = 4
+	core.EMERGE_ERRORED = 5
+	core.emerge_area = function(p1, p2, callback)
+		-- The mock has everything already: one callback ends the phase.
+		if callback then
+			callback({x = p1.x, y = p1.y, z = p1.z}, core.EMERGE_FROM_MEMORY, 0)
+		end
+		return true
+	end
+
+	-- A block hash that can be undone, for the mapblock-changed callback.
+	local BLOCK_BIAS = 512
+	core.hash_node_position = function(pos)
+		local bx = math.floor(pos.x / 16) + BLOCK_BIAS
+		local by = math.floor(pos.y / 16) + BLOCK_BIAS
+		local bz = math.floor(pos.z / 16) + BLOCK_BIAS
+		return (bx * 1024 + by) * 1024 + bz
+	end
+	core.get_position_from_hash = function(hash)
+		local bz = hash % 1024
+		hash = math.floor(hash / 1024)
+		local by = hash % 1024
+		local bx = math.floor(hash / 1024)
+		return {
+			x = (bx - BLOCK_BIAS) * 16,
+			y = (by - BLOCK_BIAS) * 16,
+			z = (bz - BLOCK_BIAS) * 16,
+		}
+	end
+
+	core.objects_in_area = function(min, max)
+		local found = {}
+		for _, player in ipairs(mock.connected) do
+			local pos = player:get_pos()
+			if pos and pos.x >= min.x and pos.x <= max.x
+				and pos.y >= min.y and pos.y <= max.y
+				and pos.z >= min.z and pos.z <= max.z then
+				found[#found + 1] = player
+			end
+		end
+		local index = 0
+		return function()
+			index = index + 1
+			return found[index]
+		end
+	end
+
+	core.get_voxel_manip = function(p1, p2)
+		local emerged1 = {x = p1.x, y = p1.y, z = p1.z}
+		local emerged2 = {x = p2.x, y = p2.y, z = p2.z}
+		local size = {x = p2.x - p1.x + 1, y = p2.y - p1.y + 1, z = p2.z - p1.z + 1}
+		local volume = size.x * size.y * size.z
+		local data, param2 = {}, {}
+
+		local function index_of(pos)
+			local dx = math.floor(pos.x) - emerged1.x
+			local dy = math.floor(pos.y) - emerged1.y
+			local dz = math.floor(pos.z) - emerged1.z
+			if dx < 0 or dy < 0 or dz < 0 or dx >= size.x or dy >= size.y or dz >= size.z then
+				return nil
+			end
+			return dz * size.y * size.x + dy * size.x + dx + 1
+		end
+
+		local function position_of(index)
+			local zero = index - 1
+			return {
+				x = emerged1.x + zero % size.x,
+				y = emerged1.y + math.floor(zero / size.x) % size.y,
+				z = emerged1.z + math.floor(zero / (size.x * size.y)),
+			}
+		end
+
+		local vm = {liquids_updated = false}
+		function vm:read_from_map()
+			for i = 1, volume do
+				local node = mock.get_node(position_of(i))
+				data[i] = node_ids[node.name] or 0
+				param2[i] = node.param2 or 0
+			end
+			return emerged1, emerged2
+		end
+		function vm:get_emerged_area() return emerged1, emerged2 end
+		function vm:get_data() return data end
+		function vm:get_param2_data() return param2 end
+		function vm:set_data(value) data = value end
+		function vm:set_param2_data(value) param2 = value end
+		function vm:get_node_at(pos)
+			local index = index_of(pos)
+			if not index then return nil end
+			return {name = node_names[data[index]] or "unknown", param2 = param2[index]}
+		end
+		function vm:set_node_at(pos, node)
+			local index = index_of(pos)
+			if not index then return end
+			mock.add_node_name(node.name)
+			data[index] = node_ids[node.name]
+			param2[index] = node.param2 or 0
+		end
+		function vm:update_liquids() vm.liquids_updated = true end
+		function vm:write_to_map()
+			for i = 1, volume do
+				mock.set_node(position_of(i), {
+					name = node_names[data[i]] or "air",
+					param2 = param2[i],
+				})
+			end
+		end
+		function vm:close() end
+		return vm
 	end
 
 	-- Asking for a callback the mock does not have is a bug in the mock, and

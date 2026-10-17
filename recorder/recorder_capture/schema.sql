@@ -17,6 +17,33 @@ CREATE TABLE Metadata (
 	value TEXT NOT NULL
 ) STRICT;
 
+-- The world the recording starts from: one snapshot of the region, taken before
+-- the first recorded action, so a replay needs nothing but this file.
+--
+-- pos1_* and size_* are the region's low corner and its dimensions; names is
+-- the newline-separated list of node names the body refers to by index (node
+-- names never contain a newline). data is the deflated sparse body built by
+-- recorder_common.snapshot: one entry per non-air node, in the region's
+-- flat-array order (x fastest, then y, then z - the order VoxelManip numbers
+-- nodes). Air is not stored. encoding is "deflate" or "raw", so a reader knows
+-- whether to decompress the body.
+--
+-- Node names are stored, not Content IDs: an id is only stable for one run of
+-- one server, and this file has to be readable anywhere, later.
+CREATE TABLE Snapshot (
+	tick INTEGER PRIMARY KEY,
+	t REAL NOT NULL,
+	pos1_x INTEGER NOT NULL,
+	pos1_y INTEGER NOT NULL,
+	pos1_z INTEGER NOT NULL,
+	size_x INTEGER NOT NULL,
+	size_y INTEGER NOT NULL,
+	size_z INTEGER NOT NULL,
+	names TEXT NOT NULL,
+	encoding TEXT NOT NULL,
+	data BLOB NOT NULL
+) STRICT;
+
 -- One row per player seen during the recording. Events.subject_player,
 -- Events.object_player and Movement.player_id all reference this, so a player
 -- keeps one identity even across leaving and rejoining.

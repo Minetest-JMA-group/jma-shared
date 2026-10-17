@@ -48,7 +48,7 @@ local dropped = 0      -- rows lost to failed flushes
 local written = { events = 0, movement = 0, players = 0 }
 local in_transaction = false
 
-local insert_player, insert_event, insert_movement, set_meta_stmt, get_meta_stmt
+local insert_player, insert_event, insert_movement, set_meta_stmt, get_meta_stmt, insert_snapshot
 
 local function errmsg(where)
 	return string.format("%s: %s", where, tostring(db and db:errmsg()))
@@ -185,6 +185,11 @@ dbmanager.open = function(path)
 	stmt, serr = prepare_statement("SELECT value FROM Metadata WHERE key = ?")
 	if not stmt then db:close() db = nil return nil, serr end
 	get_meta_stmt = stmt
+	stmt, serr = prepare_statement("INSERT INTO Snapshot (tick, t, pos1_x, pos1_y, pos1_z, " ..
+		"size_x, size_y, size_z, names, encoding, data) " ..
+		"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	if not stmt then db:close() db = nil return nil, serr end
+	insert_snapshot = stmt
 
 	seq, failed, dropped, in_transaction = 0, 0, 0, false
 	events, movement, player_ids = {}, {}, {}
@@ -239,6 +244,7 @@ dbmanager.close = function()
 	db:close()
 	db = nil
 	insert_player, insert_event, insert_movement, set_meta_stmt, get_meta_stmt = nil, nil, nil, nil, nil
+	insert_snapshot = nil
 	player_ids = {}
 	events, movement = {}, {}
 	in_transaction = false
@@ -402,6 +408,43 @@ dbmanager.flush = function()
 	failed = failed + 1
 	events, movement = {}, {}
 	return nil, err, lost
+end
+
+-- The region snapshot is one row written once, when the snapshot phase is done:
+-- the baseline every later change is measured against. It is deliberately not
+-- buffered with the event rows - it is not a row in the timeline, and it has to
+-- be in the file before the first event refers to the world it describes.
+---@param row table  -- {tick, t, pos1, size, names, encoding, data}
+---@return boolean|nil, string?
+dbmanager.set_snapshot = function(row)
+	-- Bind one by one, because the body has to go in as a BLOB: lsqlite3 binds
+	-- a Lua string as TEXT, and a STRICT BLOB column refuses TEXT.
+	local values = {
+		row.tick, row.t,
+		row.pos1.x, row.pos1.y, row.pos1.z,
+		row.size.x, row.size.y, row.size.z,
+		row.names, row.encoding,
+	}
+	for index = 1, #values do
+		if insert_snapshot:bind(index, values[index]) ~= sqlite.OK then
+			local err = errmsg("cannot bind snapshot")
+			insert_snapshot:reset()
+			return nil, err
+		end
+	end
+	if insert_snapshot:bind_blob(#values + 1, row.data) ~= sqlite.OK then
+		local err = errmsg("cannot bind the snapshot body")
+		insert_snapshot:reset()
+		return nil, err
+	end
+	local ret = insert_snapshot:step()
+	if ret ~= sqlite.DONE then
+		local err = errmsg("cannot write snapshot")
+		insert_snapshot:reset()
+		return nil, err
+	end
+	insert_snapshot:reset()
+	return true
 end
 
 ---@param key string

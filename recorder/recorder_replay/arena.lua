@@ -305,6 +305,19 @@ function arena.relight(box)
 	end
 end
 
+-- VoxelManip writes do not touch node metadata: a chest at a position the VM
+-- writes keeps its inventory behind whatever node is there now, and a node
+-- removed by clearing the arena leaves its metadata at an air position. The
+-- arena owns everything inside its box, so its metadata goes with the nodes.
+---@param box table
+function arena.clear_metadata(box)
+	local ok, positions = pcall(core.find_nodes_with_meta, box.pos1, box.pos2)
+	if not ok or not positions then return end
+	for _, pos in pairs(positions) do
+		pcall(function() core.get_meta(pos):from_table(nil) end)
+	end
+end
+
 -- Every cell of the box is written - an explicit read_from_map() is not
 -- needed, because get_voxel_manip() already loaded the area. The outer layer
 -- becomes the barrier and the interior becomes air; the reconstruction then
@@ -336,6 +349,7 @@ function arena.prepare(box)
 		end
 	end)
 	if not written then return nil, err end
+	arena.clear_metadata(box)
 	arena.relight(box)
 	return true
 end
@@ -358,6 +372,7 @@ function arena.clear(box)
 		end
 	end)
 	if not written then return nil, err end
+	arena.clear_metadata(box)
 	arena.relight(box)
 	return true
 end

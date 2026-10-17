@@ -28,6 +28,7 @@ local unpack = table.unpack or unpack
 -- number of parameters.
 local EVENT_COLUMNS = 13
 local MOVEMENT_COLUMNS = 20
+local METADATA_COLUMNS = 7
 
 -- What schema.sql puts in PRAGMA application_id ('JMAR'), and what tells a
 -- recorder file apart from any other database. The same value is in
@@ -51,10 +52,11 @@ function dbmanager.new(sqlite_lib)
 		seq = 0,            -- id handed out last; shared by Events and Movement
 		events = {},        -- buffered Events rows, in recording order
 		movement = {},      -- buffered Movement rows, in recording order
+		metadata = {},      -- buffered NodeMetadata rows, in recording order
 		player_ids = {},    -- player name -> Players.id
 		failed = 0,         -- consecutive failed flushes
 		dropped = 0,        -- rows lost to failed flushes
-		written = {events = 0, movement = 0, players = 0},
+		written = {events = 0, movement = 0, players = 0, metadata = 0},
 		in_transaction = false,
 	}, DB)
 end
@@ -184,10 +186,14 @@ function DB:open(path)
 		"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if not stmt then self.db:close() self.db = nil return nil, serr end
 	self.insert_snapshot = stmt
+	stmt, serr = prepare_statement(self, "INSERT INTO NodeMetadata (id, tick, t, pos_x, pos_y, pos_z, data) " ..
+		"VALUES (?, ?, ?, ?, ?, ?, ?)")
+	if not stmt then self.db:close() self.db = nil return nil, serr end
+	self.insert_metadata = stmt
 
 	self.seq, self.failed, self.dropped, self.in_transaction = 0, 0, 0, false
-	self.events, self.movement, self.player_ids = {}, {}, {}
-	self.written = {events = 0, movement = 0, players = 0}
+	self.events, self.movement, self.metadata, self.player_ids = {}, {}, {}, {}
+	self.written = {events = 0, movement = 0, players = 0, metadata = 0}
 	return true
 end
 
@@ -239,8 +245,9 @@ function DB:close()
 	self.db = nil
 	self.insert_player, self.insert_event, self.insert_movement = nil, nil, nil
 	self.set_meta_stmt, self.get_meta_stmt, self.insert_snapshot = nil, nil, nil
+	self.insert_metadata = nil
 	self.player_ids = {}
-	self.events, self.movement = {}, {}
+	self.events, self.movement, self.metadata = {}, {}, {}
 	self.in_transaction = false
 	return ok, err
 end
@@ -303,9 +310,14 @@ function DB:add_movement(row)
 	self.movement[#self.movement + 1] = row
 end
 
+---@param row table  -- a NodeMetadata row, in column order, ids included
+function DB:add_metadata(row)
+	self.metadata[#self.metadata + 1] = row
+end
+
 ---@return integer
 function DB:buffered()
-	return #self.events + #self.movement
+	return #self.events + #self.movement + #self.metadata
 end
 
 ---@return table
@@ -314,7 +326,8 @@ function DB:stats()
 		players = self.written.players,
 		events = self.written.events,
 		movement = self.written.movement,
-		buffered = #self.events + #self.movement,
+		metadata = self.written.metadata,
+		buffered = #self.events + #self.movement + #self.metadata,
 		dropped = self.dropped,
 		failed = self.failed,
 	}
@@ -361,7 +374,8 @@ function DB:flush()
 		return nil, "no recording database is open"
 	end
 	local nevents, nmovement = #self.events, #self.movement
-	if nevents == 0 and nmovement == 0 then
+	local nmetadata = #self.metadata
+	if nevents == 0 and nmovement == 0 and nmetadata == 0 then
 		-- Nothing to write, but the run of failures (if any) ends here.
 		self.failed = 0
 		return true
@@ -386,6 +400,9 @@ function DB:flush()
 	if ok and nmovement > 0 then
 		ok, err = insert_rows(self, self.insert_movement, self.movement, nmovement, MOVEMENT_COLUMNS)
 	end
+	if ok and nmetadata > 0 then
+		ok, err = insert_rows(self, self.insert_metadata, self.metadata, nmetadata, METADATA_COLUMNS)
+	end
 
 	if ok then
 		ret = self.db:exec("COMMIT")
@@ -399,17 +416,18 @@ function DB:flush()
 		self.in_transaction = false
 		self.written.events = self.written.events + nevents
 		self.written.movement = self.written.movement + nmovement
+		self.written.metadata = self.written.metadata + nmetadata
 		self.failed = 0
-		self.events, self.movement = {}, {}
+		self.events, self.movement, self.metadata = {}, {}, {}
 		return true
 	end
 
 	self.db:exec("ROLLBACK")
 	self.in_transaction = false
-	local lost = nevents + nmovement
+	local lost = nevents + nmovement + nmetadata
 	self.dropped = self.dropped + lost
 	self.failed = self.failed + 1
-	self.events, self.movement = {}, {}
+	self.events, self.movement, self.metadata = {}, {}, {}
 	return nil, err, lost
 end
 

@@ -106,6 +106,16 @@ function sessions.seek(session, T)
 		deps.arena.relight(session.arena)
 	end
 
+	-- Metadata is not part of the node write: the arena is wiped of it and
+	-- then told everything the recording had up to this moment, so a seek
+	-- backwards also undoes a container's later contents.
+	deps.arena.clear_metadata(session.arena)
+	for _, row in ipairs(deps.reader.node_metadata_until(session.rec, tick)) do
+		deps.reconstruct.apply_metadata(session.offset, row)
+	end
+	session.metadata_last_id = deps.reader.last_metadata_id(session.rec, tick)
+	session.metadata_events = {rows = {}, next = 1}
+
 	local offset = session.offset
 	local present = {}
 	for _, ev in ipairs(deps.reader.join_leave_until(session.rec, tick)) do
@@ -198,6 +208,25 @@ local function advance_player(session, pid, obj, cursor)
 	end
 end
 
+-- Apply the metadata rows the clock has reached. Metadata does not need a
+-- world write; it goes straight into the node it belongs to.
+local function advance_metadata(session)
+	local buffer = session.metadata_events
+	while true do
+		while buffer.next <= #buffer.rows do
+			local row = buffer.rows[buffer.next]
+			if row.t > session.T then return end
+			buffer.next = buffer.next + 1
+			deps.reconstruct.apply_metadata(session.offset, row)
+		end
+		local more = deps.reader.node_metadata_after(session.rec, session.metadata_last_id, 200)
+		if #more == 0 then return end
+		session.metadata_last_id = more[#more].id
+		buffer.rows = more
+		buffer.next = 1
+	end
+end
+
 ---@param session table
 function sessions.start(arg, player)
 	local limit = tonumber(core.settings:get("replay.max_sessions")) or 4
@@ -262,6 +291,8 @@ function sessions.start(arg, player)
 		joined = {},
 		events = {rows = {}, next = 1},
 		event_last_id = 0,
+		metadata_events = {rows = {}, next = 1},
+		metadata_last_id = 0,
 	}
 	by_id[session.id] = session
 	local joined, join_err = sessions.join(session, player)
@@ -355,6 +386,7 @@ function sessions.step_all(dtime)
 				session.paused = true
 			end
 			advance_events(session)
+			advance_metadata(session)
 			if session.reconstruct_dirty then
 				session.reconstruct_dirty = false
 				local written, err = deps.reconstruct.write(session.reconstruct, session.offset)

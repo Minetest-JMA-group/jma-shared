@@ -114,6 +114,15 @@ local function make_fixture()
 		"air", 0, nil, '{"old_node":"default:stone","old_param2":0}'})
 	writer:add_event({writer:next_id(), 9, 0.9, "node_change", alice, nil, 2, 1, 2,
 		"default:dirt", 3, nil, '{"old_node":"default:glass","old_param2":7}'})
+	-- A chest at (3,1,3): an inventory that changes at 0.7 s, and metadata that
+	-- is taken away entirely at 0.9 s.
+	writer:add_metadata({writer:next_id(), 0, 0, 3, 1, 3,
+		core.serialize({fields = {owner = "alice"},
+			inventory = {main = {"default:stone 5", "", "default:torch 3"}}})})
+	writer:add_metadata({writer:next_id(), 7, 0.7, 3, 1, 3,
+		core.serialize({fields = {owner = "alice"},
+			inventory = {main = {"", "", "default:torch 3"}}})})
+	writer:add_metadata({writer:next_id(), 9, 0.9, 3, 1, 3, ""})
 	writer:flush()
 	writer:close()
 end
@@ -598,6 +607,38 @@ check(#mock.relit == relit, "forward changes leave the light to write_to_map()")
 check(mock.liquids_updated == false, "still without starting liquid flow")
 
 ----------------------------------------------------------------------------
+print("=== node metadata ===")
+----------------------------------------------------------------------------
+
+-- The chest is at recorded (3,1,3), so (104,12,104) in the arena.
+local CHEST = "104,12,104"
+local function chest()
+	return mock.node_meta[CHEST]
+end
+sessions.seek(session, 0.3)
+check(chest() ~= nil, "the baseline metadata is applied to the reconstruction")
+check(chest() and chest().fields.owner == "alice", "with its fields")
+check(chest() and chest().inventory.main[1] == "default:stone 5"
+	and chest().inventory.main[3] == "default:torch 3", "and its inventory, slot for slot")
+
+sessions.seek(session, 0.8)
+check(chest() and chest().inventory.main[1] == "", "a later metadata change is applied")
+check(chest() and chest().inventory.main[3] == "default:torch 3", "leaving the rest alone")
+
+sessions.seek(session, 0.3)
+check(chest() and chest().inventory.main[1] == "default:stone 5",
+	"seeking back restores the earlier contents")
+
+sessions.seek(session, 0.5)
+check(chest() and chest().inventory.main[1] == "default:stone 5", "before the change")
+mock.step(0.35)
+check(near(session.T, 0.85), "the clock crossed the change: " .. tostring(session.T))
+check(chest() and chest().inventory.main[1] == "",
+	"forward playback applies the metadata change when the clock reaches it")
+mock.step(0.1)
+check(chest() == nil, "and the clearing row when it reaches that")
+
+----------------------------------------------------------------------------
 print("=== a second viewer ===")
 ----------------------------------------------------------------------------
 
@@ -620,6 +661,10 @@ check(mock.get_node({x = 100, y = 10, z = 100}).name == "recorder_replay:barrier
 print("=== leaving and ending ===")
 ----------------------------------------------------------------------------
 
+-- The chest has metadata at 0.3 s; leaving must take it out of the arena with
+-- the nodes, because a VoxelManip write does not touch node metadata.
+sessions.seek(session, 0.3)
+check(chest() ~= nil, "the chest has metadata again before leaving")
 use("leave", watcher)
 check(sessions.for_player("Watcher") ~= nil, "the leave item asks to leave")
 -- The engine writes the used stack back into its slot after on_use returns;
@@ -632,6 +677,7 @@ local empty, offender = box_is_air(WATCHER_ARENA)
 check(empty, "the whole arena is air again: " .. tostring(offender))
 check(#mock.relit > 0 and mock.relit[#mock.relit].pos1.x == 100,
 	"clearing it recalculates the light of the ground it covered")
+check(chest() == nil, "and its node metadata goes with the nodes")
 check(flag_count() == 0, "and the boot flag is gone")
 check(watcher.inventory.main[1] == "default:pick_stone",
 	"the player's things are back after the engine's write: " .. tostring(watcher.inventory.main[1]))

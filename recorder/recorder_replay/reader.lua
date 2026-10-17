@@ -27,7 +27,7 @@ end
 -- schema version without holding them - hand-made, or damaged after the
 -- header - and every query against such a file raises instead of returning an
 -- error, so their presence is checked before anything reads rows.
-local REQUIRED_TABLES = {"Metadata", "Snapshot", "Players", "Movement", "Events"}
+local REQUIRED_TABLES = {"Metadata", "Snapshot", "Players", "Movement", "Events", "NodeMetadata"}
 
 -- Open a recording and read the facts that do not change during a session.
 ---@param path string
@@ -235,6 +235,54 @@ end
 function reader.last_event_id(rec, tick)
 	return tonumber(reader.scalar(rec,
 		string.format("SELECT MAX(id) FROM Events WHERE tick <= %d", tick))) or 0
+end
+
+local METADATA_COLUMNS = "id, tick, t, pos_x, pos_y, pos_z, data"
+
+local function metadata_row(row)
+	return {
+		id = row.id,
+		tick = row.tick,
+		t = row.t,
+		pos = {x = row.pos_x, y = row.pos_y, z = row.pos_z},
+		data = row.data,
+	}
+end
+
+---@param rec table
+---@param after_id integer
+---@param limit integer
+---@return table[]
+function reader.node_metadata_after(rec, after_id, limit)
+	local rows = {}
+	local sql = string.format(
+		"SELECT %s FROM NodeMetadata WHERE id > %d ORDER BY id LIMIT %d",
+		METADATA_COLUMNS, after_id, limit)
+	for row in rec.db:nrows(sql) do
+		rows[#rows + 1] = metadata_row(row)
+	end
+	return rows
+end
+
+---@param rec table
+---@param tick integer
+---@return table[]
+function reader.node_metadata_until(rec, tick)
+	local rows = {}
+	local sql = string.format(
+		"SELECT %s FROM NodeMetadata WHERE tick <= %d ORDER BY id", METADATA_COLUMNS, tick)
+	for row in rec.db:nrows(sql) do
+		rows[#rows + 1] = metadata_row(row)
+	end
+	return rows
+end
+
+---@param rec table
+---@param tick integer
+---@return integer
+function reader.last_metadata_id(rec, tick)
+	return tonumber(reader.scalar(rec,
+		string.format("SELECT MAX(id) FROM NodeMetadata WHERE tick <= %d", tick))) or 0
 end
 
 return reader

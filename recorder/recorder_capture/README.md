@@ -130,6 +130,7 @@ Settings are read when a recording starts, so a change applies to the next one.
 | `recorder.max_duration` | `0` | Stop the recording after this many seconds. `0` is no limit. |
 | `recorder.max_size_mb` | `0` | Stop the recording once the file reaches this size. `0` is no limit. |
 | `recorder.disabled_events` | empty | Comma-separated event types not to record, e.g. `chat, chatcommand, punch_node`. The recording's own markers (`recording_start`, `recording_stop`, `write_error`) and `node_change` cannot be disabled. |
+| `recorder.metadata` | `true` | Record node metadata and inventories (chest contents, sign text, ...). With `false` the recording holds no metadata rows; replay handles both kinds of file the same way. |
 
 ## The recording file
 
@@ -161,6 +162,7 @@ See `schema.sql` for the same information next to the tables.
 | `Players` | `id`, `name` – one row per player seen during the recording. |
 | `Movement` | Player kinematics, one row per player per server step in which something about that player changed. |
 | `Events` | One row per action. |
+| `NodeMetadata` | Node metadata and inventories: a baseline at tick 0, then one row whenever the periodic scan sees a change. |
 
 ### The region
 
@@ -210,6 +212,24 @@ step after the step it belongs to, so its `id` can be later than that of other
 rows sharing its `tick`; the `tick` and `t` columns are what say when it
 happened. `node_change` cannot be switched off: a recording whose world drifts
 from its snapshot would be a recording of something else.
+
+### Node metadata
+
+`id`, `tick`, `t`, `pos_x/y/z`, `data`.
+
+`data` is `NodeMetaRef:to_table()` serialized with `core.serialize`, with
+inventory slots reduced to itemstrings: `fields` holds the metadata fields
+(sign text, owner, formspec, infotext, ...) and `inventory` holds every list,
+slot for slot, so a chest keeps both its contents and its size. An empty
+string is a deliberate clearing: the node stopped having metadata, or the node
+went away.
+
+The first rows are the baseline at tick 0, taken with the snapshot. Later
+changes have no engine callback, so the region is scanned once a second
+(`find_nodes_with_meta`) and compared with what the recording knows; only
+differences become rows, and their `tick`/`t` are those of the scan that saw
+them. A position whose mapblock is unloaded is left alone rather than mistaken
+for an emptied node. `recorder.metadata = false` turns the whole thing off.
 
 ### Movement
 
@@ -377,10 +397,10 @@ rather than reporting a clean stop, and the `-wal` file has to travel with the
   because they do have one.
 - **Entities.** Mobs, item drops and projectiles are not recorded; the recording
   follows players and the region's nodes, not other objects.
-- **Node metadata and inventories.** The node's name and param2 are recorded, but
-  not the metadata behind it: chest contents, sign text and a node timer's state
-  are not in the file. Changes to them are noticed by the mapblock callback, but
-  a replay cannot put them back.
+- **Node timers and their state.** Node metadata and inventories are recorded
+  (see *Node metadata*), but a node timer's state is engine state, not
+  metadata, and is not. A timer's effect on the world is still recorded as the
+  `node_change` it produces.
 - **Formspec and GUI input**, and anything else a mod does without a callback.
 - **Login and IP data.** `ipdb` is the place for who connected from where.
 

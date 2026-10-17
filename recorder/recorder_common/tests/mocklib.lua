@@ -385,6 +385,117 @@ function M.new(opts)
 		mock.node_defs[name] = def
 		mock.add_node_name(name)
 	end
+
+	-- Node metadata over a table, shaped like the engine's NodeMetaRef:
+	-- to_table() hands inventory slots back as ItemStack userdata, which is
+	-- exactly what the recorder has to normalize before serializing.
+	mock.node_meta = {}
+	local function copy_table(value)
+		if type(value) ~= "table" then return value end
+		local out = {}
+		for k, v in pairs(value) do out[k] = copy_table(v) end
+		return out
+	end
+	local function meta_entry(key)
+		local entry = mock.node_meta[key]
+		if not entry then
+			entry = {fields = {}, inventory = {}}
+			mock.node_meta[key] = entry
+		end
+		return entry
+	end
+	core.get_meta = function(pos)
+		local key = node_key(pos)
+		return {
+			to_table = function()
+				local entry = mock.node_meta[key]
+				if not entry then return nil end
+				local out = {fields = copy_table(entry.fields or {}), inventory = {}}
+				for listname, list in pairs(entry.inventory or {}) do
+					local items = {}
+					for i, itemstring in ipairs(list) do
+						items[i] = ItemStack(itemstring)
+					end
+					out.inventory[listname] = items
+				end
+				return out
+			end,
+			from_table = function(_, data)
+				if type(data) ~= "table" then
+					mock.node_meta[key] = nil
+					return true
+				end
+				local entry = {fields = copy_table(data.fields or {}), inventory = {}}
+				for listname, list in pairs(data.inventory or {}) do
+					local items = {}
+					for i, stack in ipairs(list) do
+						if type(stack) == "string" then
+							items[i] = stack
+						elseif stack ~= nil and stack.to_string then
+							items[i] = stack:to_string()
+						else
+							items[i] = ""
+						end
+					end
+					entry.inventory[listname] = items
+				end
+				mock.node_meta[key] = entry
+				return true
+			end,
+			set_string = function(_, field, value)
+				meta_entry(key).fields[field] = tostring(value)
+			end,
+			get_string = function(_, field)
+				local entry = mock.node_meta[key]
+				return entry and entry.fields[field] or ""
+			end,
+			get_inventory = function()
+				local entry = meta_entry(key)
+				local function itemstrings(list)
+					local items = {}
+					for i, stack in ipairs(list or {}) do
+						if type(stack) == "string" then
+							items[i] = stack
+						elseif stack ~= nil and stack.to_string then
+							items[i] = stack:to_string()
+						else
+							items[i] = ""
+						end
+					end
+					return items
+				end
+				return {
+					set_list = function(_, listname, list)
+						entry.inventory[listname] = itemstrings(list)
+					end,
+					get_list = function(_, listname)
+						local items = {}
+						for i, itemstring in ipairs(entry.inventory[listname] or {}) do
+							items[i] = ItemStack(itemstring)
+						end
+						return items
+					end,
+					get_size = function(_, listname)
+						return #(entry.inventory[listname] or {})
+					end,
+				}
+			end,
+		}
+	end
+	core.find_nodes_with_meta = function(p1, p2)
+		local out = {}
+		for key in pairs(mock.node_meta) do
+			local x, y, z = key:match("^(%-?%d+),(%-?%d+),(%-?%d+)$")
+			if x then
+				x, y, z = tonumber(x), tonumber(y), tonumber(z)
+				if x >= p1.x and x <= p2.x and y >= p1.y and y <= p2.y
+					and z >= p1.z and z <= p2.z then
+					out[#out + 1] = {x = x, y = y, z = z}
+				end
+			end
+		end
+		return out
+	end
 	core.pos_to_string = function(pos)
 		return string.format("(%s,%s,%s)", tostring(pos.x), tostring(pos.y), tostring(pos.z))
 	end

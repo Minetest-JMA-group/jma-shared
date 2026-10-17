@@ -15,6 +15,8 @@
 ---@field offset table         -- recorded position -> arena position
 ---@field reconstruct table    -- the reconstructed region's state
 ---@field reconstruct_dirty boolean -- node changes waiting to be written
+---@field metadata_last_id integer -- last metadata row applied
+---@field metadata_events table -- metadata rows waiting for the clock
 
 ---@class ReplayArena
 ---@field init fun(dependencies: table)
@@ -25,6 +27,7 @@
 ---@field resolve fun(player_name: string, recorded: table): table|nil, string?
 ---@field prepare fun(box: table): boolean|nil, string?
 ---@field clear fun(box: table): boolean|nil, string?
+---@field clear_metadata fun(box: table)
 ---@field relight fun(box: table)
 ---@field viewing_position fun(box: table): table
 ---@field offset fun(box: table, recorded: table): table

@@ -156,6 +156,35 @@ function reconstruct.seek(state, rec, tick)
 	end
 end
 
+-- Put one recorded metadata row into the arena. An empty data string is a
+-- deliberate clearing; the position is translated like every other recorded
+-- position. A row that cannot be read is reported and skipped rather than
+-- taking the session down.
+---@param offset table
+---@param row table
+function reconstruct.apply_metadata(offset, row)
+	if not row or not row.pos then return end
+	local pos = {
+		x = row.pos.x + offset.x,
+		y = row.pos.y + offset.y,
+		z = row.pos.z + offset.z,
+	}
+	local ok, err
+	if row.data == "" then
+		ok, err = pcall(function() core.get_meta(pos):from_table(nil) end)
+	else
+		local read, data = pcall(core.deserialize, row.data)
+		if read and type(data) == "table" then
+			ok, err = pcall(function() core.get_meta(pos):from_table(data) end)
+		else
+			ok, err = false, "the metadata row cannot be deserialized"
+		end
+	end
+	if not ok then
+		core.log("warning", "[replay] cannot apply node metadata: " .. tostring(err))
+	end
+end
+
 -- Write the whole region into the arena in one VoxelManip operation. The VM
 -- pre-loads a mapblock-aligned area that can be larger than the region, so the
 -- cells are addressed through the emerged area's origin.

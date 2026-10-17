@@ -1088,4 +1088,65 @@ check(value(db, "SELECT COUNT(*) FROM Events WHERE data LIKE '%shutdown%'") == 1
 	"the recording says it was the shutdown that ended it")
 db:close()
 
+----------------------------------------------------------------------------
+-- Node metadata and inventories
+----------------------------------------------------------------------------
+local META_REGION = {pos1 = {x = 200, y = 0, z = 0}, pos2 = {x = 205, y = 4, z = 5}}
+local chest = {x = 202, y = 1, z = 2}
+local sign = {x = 203, y = 1, z = 2}
+mock.set_node(chest, {name = "default:chest"})
+mock.set_node(sign, {name = "default:sign_wall_wood"})
+core.get_meta(chest):from_table({
+	fields = {owner = "alice", infotext = "Chest"},
+	inventory = {main = {"default:stone 5", "", "default:torch 3"}},
+})
+core.get_meta(sign):set_string("text", "hello")
+
+check(start_recording("meta", META_REGION) == nil, "a recording with metadata starts")
+local meta_path = recorder.get_recording_path()
+mock.step(0.1)
+core.get_meta(chest):from_table({
+	fields = {owner = "alice", infotext = "Chest"},
+	inventory = {main = {"", "", "default:torch 3"}},
+})
+mock.steps(11, 0.1)  -- past the one-second scan
+core.get_meta(chest):from_table(nil)
+mock.steps(11, 0.1)
+check(recorder.stop() == nil, "it stops")
+
+local meta_db = open_recording(meta_path)
+local chest_rows = rows(meta_db, string.format(
+	"SELECT tick, data FROM NodeMetadata WHERE pos_x = %d AND pos_y = %d AND pos_z = %d ORDER BY id",
+	chest.x, chest.y, chest.z))
+check(#chest_rows == 3, "the chest has a baseline, a change and a clearing: " .. #chest_rows)
+check(chest_rows[1].tick == 0, "the first row is the baseline at tick 0")
+local baseline_table = core.deserialize(chest_rows[1].data)
+check(baseline_table and baseline_table.fields.owner == "alice", "the fields are recorded")
+check(baseline_table and baseline_table.inventory.main[1] == "default:stone 5",
+	"the inventory is recorded slot for slot")
+check(baseline_table and baseline_table.inventory.main[2] == "",
+	"and an empty slot keeps its place")
+local changed = core.deserialize(chest_rows[2].data)
+check(changed and changed.inventory.main[1] == "" and changed.inventory.main[3] == "default:torch 3",
+	"an inventory change is seen at the next scan")
+check(chest_rows[3].data == "", "taking the metadata away is recorded as a clearing")
+local sign_rows = rows(meta_db, string.format(
+	"SELECT tick, data FROM NodeMetadata WHERE pos_x = %d AND pos_y = %d AND pos_z = %d",
+	sign.x, sign.y, sign.z))
+check(#sign_rows == 1, "a node whose metadata did not change has its baseline only")
+check(core.deserialize(sign_rows[1].data).fields.text == "hello", "the sign text is recorded")
+meta_db:close()
+
+-- The setting turns the whole thing off for the recording (replay is not
+-- affected: it only acts on what the file holds).
+mock.settings["recorder.metadata"] = "false"
+check(start_recording("nometa", META_REGION) == nil, "a recording without metadata starts")
+local nometa_path = recorder.get_recording_path()
+check(recorder.stop() == nil, "it stops")
+local nometa_db = open_recording(nometa_path)
+check(value(nometa_db, "SELECT COUNT(*) FROM NodeMetadata") == 0,
+	"with recorder.metadata = false the file holds no metadata rows")
+nometa_db:close()
+mock.settings["recorder.metadata"] = nil
+
 print(("\n%d checks passed"):format(checks))

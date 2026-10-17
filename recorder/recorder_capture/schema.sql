@@ -44,6 +44,26 @@ CREATE TABLE Snapshot (
 	data BLOB NOT NULL
 ) STRICT;
 
+-- Node metadata and inventories, as they were and as they changed. The row
+-- holds what NodeMetaRef:to_table() describes: an inventory list is a list of
+-- itemstrings, slot for slot (an empty string is an empty slot). data is that
+-- table serialized with core.serialize; an empty string is a deliberate
+-- clearing (the node stopped having metadata, or the node went away).
+--
+-- Rows share the id sequence with Events and Movement, so their order relative
+-- to the rest of the timeline is recoverable. The first rows are the baseline
+-- at tick 0; later rows are what the recorder's periodic scan found, so a
+-- metadata change carries the tick and time of the scan that saw it.
+CREATE TABLE NodeMetadata (
+	id INTEGER PRIMARY KEY,
+	tick INTEGER NOT NULL,
+	t REAL NOT NULL,
+	pos_x INTEGER NOT NULL,
+	pos_y INTEGER NOT NULL,
+	pos_z INTEGER NOT NULL,
+	data TEXT NOT NULL
+) STRICT;
+
 -- One row per player seen during the recording. Events.subject_player,
 -- Events.object_player and Movement.player_id all reference this, so a player
 -- keeps one identity even across leaving and rejoining.
@@ -142,3 +162,4 @@ CREATE INDEX idx_events_tick ON Events(tick);
 CREATE INDEX idx_events_type ON Events(type);
 CREATE INDEX idx_events_subject ON Events(subject_player);
 CREATE INDEX idx_events_object ON Events(object_player);
+CREATE INDEX idx_node_metadata_tick ON NodeMetadata(tick);

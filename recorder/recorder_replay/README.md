@@ -82,6 +82,12 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
   bounds are written to mod storage before its first node, so if the server
   dies mid-replay the next boot clears the leftover shell (on a world the game
   rebuilds from scratch there is nothing to clear, and the flag is erased).
+- Node metadata and inventories are restored with the nodes: a chest shows what
+  it held, a sign shows its text. Changes are applied as the clock reaches
+  them, and a seek rebuilds them from the baseline for that moment. VoxelManip
+  writes do not touch metadata, so the arena's metadata is cleared explicitly
+  before a reconstruction and when the arena is torn down - otherwise a live
+  world's chest could leave its inventory behind on a replay node.
 
 ## What is played
 
@@ -99,8 +105,8 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
 - Chat, items and inventories are not drawn.
 - Lua entities are not recorded, so mobs, dropped items and the like do not
   appear.
-- Node metadata and node timers' state are not recorded or replayed; a node
-  timer's `node_change` output is replayed because it changes a node.
+- Node timers' state is not recorded or replayed; a node timer's `node_change`
+  output is replayed because it changes a node.
 - Light values are not recorded. A reconstruction is lit by the replay
   server's sky and by the nodes themselves, not by the light the recorded
   world had: a cave, a lamp-lit room or a night-time scene will look

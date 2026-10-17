@@ -110,6 +110,9 @@ local function new_state()
 		sampled = {},        -- player id -> name, from the last pass through the region
 		known_ids = nil,     -- region flat index -> content id, what the recording knows
 		known_param2 = nil,  -- and the param2 that goes with it
+		metadata_enabled = false, -- whether node metadata and inventories are recorded
+		metadata_known = {}, -- position key -> serialized metadata the recording knows
+		next_metadata_poll = 0,
 		pending_blocks = {}, -- mapblock changes waiting to be diffed, with their tick
 		prev = {},           -- player id -> last sample, for deriving acceleration
 		written = {},        -- player id -> last sample written, to spot no-ops
@@ -148,6 +151,14 @@ local CONTROL_BIT = { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512 }
 
 local function log_error(msg)
 	core.log("error", "[recorder] " .. msg)
+end
+
+-- A boolean setting with a default. get_bool() on its own reads an unset
+-- setting as false, and the features below default to on.
+local function enabled_setting(name, default)
+	local raw = core.settings:get(name)
+	if raw == nil or raw == "" then return default end
+	return core.settings:get_bool(name)
 end
 
 -- One report per kind of trouble per recording: a callback that fires every
@@ -425,6 +436,133 @@ local function inventory_snapshot(player)
 	end)
 	if ok then return result end
 	return nil
+end
+
+----------------------------------------------------------------------------
+-- Node metadata
+----------------------------------------------------------------------------
+
+-- How often the region is scanned for metadata changes. Metadata has no engine
+-- callback, and most changes happen where players are, so a second of
+-- granularity is a good trade against scanning the region every step.
+local METADATA_INTERVAL = 1.0
+
+local function position_key(pos)
+	return string.format("%d,%d,%d", math.floor(pos.x), math.floor(pos.y), math.floor(pos.z))
+end
+
+-- NodeMetaRef:to_table() is not quite storable: inventory slots are ItemStack
+-- userdata, and an empty inventory is still a list of empty slots that says
+-- how large the node's inventory is. Fields stay strings, stacks become the
+-- itemstrings from_table() accepts, and a table with nothing in it is nil -
+-- "this node has no metadata worth recording".
+---@param table_ table?
+---@return string|nil  -- serialized metadata, or nil when there is nothing to store
+local function metadata_blob(table_)
+	if type(table_) ~= "table" then return nil end
+	local normalized = {fields = {}, inventory = {}}
+	local any = false
+	for key, value in pairs(table_.fields or {}) do
+		normalized.fields[key] = tostring(value)
+		any = true
+	end
+	for listname, list in pairs(table_.inventory or {}) do
+		local items = {}
+		for i, stack in ipairs(list) do
+			if type(stack) == "string" then
+				items[i] = stack
+			elseif stack ~= nil and stack.to_string then
+				local ok, itemstring = pcall(stack.to_string, stack)
+				items[i] = ok and itemstring or ""
+			else
+				items[i] = ""
+			end
+		end
+		normalized.inventory[listname] = items
+		any = true
+	end
+	if not any then return nil end
+	local ok, blob = pcall(core.serialize, normalized)
+	if not ok or not blob then return nil end
+	return blob
+end
+
+---@param pos table
+---@return string|nil
+local function metadata_at(pos)
+	local ok, table_ = pcall(function()
+		return core.get_meta(pos):to_table()
+	end)
+	if not ok then return nil end
+	return metadata_blob(table_)
+end
+
+local function record_metadata(rec, pos, blob, tick, t)
+	rec.db:add_metadata({
+		rec.db:next_id(), tick or rec.tick, t or rec.elapsed,
+		math.floor(pos.x), math.floor(pos.y), math.floor(pos.z), blob or "",
+	})
+end
+
+-- The metadata the recording starts from, written with tick 0 like the node
+-- snapshot it belongs with.
+local function record_metadata_baseline(rec)
+	if not rec.metadata_enabled then return end
+	local ok, positions = pcall(core.find_nodes_with_meta, rec.region.pos1, rec.region.pos2)
+	if not ok then
+		complain(rec, "list node metadata", "cannot list node metadata: " .. tostring(positions))
+		return
+	end
+	local known = {}
+	for _, pos in pairs(positions or {}) do
+		local blob = metadata_at(pos)
+		if blob then
+			known[position_key(pos)] = blob
+			record_metadata(rec, pos, blob, 0, 0)
+		end
+	end
+	rec.metadata_known = known
+end
+
+-- Compare the metadata in the region with what the recording knows. Only
+-- differences become rows; a node that went away, or whose metadata was
+-- cleared, gets an empty row. A position whose block is unloaded is left
+-- alone: the scan cannot see it, and that is not the same as it being gone.
+local function poll_metadata(rec)
+	local known = rec.metadata_known
+	local ok, positions = pcall(core.find_nodes_with_meta, rec.region.pos1, rec.region.pos2)
+	if not ok then
+		complain(rec, "list node metadata", "cannot list node metadata: " .. tostring(positions))
+		return
+	end
+	local seen = {}
+	for _, pos in pairs(positions or {}) do
+		local key = position_key(pos)
+		seen[key] = true
+		local blob = metadata_at(pos)
+		if blob then
+			if known[key] ~= blob then
+				known[key] = blob
+				record_metadata(rec, pos, blob)
+			end
+		elseif known[key] then
+			known[key] = nil
+			record_metadata(rec, pos, "")
+		end
+	end
+	for key in pairs(known) do
+		if not seen[key] then
+			local x, y, z = key:match("^(%-?%d+),(%-?%d+),(%-?%d+)$")
+			if x then
+				local pos = {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
+				local node_ok, node = pcall(core.get_node, pos)
+				if node_ok and node and node.name ~= "ignore" then
+					known[key] = nil
+					record_metadata(rec, pos, "")
+				end
+			end
+		end
+	end
 end
 
 ----------------------------------------------------------------------------
@@ -786,6 +924,8 @@ local function abort_start(rec, reason)
 	rec.snapshot = nil
 	rec.region = nil
 	rec.known_ids, rec.known_param2 = nil, nil
+	rec.metadata_enabled = false
+	rec.metadata_known = {}
 	rec.pending_blocks = {}
 	rec.name, rec.path = nil, nil
 end
@@ -820,6 +960,9 @@ local function finish_start(rec, result)
 	write_meta(rec, META_PREFIX .. "game", game and game.id or nil)
 	rec.recording = true
 	rec.snapshot = nil
+	-- The baseline rows go in with the opening marker, so a reader has the
+	-- state of every container from the first moment of the recording.
+	record_metadata_baseline(rec)
 	record_event(rec, { type = "recording_start" })
 	-- Who is online and what the world time is has to wait for the first server
 	-- step: a mod is allowed to start a recording while it loads, and the
@@ -936,6 +1079,9 @@ recorder.start = function(record_name, region_arg)
 	rec.max_buffered = tonumber(core.settings:get("recorder.max_buffered")) or MAX_BUFFERED_DEFAULT
 	rec.max_duration = tonumber(core.settings:get("recorder.max_duration")) or 0
 	rec.max_size = (tonumber(core.settings:get("recorder.max_size_mb")) or 0) * 1024 * 1024
+	rec.metadata_enabled = enabled_setting("recorder.metadata", true)
+	rec.metadata_known = {}
+	rec.next_metadata_poll = METADATA_INTERVAL
 	rec.disabled = {}
 	for type_name in (core.settings:get("recorder.disabled_events") or ""):gmatch("[^,%s]+") do
 		-- What the recording needs in order to explain itself - where it
@@ -1000,6 +1146,8 @@ local function stop(rec, reason)
 		rec.recording = false
 		rec.region = nil
 		rec.known_ids, rec.known_param2 = nil, nil
+		rec.metadata_enabled = false
+		rec.metadata_known = {}
 		rec.pending_blocks = {}
 		rec.sampled = {}
 		rec.name, rec.path = nil, nil
@@ -1039,6 +1187,8 @@ local function stop(rec, reason)
 	rec.sampled = {}
 	rec.region = nil
 	rec.known_ids, rec.known_param2 = nil, nil
+	rec.metadata_enabled = false
+	rec.metadata_known = {}
 	rec.pending_start = false
 	rec.pending_blocks = {}
 	if ok and closed then return nil end
@@ -1560,6 +1710,10 @@ local function step_recording(rec, dtime)
 	rec.elapsed = rec.elapsed + dtime
 	observe_region(rec, dtime)
 	process_block_changes(rec)
+	if rec.metadata_enabled and rec.elapsed >= rec.next_metadata_poll then
+		rec.next_metadata_poll = rec.elapsed + METADATA_INTERVAL
+		guarded(rec, "scan node metadata", poll_metadata, rec)
+	end
 	maybe_flush(rec)
 end
 

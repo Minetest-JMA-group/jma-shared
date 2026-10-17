@@ -39,6 +39,17 @@ algorithms = {
 }
 dofile(modpath .. "/init.lua")
 
+-- The region every test recording covers: wide enough for every position the
+-- suite uses, and small enough that the mock can walk it in one step.
+local TEST_REGION = {
+	pos1 = {x = -10, y = -5, z = -10},
+	pos2 = {x = 125, y = 12, z = 12},
+}
+recorder_common.register_game_hooks({
+	region = function() return TEST_REGION.pos1, TEST_REGION.pos2 end,
+})
+mock.settings["recorder.snapshot_budget"] = "1000000"
+
 local checks = 0
 local function check(condition, message)
 	checks = checks + 1
@@ -46,6 +57,19 @@ local function check(condition, message)
 		error("FAILED: " .. message, 2)
 	end
 	print("  ok - " .. message)
+end
+
+-- Start a recording and let the snapshot phase finish. In the mock, emergence
+-- is synchronous, so one step is enough; in the engine this is where the
+-- snapshot phase reports its progress.
+local function start_recording(name, region)
+	local err = recorder.start(name, region)
+	if err then return err end
+	for _ = 1, 10 do
+		if recorder.is_recording() then return nil end
+		mock.step(0.1)
+	end
+	return "the snapshot did not finish"
 end
 
 local function recordings_dir()
@@ -145,14 +169,14 @@ mock.remove_player("Bystander")
 print("=== starting and stopping ===")
 ----------------------------------------------------------------------------
 
-check(recorder.start("first") == nil, "start() returns nil on success")
+check(start_recording("first") == nil, "start() returns nil on success")
 check(recorder.is_recording() == true, "is_recording() agrees")
 check(recorder.get_recording_name() == "first", "the recording knows its name")
 local first_path = recorder.get_recording_path()
 check(first_path == recordings_dir() .. "/first-" .. os.date("!%Y%m%dT%H%M%SZ") .. ".sqlite",
 	"the file is named after the recording and the UTC time: " .. tostring(first_path))
-check(type(recorder.start("second")) == "string", "starting a second recording fails")
-check(type(recorder.start()) == "string", "starting while recording fails even without a name")
+check(type(start_recording("second")) == "string", "starting a second recording fails")
+check(type(start_recording()) == "string", "starting while recording fails even without a name")
 check(recorder.stop() == nil, "stop() returns nil on success")
 check(recorder.is_recording() == false, "the recording is over")
 check(type(recorder.stop()) == "string", "stopping twice fails the second time")
@@ -161,18 +185,18 @@ local started = list_recordings()
 check(#started == 1 and started[1]:find("^first%-") ~= nil, "exactly one file was written: " .. table.concat(started, ", "))
 
 -- A recording that is started with no name still gets one
-check(recorder.start() == nil, "start() without a name works")
+check(start_recording() == nil, "start() without a name works")
 check(recorder.get_recording_name() == "unnamed", "the name defaults to 'unnamed'")
 check(recorder.stop() == nil, "it stops again")
 check(#list_recordings() == 2, "two files now")
 
 -- Same name in the same second must not overwrite the first file
-check(recorder.start("first") == nil, "the same name can be used again")
+check(start_recording("first") == nil, "the same name can be used again")
 local second_path = recorder.get_recording_path()
 check(second_path ~= first_path, "a second recording never lands in the same file")
 check(recorder.stop() == nil, "it stops again")
 
-check(recorder.start("../../etc/passwd") == nil, "a name cannot walk out of the recordings directory")
+check(start_recording("../../etc/passwd") == nil, "a name cannot walk out of the recordings directory")
 local evil_path = recorder.get_recording_path()
 check(evil_path:find(recordings_dir(), 1, true) == 1, "the file stays inside the recordings directory")
 local evil_name = evil_path:sub(#recordings_dir() + 2)
@@ -190,7 +214,7 @@ local alice = mock.add_player("Alice", { pos = { x = 0, y = 0, z = 0 } })
 local bob = mock.add_player("Bob", { pos = { x = 10, y = 0, z = 10 }, wield = "default:sword_wood" })
 alice.inventory = { main = { "default:pick_stone", "", "default:torch 10" } }
 
-check(recorder.start("session") == nil, "the recording starts")
+check(start_recording("session") == nil, "the recording starts")
 local session_path = recorder.get_recording_path()
 
 -- t1: Alice and Bob were already online, so both get their first sample
@@ -341,7 +365,7 @@ check(#carol_movement == 2 and carol_movement[1].tick == 2 and carol_movement[1]
 
 -- Events: subject, object and payload
 local digs = events_of("dig")
-check(#digs == 4, "the digs are recorded")
+check(#digs == 4, "the digs are recorded (got " .. #digs .. ")")
 check(digs[1].subject_player == 1 and digs[1].node == "default:stone" and digs[1].param2 == 3,
 	"a dig has its digger, the node and the node's param2")
 check(digs[1].pos_x == 1 and digs[1].pos_y == 2 and digs[1].pos_z == 3, "a dig has the position")
@@ -422,7 +446,7 @@ print("=== a recording of nothing but movement ===")
 -- is a batch of movement rows with no event beside it. Such a batch is the
 -- ordinary shape, not a special case.
 mock.settings["recorder.flush_interval"] = "0.2"
-check(recorder.start("walking") == nil, "the recording starts")
+check(start_recording("walking") == nil, "the recording starts")
 local walking_path = recorder.get_recording_path()
 for i = 1, 20 do
 	alice.pos.x = i
@@ -443,7 +467,7 @@ db:close()
 print("=== a mod logging something odd ===")
 ----------------------------------------------------------------------------
 
-check(recorder.start("odd") == nil, "the recording starts")
+check(start_recording("odd") == nil, "the recording starts")
 local odd_path = recorder.get_recording_path()
 check(type(recorder.log_event("mock:bad", { pos = 5 })) == "string", "a position that is not a table is refused")
 check(type(recorder.log_event("mock:bad", { pos = { x = 1 } })) == "string", "a position missing values is refused")
@@ -473,7 +497,7 @@ print("=== when a player's row cannot be written ===")
 -- The database is busy for a moment while somebody joins. The join must not
 -- raise, and the player must not be struck off the recording for good.
 mock.settings["recorder.flush_interval"] = "0.01"
-check(recorder.start("unwritable") == nil, "the recording starts")
+check(start_recording("unwritable") == nil, "the recording starts")
 local unwritable_path = recorder.get_recording_path()
 local blocker = sqlite.open(unwritable_path)
 check(blocker:exec("BEGIN IMMEDIATE") == sqlite.OK, "another connection takes the write lock")
@@ -503,7 +527,7 @@ mock.remove_player("Erin")
 print("=== a stop that cannot be written ===")
 ----------------------------------------------------------------------------
 
-check(recorder.start("stuck") == nil, "the recording starts")
+check(start_recording("stuck") == nil, "the recording starts")
 local stuck_path = recorder.get_recording_path()
 mock.step(0.1)
 local stuck_blocker = sqlite.open(stuck_path)
@@ -526,7 +550,7 @@ print("=== a tool drawn while the write is stuck ===")
 ----------------------------------------------------------------------------
 
 mock.settings["recorder.flush_interval"] = "0.01"  -- commit on every step
-check(recorder.start("wieldgap") == nil, "the recording starts")
+check(start_recording("wieldgap") == nil, "the recording starts")
 local wieldgap_path = recorder.get_recording_path()
 mock.step(0.1)
 local wield_blocker = sqlite.open(wieldgap_path)
@@ -550,7 +574,7 @@ print("=== 0 means no early commit, not a commit every step ===")
 
 mock.settings["recorder.flush_interval"] = "100"
 mock.settings["recorder.max_buffered"] = "0"
-check(recorder.start("patient") == nil, "the recording starts")
+check(start_recording("patient") == nil, "the recording starts")
 local patient_path = recorder.get_recording_path()
 alice.pos.x = 123
 alice.vel.x = 0
@@ -573,7 +597,7 @@ print("=== a player joining in the moment the recording starts ===")
 -- mod is allowed to start a recording while it is still loading. Someone who
 -- joins in between is already in the recording and must not be joined again.
 local dave = mock.add_player("Dave", { pos = { x = 1, y = 1, z = 1 } })
-check(recorder.start("window") == nil, "the recording starts")
+check(start_recording("window") == nil, "the recording starts")
 local window_path = recorder.get_recording_path()
 mock.fire("register_on_joinplayer", dave, nil)
 mock.step(0.1)
@@ -596,10 +620,12 @@ print("=== a player that cannot be read ===")
 ----------------------------------------------------------------------------
 
 -- An object that is gone by the time it is sampled must not take the rest of
--- the recording with it, on this tick or on the ones after it.
+-- the recording with it, on this tick or on the ones after it. It joins while
+-- it can still be read, and then the object goes away.
 local broken = mock.add_player("Broken")
+check(start_recording("broken_player") == nil, "a recording starts")
+mock.step(0.1)  -- the recording opens while Broken can still be read
 broken.get_pos = function() error("this object no longer exists") end
-check(recorder.start("broken_player") == nil, "a recording starts")
 local broken_path = recorder.get_recording_path()
 mock.steps(3, 0.1)
 check(recorder.is_recording(), "it does not end over one unreadable player")
@@ -616,7 +642,8 @@ check(value(db, "SELECT pos_x FROM Events WHERE type = 'leave'") == nil,
 check(value(db, ("SELECT COUNT(*) FROM Movement JOIN Players ON Players.id = Movement.player_id " ..
 	"WHERE Players.name = 'Alice' AND Movement.tick = 1")) == 1, "the other players are still recorded")
 check(value(db, ("SELECT COUNT(*) FROM Movement JOIN Players ON Players.id = Movement.player_id " ..
-	"WHERE Players.name = 'Broken'")) == 0, "the player that cannot be read has no samples")
+	"WHERE Players.name = 'Broken'")) == 1,
+	"the one sample taken before the object went away is kept")
 db:close()
 local complaints = 0
 for _, log in ipairs(mock.logs) do
@@ -633,7 +660,7 @@ print("=== when the write cannot happen ===")
 -- then is that the recording carries on, says so, and starts over from a known
 -- state for every player instead of pretending nothing happened.
 mock.settings["recorder.flush_interval"] = "0.01"  -- commit on every step
-check(recorder.start("blocked") == nil, "the recording starts")
+check(start_recording("blocked") == nil, "the recording starts")
 local blocked_path = recorder.get_recording_path()
 mock.step(0.1)
 local logged_before = #mock.logs
@@ -679,7 +706,7 @@ print("=== giving up on a recording that cannot be written ===")
 -- and the log says so - the recording itself cannot, its rows being exactly
 -- what will not go in.
 mock.settings["recorder.flush_interval"] = "0.01"  -- commit on every step
-check(recorder.start("doomed") == nil, "a recording starts")
+check(start_recording("doomed") == nil, "a recording starts")
 local doomed_path = recorder.get_recording_path()
 -- One step before the lock goes on, so that the opening state - the world time,
 -- the joins, a Players row each - is written while the database still accepts
@@ -714,7 +741,7 @@ print("=== settings ===")
 
 -- A recording that gives itself a deadline
 mock.settings["recorder.max_duration"] = "0.25"
-check(recorder.start("limited") == nil, "a recording with a duration limit starts")
+check(start_recording("limited") == nil, "a recording with a duration limit starts")
 local limited_path = recorder.get_recording_path()
 mock.steps(6, 0.1)
 check(recorder.is_recording() == false, "it stops itself at the limit")
@@ -726,7 +753,7 @@ mock.settings["recorder.max_duration"] = nil
 
 -- Events an operator does not want
 mock.settings["recorder.disabled_events"] = "chat, chatcommand"
-check(recorder.start("quiet") == nil, "a recording with noisy events turned off starts")
+check(start_recording("quiet") == nil, "a recording with noisy events turned off starts")
 local quiet_path = recorder.get_recording_path()
 mock.fire("register_on_chat_message", "Alice", "not recorded")
 mock.fire("register_on_dignode", { x = 0, y = 0, z = 0 }, { name = "default:stone", param2 = 0 }, alice)
@@ -741,7 +768,7 @@ mock.settings["recorder.disabled_events"] = nil
 mock.settings["recorder.disabled_events"] = "write_error"
 mock.settings["recorder.flush_interval"] = "0.01"  -- commit on every step
 local logged_before = #mock.logs
-check(recorder.start("markers") == nil, "a recording starts")
+check(start_recording("markers") == nil, "a recording starts")
 local markers_path = recorder.get_recording_path()
 local markers_blocker = sqlite.open(markers_path)
 check(markers_blocker:exec("BEGIN IMMEDIATE") == sqlite.OK, "another connection takes the write lock")
@@ -770,18 +797,136 @@ print("=== where a recording is written ===")
 -- shell somebody ran it from - and a recording that followed it around would
 -- land somewhere different for no reason a reader could see.
 mock.settings["recorder.directory"] = "myrecordings"
-check(recorder.start("relative") == nil, "a recording with a directory of its own starts")
+check(start_recording("relative") == nil, "a recording with a directory of its own starts")
 check(recorder.get_recording_path():find(world .. "/myrecordings/", 1, true) == 1,
 	"a relative directory is taken from the world directory: " .. tostring(recorder.get_recording_path()))
 check(recorder.stop() == nil, "it stops")
 
 local absolute_dir = tmpbase .. "/recorder_tests/absolute"
 mock.settings["recorder.directory"] = absolute_dir
-check(recorder.start("absolute") == nil, "a recording with an absolute directory starts")
+check(start_recording("absolute") == nil, "a recording with an absolute directory starts")
 check(recorder.get_recording_path():find(absolute_dir .. "/", 1, true) == 1,
 	"an absolute directory is used as it is: " .. tostring(recorder.get_recording_path()))
 check(recorder.stop() == nil, "it stops")
 mock.settings["recorder.directory"] = nil
+
+----------------------------------------------------------------------------
+print("=== a region is required ===")
+----------------------------------------------------------------------------
+
+-- A table literal cannot carry a nil value, so clear the hook itself.
+recorder_common.game_hooks.region = nil
+local no_region = recorder.start("noregion")
+check(type(no_region) == "string" and no_region:find("region", 1, true) ~= nil,
+	"a start without any region is refused: " .. tostring(no_region))
+recorder_common.game_hooks.region = function() return TEST_REGION.pos1, TEST_REGION.pos2 end
+
+----------------------------------------------------------------------------
+print("=== the snapshot is in the file ===")
+----------------------------------------------------------------------------
+
+mock.set_node({x = 2, y = 2, z = 2}, {name = "default:stone"})
+mock.set_node({x = 3, y = 2, z = 2}, {name = "default:dirt", param2 = 4})
+check(start_recording("snapshot") == nil, "a recording with nodes in its region starts")
+local snapshot_path = recorder.get_recording_path()
+check(recorder.stop() == nil, "it stops")
+
+local sdb = open_recording(snapshot_path)
+local snap_row = rows(sdb, "SELECT * FROM Snapshot")[1]
+check(snap_row ~= nil, "the file carries the snapshot")
+local whole = recorder_common.region.normalize(TEST_REGION.pos1, TEST_REGION.pos2)
+local whole_size = recorder_common.region.size(whole)
+check(snap_row.size_x == whole_size.x and snap_row.size_y == whole_size.y
+	and snap_row.size_z == whole_size.z, "with the region's size")
+check(snap_row.pos1_x == whole.pos1.x and snap_row.pos1_z == whole.pos1.z,
+	"and its low corner")
+local names = {}
+for line in snap_row.names:gmatch("[^\n]+") do names[#names + 1] = line end
+check(#names >= 2, "the name table lists the nodes: " .. table.concat(names, ", "))
+
+local entries = recorder_common.snapshot.decode(snap_row.data)
+check(entries ~= nil and #entries >= 2, "the body decodes")
+local by_index = {}
+for _, entry in ipairs(entries) do by_index[entry.i] = entry end
+local stone_entry = by_index[recorder_common.region.index(whole, {x = 2, y = 2, z = 2})]
+check(stone_entry ~= nil and names[stone_entry.n] == "default:stone",
+	"a node is stored at its region index, by name")
+local dirt_entry = by_index[recorder_common.region.index(whole, {x = 3, y = 2, z = 2})]
+check(dirt_entry ~= nil and names[dirt_entry.n] == "default:dirt" and dirt_entry.p == 4,
+	"with its param2")
+sdb:close()
+
+----------------------------------------------------------------------------
+print("=== walking in and out of the region ===")
+----------------------------------------------------------------------------
+
+local outsider = mock.add_player("Outsider", {pos = {x = 500, y = 0, z = 0}})
+check(start_recording("regions") == nil, "a recording starts")
+local regions_path = recorder.get_recording_path()
+mock.step(0.1)      -- tick 1: outside the region
+outsider.pos.x = 0
+mock.step(0.1)      -- tick 2: walked in
+outsider.pos.x = 500
+mock.step(0.1)      -- tick 3: walked out
+check(recorder.stop() == nil, "it stops")
+
+local rdb = open_recording(regions_path)
+local outsider_id = value(rdb, "SELECT id FROM Players WHERE name = 'Outsider'")
+check(outsider_id ~= nil, "the outsider is known once they enter")
+local outsider_join = rows(rdb, ("SELECT * FROM Events WHERE type = 'join' AND subject_player = %d")
+	:format(outsider_id))[1]
+check(outsider_join ~= nil, "they join the recording when they walk in")
+check(outsider_join.data:find('"reason":"region"', 1, true) ~= nil, "as a region join")
+check(outsider_join.data:find("at_start", 1, true) == nil, "not as an at_start one")
+local outsider_leave = rows(rdb, ("SELECT * FROM Events WHERE type = 'leave' AND subject_player = %d")
+	:format(outsider_id))[1]
+check(outsider_leave ~= nil, "and leave it when they walk out")
+check(outsider_leave.data:find('"reason":"region"', 1, true) ~= nil, "as a region leave")
+check(outsider_leave.pos_x == 0 and outsider_leave.pos_z == 0,
+	"at the place they were last seen")
+check(value(rdb, ("SELECT COUNT(*) FROM Movement WHERE player_id = %d"):format(outsider_id)) == 1,
+	"only the tick inside the region is sampled")
+rdb:close()
+mock.remove_player("Outsider")
+
+----------------------------------------------------------------------------
+print("=== marking a region by hand ===")
+----------------------------------------------------------------------------
+
+local marker = mock.add_player("Marker", {pos = {x = 0, y = 0, z = 0}})
+local cmd = mock.chatcommands.recorder
+local ok, msg = cmd.func("Marker", "pos1")
+check(ok and msg:find("pos1 set", 1, true) ~= nil, "pos1 marks the player's position: " .. tostring(msg))
+marker.pos = {x = 4, y = 3, z = 2}
+ok, msg = cmd.func("Marker", "pos2")
+check(ok and msg:find("start will use", 1, true) ~= nil, "pos2 completes the marks: " .. tostring(msg))
+ok, msg = cmd.func("Marker", "start byhand")
+check(ok, "the command starts a recording: " .. tostring(msg))
+mock.step(0.1)
+check(recorder.is_recording(), "the snapshot completes in a step")
+local byhand_path = recorder.get_recording_path()
+check(recorder.stop() == nil, "it stops")
+local bdb = open_recording(byhand_path)
+local bsnap = rows(bdb, "SELECT * FROM Snapshot")[1]
+check(bsnap.size_x == 5 and bsnap.size_y == 4 and bsnap.size_z == 3,
+	string.format("the marks decide the region: %dx%dx%d",
+		bsnap.size_x, bsnap.size_y, bsnap.size_z))
+bdb:close()
+ok, msg = cmd.func("Marker", "unset")
+check(ok and msg:find("cleared", 1, true) ~= nil, "unset clears them")
+mock.remove_player("Marker")
+
+----------------------------------------------------------------------------
+print("=== the snapshot phase reports itself ===")
+----------------------------------------------------------------------------
+
+check(recorder.start("phasetest") == nil, "a recording starts directly")
+local status_ok, status_msg = cmd.func("someone", "status")
+check(status_ok and status_msg:find("Snapshotting", 1, true) ~= nil,
+	"the status says what the phase is doing: " .. tostring(status_msg))
+mock.step(0.1)
+check(recorder.is_recording(), "and the recording begins when it is done")
+check(recorder.stop() == nil, "it stops")
 
 ----------------------------------------------------------------------------
 -- The chat command
@@ -792,7 +937,9 @@ check(command.privs.server == true, "and needs the server privilege")
 local ok, message = command.func("someone", "")
 check(ok and message:find("No recording in progress") ~= nil, "/recorder says nothing is being recorded")
 ok, message = command.func("someone", "start fromchat")
-check(ok and recorder.is_recording(), "/recorder start begins a recording")
+check(ok, "/recorder start accepts the command")
+mock.step(0.1)  -- the snapshot phase runs in server steps
+check(recorder.is_recording(), "/recorder start begins a recording")
 ok, message = command.func("someone", "meta mode survival")
 check(ok and recorder.add_meta("mode", "survival") == nil, "/recorder meta attaches metadata")
 ok, message = command.func("someone", "status")
@@ -801,7 +948,7 @@ ok, message = command.func("someone", "stop")
 check(ok and not recorder.is_recording(), "/recorder stop ends it")
 
 -- The server going down takes the recording with it
-check(recorder.start("shutdown") == nil, "a recording starts before the shutdown")
+check(start_recording("shutdown") == nil, "a recording starts before the shutdown")
 local shutdown_path = recorder.get_recording_path()
 mock.fire("register_on_shutdown")
 check(recorder.is_recording() == false, "the shutdown stopped it")

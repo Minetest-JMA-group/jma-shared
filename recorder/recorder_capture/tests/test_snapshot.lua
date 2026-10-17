@@ -94,11 +94,11 @@ while true do
 	states[#states + 1] = state
 	if state ~= "working" then break end
 end
-check(#states == 4, "24 nodes at 8 per step is three working steps and a done (got " .. #states .. ")")
+check(#states == 3, "24 nodes at 8 per step is two working steps and a done (got " .. #states .. ")")
 check(states[#states] == "done", "the last step is the one that finishes")
 
 local halfway = snapshot.new(p1, p2)
-snapshot.step(halfway, 8)   -- emerge -> walk begins
+snapshot.step(halfway, 8)   -- emerge, read and the first slice
 snapshot.step(halfway, 8)
 check(snapshot.progress(halfway) > 0 and snapshot.progress(halfway) < 1,
 	"progress is reported while walking: " .. tostring(snapshot.progress(halfway)))

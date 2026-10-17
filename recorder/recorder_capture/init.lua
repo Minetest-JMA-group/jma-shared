@@ -25,6 +25,17 @@ local MANDATORY_EVENTS = {
 	write_error = true,
 }
 
+-- Events that describe the recording rather than the region, and that must not
+-- be judged by a position: a leave has no position left to judge when the
+-- player has already gone.
+local REGION_EXEMPT = {
+	recording_start = true,
+	recording_stop = true,
+	write_error = true,
+	join = true,
+	leave = true,
+}
+
 recorder = {}
 
 local sqlite = algorithms.require("lsqlite3")
@@ -61,11 +72,14 @@ local modpath = core.get_modpath(core.get_current_modname())
 ---@type DBManager
 local dbmanager = dofile(modpath .. "/dbmanager.lua")
 dbmanager.init(sqlite)
+local snapshot_module = dofile(modpath .. "/snapshot.lua")
+local region_module = recorder_common.region
 
 local state = {
 	recording = false,
 	name = nil,          -- sanitized recording name
 	path = nil,          -- path of the SQLite file
+	started_at = nil,    -- os.time() when the recording was asked for
 	tick = 0,            -- server steps since the recording started
 	elapsed = 0,         -- server seconds since the recording started
 	last_flush = 0,
@@ -79,11 +93,21 @@ local state = {
 	troubles = {},       -- what to write down about them, for the file
 	troubles_dirty = false,
 	pending_start = false,   -- the opening state is taken at the next step
+	region = nil,        -- the cuboid this recording covers
+	snapshot = nil,      -- the snapshot phase, while it runs
+	snapshot_budget = 20000,  -- region nodes examined per step while snapshotting
+	sampled = {},        -- player id -> name, from the last pass through the region
+	known_ids = nil,     -- region flat index -> content id, what the recording knows
+	known_param2 = nil,  -- and the param2 that goes with it
 	prev = {},           -- player id -> last sample, for deriving acceleration
 	written = {},        -- player id -> last sample written, to spot no-ops
 	wield = {},          -- player id -> last wielded itemstring
 	joined = {},         -- player ids that are in the recording as present
 }
+
+-- Per-player region marks, kept between recordings. A mark dies with the
+-- player's connection, so one that is forgotten cannot surprise the next person.
+local marks = {}
 
 -- Movement sample layout: what sample_state() produces, in order. The same
 -- values go into the Movement table, with acceleration at 9-11 and the rest
@@ -213,6 +237,57 @@ local function set_actor(ev, obj)
 	end
 end
 
+-- A position from the engine or from a mod, as three numbers or nothing.
+local function position_of(pos)
+	if type(pos) ~= "table" then return nil end
+	local x, y, z = tonumber(pos.x), tonumber(pos.y), tonumber(pos.z)
+	if not (x and y and z) then return nil end
+	return x, y, z
+end
+
+-- Where an object is, if it can still be read. A name is looked up; an object
+-- that has gone away answers nothing.
+---@param obj ObjectRef|string|nil
+---@return table|nil
+local function position_of_object(obj)
+	if obj == nil then return nil end
+	if type(obj) == "string" then
+		obj = core.get_player_by_name(obj)
+		if not obj then return nil end
+	end
+	local ok, pos = pcall(function() return obj:get_pos() end)
+	if ok then return pos end
+	return nil
+end
+
+-- Does this event belong inside the region? The subject, and the object when
+-- there is one, must be inside; an event with no player in it (a mob's dig, an
+-- explosion) is judged by the position it is about. An event whose subject
+-- cannot be read any more is left out rather than guessed at.
+---@param ev table
+---@return boolean
+local function event_in_region(ev)
+	local reg = state.region
+	if not reg then return true end
+	if ev.subject == nil and ev.object == nil then
+		-- Nothing in it is a player. A position, when there is one, decides; an
+		-- event with neither (a mod's own note about the match) says nothing
+		-- that could lie outside the region.
+		if ev.pos == nil then return true end
+		local x, y, z = position_of(ev.pos)
+		return x ~= nil and region_module.contains(reg, {x = x, y = y, z = z})
+	end
+	if ev.subject ~= nil then
+		local pos = position_of_object(ev.subject)
+		if not pos or not region_module.contains(reg, pos) then return false end
+	end
+	if ev.object ~= nil then
+		local pos = position_of_object(ev.object)
+		if not pos or not region_module.contains(reg, pos) then return false end
+	end
+	return true
+end
+
 -- The itemstring of a stack, for the pcall below.
 local function itemstring_of(stack)
 	return stack:to_string()
@@ -242,14 +317,6 @@ local function wielded(obj)
 	local ok, str = pcall(held_stack, obj)
 	if ok and type(str) == "string" then return str end
 	return ""
-end
-
--- A position from the engine or from a mod, as three numbers or nothing.
-local function position_of(pos)
-	if type(pos) ~= "table" then return nil end
-	local x, y, z = tonumber(pos.x), tonumber(pos.y), tonumber(pos.z)
-	if not (x and y and z) then return nil end
-	return x, y, z
 end
 
 -- param2 is an INTEGER column, and SQLite refuses to put a fractional real in
@@ -352,6 +419,7 @@ record_event = function(ev)
 		complain("event without a type", "cannot record an event whose type is not a name")
 		return
 	end
+	if not REGION_EXEMPT[ev.type] and not event_in_region(ev) then return end
 	if state.disabled[ev.type] then return end
 	local x, y, z = position_of(ev.pos)
 	dbmanager.add_event({
@@ -455,12 +523,18 @@ local function player_snapshot(player)
 	return {}
 end
 
--- A player enters the recording: either by joining the server while a
--- recording runs, or by being online when one is started (at_start), which is
--- the same thing from a reader's point of view.
-local function on_join(player, last_login, at_start)
+-- A player enters the recording: by joining the game inside the region, by
+-- being online in it when the recording starts (at_start), or by walking into
+-- it (reason "region").
+local function on_join(player, last_login, at_start, reason)
 	local name = player_name(player)
 	if not name then return end
+	-- A player who joins the game outside the region is not in the recording
+	-- yet; the next pass through the region will join them there.
+	local pos = position_of_object(player)
+	if state.region and not (pos and region_module.contains(state.region, pos)) then
+		return
+	end
 	local pid = dbmanager.player_id(name)
 	local wield = wielded(player)
 	if pid then
@@ -480,6 +554,7 @@ local function on_join(player, last_login, at_start)
 		data = {
 			at_start = at_start or nil,
 			last_login = last_login,
+			reason = reason,
 			hp = snapshot.hp,
 			breath = snapshot.breath,
 			pitch = snapshot.pitch,
@@ -492,12 +567,13 @@ end
 local function on_leave(player, timed_out)
 	local name = player_name(player)
 	if not name then return end
-	-- Where the player was when they left is what a reader following their
-	-- trail has to end on; without it the trail stops at their last sample,
-	-- which can be some way back - a fall or a kill in progress. The engine is
-	-- free to have let go of the object by now, and the leave itself is worth
-	-- more than the position, so a player that cannot be read is recorded
-	-- without one.
+	local pid = dbmanager.player_id(name)
+	-- A player who was never in the recording (they stayed outside the region)
+	-- has nothing to leave from.
+	if not pid or not state.joined[pid] then return end
+	-- Where they were when they left is what a reader following their trail
+	-- has to end on. The engine is free to have let go of the object by now, so
+	-- a player that cannot be read is recorded without a position.
 	local read, pos = pcall(function() return player:get_pos() end)
 	record_event({
 		type = "leave",
@@ -505,15 +581,60 @@ local function on_leave(player, timed_out)
 		pos = read and pos or nil,
 		data = { timed_out = timed_out or nil },
 	})
-	local pid = dbmanager.player_id(name)
-	if pid then
-		-- Whatever the player does after rejoining has no relation to these,
-		-- and the first sample after a rejoin has no previous velocity.
-		state.prev[pid] = nil
-		state.written[pid] = nil
-		state.wield[pid] = nil
-		state.joined[pid] = nil
+	-- Whatever the player does after rejoining has no relation to these,
+	-- and the first sample after a rejoin has no previous velocity.
+	state.prev[pid] = nil
+	state.written[pid] = nil
+	state.wield[pid] = nil
+	state.joined[pid] = nil
+end
+
+-- One pass through the region: sample the players in it, and note who walked
+-- in or out since the last pass. Everything in a recording is inside the
+-- region, so a player who leaves it leaves the recording until they return.
+local function observe_region(dtime)
+	local reg = state.region
+	local seen = {}
+	for player in core.objects_in_area(reg.pos1, reg.pos2) do
+		if core.is_player(player) then
+			local name = player_name(player)
+			if name then
+				local pid = player_id(name)
+				if pid then
+					seen[pid] = name
+					if not state.joined[pid] then
+						-- They were outside when the recording started, or have
+						-- walked in since; either way they enter the recording here.
+						guarded("record a join", on_join, player, nil, false, "region")
+					end
+					-- A player who could not be joined is not sampled either: a
+					-- movement trail that begins without a join would leave a
+					-- reader without the state the trail starts from.
+					if state.joined[pid] then
+						guarded("sample a player", record_player, player, dtime)
+					end
+				end
+			end
+		end
 	end
+	for pid, name in pairs(state.sampled) do
+		if not seen[pid] and state.joined[pid] then
+			-- They are still in the game but out of the region: their trail
+			-- ends where it was last sampled.
+			local last = state.prev[pid]
+			record_event({
+				type = "leave",
+				subject = name,
+				pos = last and {x = last[S_POS_X], y = last[S_POS_Y], z = last[S_POS_Z]} or nil,
+				data = { reason = "region" },
+			})
+			state.joined[pid] = nil
+			state.prev[pid] = nil
+			state.written[pid] = nil
+			state.wield[pid] = nil
+		end
+	end
+	state.sampled = seen
 end
 
 ----------------------------------------------------------------------------
@@ -599,11 +720,119 @@ end
 -- API
 ----------------------------------------------------------------------------
 
+-- Resolve the region a recording covers. A region handed in wins; otherwise the
+-- game may provide one. Marks are resolved by the chat command, which knows who
+-- asked.
+---@param region_arg table?  -- {pos1 =, pos2 =}
+---@return table|nil, string?
+local function resolve_region(region_arg)
+	if region_arg then
+		return region_module.normalize(region_arg.pos1, region_arg.pos2)
+	end
+	local provider = recorder_common.game_hooks.region
+	if provider then
+		local ok, pos1, pos2 = pcall(provider)
+		if ok and pos1 and pos2 then
+			local normalized, err = region_module.normalize(pos1, pos2)
+			if normalized then return normalized end
+			return nil, err
+		end
+	end
+	return nil, "a recording needs a region: mark two corners with /recorder pos1 and /recorder pos2," ..
+		" or let the game provide one"
+end
+
+-- The recording did not become one: close the file and take it away, so a
+-- failed start leaves nothing behind that looks like a recording.
+---@param reason string
+local function abort_start(reason)
+	local path = state.path
+	log_error(string.format("cannot start a recording in %s: %s", tostring(path), tostring(reason)))
+	dbmanager.close()
+	if path then
+		os.remove(path)
+		os.remove(path .. "-wal")
+		os.remove(path .. "-shm")
+	end
+	state.recording = false
+	state.snapshot = nil
+	state.region = nil
+	state.known_ids, state.known_param2 = nil, nil
+	state.name, state.path = nil, nil
+end
+
+-- The snapshot is done: the file can say what the world looked like, and the
+-- recording proper begins.
+---@param result table
+local function finish_start(result)
+	local ok, err = dbmanager.set_snapshot({
+		tick = 0,
+		t = 0,
+		pos1 = state.region.pos1,
+		size = region_module.size(state.region),
+		names = table.concat(result.names, "\n"),
+		encoding = result.encoding,
+		data = result.data,
+	})
+	if not ok then
+		abort_start(err)
+		return
+	end
+	state.known_ids = result.ids
+	state.known_param2 = result.param2
+
+	-- The schema version is not repeated here: PRAGMA user_version is where the
+	-- file keeps it, and it is the version of the file rather than of the mod.
+	write_meta(META_PREFIX .. "name", state.name)
+	write_meta(META_PREFIX .. "started_at", os.date("!%Y-%m-%dT%H:%M:%SZ", state.started_at))
+	local version = core.get_version()
+	write_meta(META_PREFIX .. "server_version", version and version.string or nil)
+	local game = core.get_game_info()
+	write_meta(META_PREFIX .. "game", game and game.id or nil)
+	state.recording = true
+	state.snapshot = nil
+	record_event({ type = "recording_start" })
+	-- Who is online and what the world time is has to wait for the first server
+	-- step: a mod is allowed to start a recording while it loads, and the
+	-- engine refuses those questions before the server is running.
+	state.pending_start = true
+	local flushed, flush_err = dbmanager.flush()
+	if not flushed then
+		abort_start(flush_err)
+		return
+	end
+	core.log("action", "[recorder] recording " .. state.name .. " started, writing to " .. state.path)
+end
+
+-- One step of the snapshot phase. The recording is not active yet, so events
+-- and samples are dropped by the same gate that drops them when nothing is
+-- being recorded.
+local function advance_snapshot()
+	local snap = state.snapshot
+	if not snap then return end
+	local status, result = snapshot_module.step(snap, state.snapshot_budget)
+	if status == "working" then return end
+	if status == "failed" then
+		snapshot_module.free(snap)
+		state.snapshot = nil
+		abort_start(result)
+		return
+	end
+	state.snapshot = nil
+	snapshot_module.free(snap)
+	finish_start(result)
+end
+
 ---@param record_name string?  -- used for the file name; "unnamed" if not given
+---@param region_arg table?  -- {pos1 =, pos2 =}; the game may provide one instead
 ---@return nil|string  -- nil on success, an error message on failure
-recorder.start = function(record_name)
-	if state.recording then
+recorder.start = function(record_name, region_arg)
+	if state.recording or state.snapshot then
 		return "a recording is already in progress: " .. tostring(state.path)
+	end
+	local region, region_err = resolve_region(region_arg)
+	if not region then
+		return region_err
 	end
 	local name = recorder_common.sanitize_name(record_name)
 	local dir = recorder_common.recordings_dir()
@@ -638,40 +867,32 @@ recorder.start = function(record_name)
 		end
 	end
 
-	state.recording = true
+	-- The recording proper starts when the snapshot is done; until then
+	-- state.recording stays false and the existing gate drops events.
+	state.recording = false
 	state.name = name
 	state.path = path
+	state.started_at = now
+	state.region = region
 	state.tick = 0
 	state.elapsed = 0
 	state.last_flush = 0
 	state.complaints, state.player_errors = {}, {}
 	state.troubles, state.troubles_dirty = {}, false
 	state.prev, state.written, state.wield, state.joined = {}, {}, {}, {}
+	state.sampled = {}
+	state.known_ids, state.known_param2 = nil, nil
+	state.snapshot_budget = math.max(1,
+		math.floor(tonumber(core.settings:get("recorder.snapshot_budget")) or 20000))
 
-	-- The schema version is not repeated here: PRAGMA user_version is where the
-	-- file keeps it, and it is the version of the file rather than of the mod.
-	write_meta(META_PREFIX .. "name", name)
-	write_meta(META_PREFIX .. "started_at", os.date("!%Y-%m-%dT%H:%M:%SZ", now))
-	local version = core.get_version()
-	write_meta(META_PREFIX .. "server_version", version and version.string or nil)
-	local game = core.get_game_info()
-	write_meta(META_PREFIX .. "game", game and game.id or nil)
-	record_event({ type = "recording_start" })
-	-- Who is online and what the world time is has to wait for the first server
-	-- step: a mod is allowed to start a recording while it loads, and the
-	-- engine refuses those questions before the server is running.
-	state.pending_start = true
-	local ok_stats, flush_err = dbmanager.flush()
-	if not ok_stats then
-		-- There is no point in carrying on if the very first write fails.
-		dbmanager.close()
-		state.recording = false
-		state.pending_start = false
-		state.name, state.path = nil, nil
-		log_error(string.format("cannot write to %s: %s", path, tostring(flush_err)))
-		return "cannot write to " .. path
+	local snap, snap_err = snapshot_module.new(region.pos1, region.pos2)
+	if not snap then
+		abort_start(snap_err)
+		return snap_err
 	end
-	core.log("action", "[recorder] recording " .. name .. " started, writing to " .. path)
+	state.snapshot = snap
+	core.log("action", string.format("[recorder] snapshotting %s .. %s for %s, writing to %s",
+		core.pos_to_string(region.pos1), core.pos_to_string(region.pos2), name, path))
 	return nil
 end
 
@@ -680,6 +901,26 @@ end
 ---@param reason string?
 ---@return nil|string  -- nil on success, an error message on failure
 recorder.stop = function(reason)
+	if state.snapshot then
+		-- The recording never became one: there is nothing to mark in the file,
+		-- and a file that was never a recording should not be left behind.
+		local path = state.path
+		snapshot_module.free(state.snapshot)
+		state.snapshot = nil
+		dbmanager.close()
+		if path then
+			os.remove(path)
+			os.remove(path .. "-wal")
+			os.remove(path .. "-shm")
+		end
+		state.recording = false
+		state.region = nil
+		state.known_ids, state.known_param2 = nil, nil
+		state.sampled = {}
+		state.name, state.path = nil, nil
+		core.log("action", "[recorder] recording abandoned while snapshotting; the file is gone")
+		return nil
+	end
 	if not state.recording then
 		return "no recording is in progress"
 	end
@@ -708,6 +949,9 @@ recorder.stop = function(reason)
 	end
 	state.name, state.path = nil, nil
 	state.prev, state.written, state.wield, state.joined = {}, {}, {}, {}
+	state.sampled = {}
+	state.region = nil
+	state.known_ids, state.known_param2 = nil, nil
 	state.pending_start = false
 	if ok and closed then return nil end
 	return tostring(err)
@@ -795,12 +1039,12 @@ end
 
 ---@return string|nil  -- the name this recording was started with
 recorder.get_recording_name = function()
-	return state.recording and state.name or nil
+	return (state.recording or state.snapshot) and state.name or nil
 end
 
 ---@return string|nil  -- full path of the file being written
 recorder.get_recording_path = function()
-	return state.recording and state.path or nil
+	return (state.recording or state.snapshot) and state.path or nil
 end
 
 ----------------------------------------------------------------------------
@@ -1019,7 +1263,19 @@ hook("cheat", core.register_on_cheat, function(player, cheat)
 	})
 end)
 
+-- A region marked by someone who has gone is theirs no more.
+core.register_on_leaveplayer(function(player)
+	local name = player_name(player)
+	if name then marks[name] = nil end
+end)
+
 core.register_globalstep(function(dtime)
+	if state.snapshot then
+		advance_snapshot()
+		-- Whether it is still running or only just finished, the recording's
+		-- first step is the next one.
+		return
+	end
 	if not state.recording then return end
 	if state.pending_start then
 		-- Still tick 0: this is the state the recording opens with, and it
@@ -1028,29 +1284,28 @@ core.register_globalstep(function(dtime)
 		-- next step instead of being lost for the rest of the recording.
 		local gametime = core.get_gametime()
 		write_meta(META_PREFIX .. "gametime", gametime and tostring(gametime) or nil)
-		local players = core.get_connected_players()
-		for i = 1, #players do
-			local pid = player_id(players[i])
-			-- Someone who joined in the moment between start() and this step is
-			-- already in the recording and does not need joining again.
-			if not (pid and state.joined[pid]) then
-				guarded("record a join", on_join, players[i], nil, true)
+		for player in core.objects_in_area(state.region.pos1, state.region.pos2) do
+			if core.is_player(player) then
+				local pid = player_id(player)
+				-- Someone who joined in the moment between start() and this step
+				-- is already in the recording and does not need joining again.
+				if not (pid and state.joined[pid]) then
+					guarded("record a join", on_join, player, nil, true)
+				end
 			end
 		end
 		state.pending_start = false
 	end
 	state.tick = state.tick + 1
 	state.elapsed = state.elapsed + dtime
-	local players = core.get_connected_players()
-	for i = 1, #players do
-		guarded("sample a player", record_player, players[i], dtime)
-	end
+	observe_region(dtime)
 	maybe_flush()
 end)
 
 core.register_on_shutdown(function()
-	if not state.recording then return end
-	stop_recording("shutdown")
+	if state.snapshot or state.recording then
+		stop_recording("shutdown")
+	end
 end)
 
 ----------------------------------------------------------------------------
@@ -1058,6 +1313,12 @@ end)
 ----------------------------------------------------------------------------
 
 local function status_string()
+	if state.snapshot then
+		return string.format(
+			"Snapshotting the region for '%s' into %s: %d%% (the recording starts when it is done)",
+			state.name, state.path,
+			math.floor(snapshot_module.progress(state.snapshot) * 100))
+	end
 	if not state.recording then
 		return "No recording in progress."
 	end
@@ -1076,17 +1337,19 @@ local function status_string()
 	if state.max_size > 0 then
 		limit = limit .. string.format(", stops at %.1f MB", state.max_size / (1024 * 1024))
 	end
+	local size = region_module.size(state.region)
 	return string.format(
 		"Recording '%s' to %s: %d s, tick %d, %d events, %d movement rows, " ..
-		"%d buffered, %d dropped%s, %.1f MB on disk%s",
+		"%d buffered, %d dropped%s, %.1f MB on disk, region %dx%dx%d%s",
 		state.name, state.path, math.floor(state.elapsed), state.tick,
 		stats.events, stats.movement, stats.buffered, stats.dropped,
-		failing, recording_size(state.path) / (1024 * 1024), limit)
+		failing, recording_size(state.path) / (1024 * 1024),
+		size.x, size.y, size.z, limit)
 end
 
 core.register_chatcommand("recorder", {
 	description = "Control the action recorder",
-	params = "[start [name] | stop | status | meta <key> <value>]",
+	params = "[start [name] [x1,y1,z1 x2,y2,z2] | stop | status | pos1 | pos2 | unset | meta <key> <value>]",
 	privs = { server = true },
 	---@param name string
 	---@param params string
@@ -1095,10 +1358,50 @@ core.register_chatcommand("recorder", {
 		if command == nil or command == "" or command == "status" then
 			return true, status_string()
 		end
+		if command == "pos1" or command == "pos2" then
+			local player = core.get_player_by_name(name)
+			if not player then return false, "no player" end
+			local pos = player:get_pos()
+			if not pos then return false, "cannot read your position" end
+			local mark = marks[name] or {}
+			mark[command] = {
+				x = math.floor(pos.x), y = math.floor(pos.y), z = math.floor(pos.z),
+			}
+			marks[name] = mark
+			return true, string.format("%s set to %s%s", command, core.pos_to_string(mark[command]),
+				(mark.pos1 and mark.pos2) and "; /recorder start will use these corners" or "")
+		end
+		if command == "unset" then
+			marks[name] = nil
+			return true, "region marks cleared"
+		end
 		if command == "start" then
-			local err = recorder.start(rest ~= "" and rest or nil)
+			-- An optional name, and optionally two coordinate triples; without
+			-- them the caller's marks, then the game's provider, are used.
+			local words = {}
+			for word in rest:gmatch("%S+") do words[#words + 1] = word end
+			local function coordinates(text)
+				local x, y, z = text:match("^(-?%d+),(-?%d+),(-?%d+)$")
+				if not x then return nil end
+				return {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
+			end
+			local explicit
+			if #words >= 2 then
+				local p1 = coordinates(words[#words - 1])
+				local p2 = coordinates(words[#words])
+				if p1 and p2 then
+					explicit = {pos1 = p1, pos2 = p2}
+					table.remove(words)
+					table.remove(words)
+				end
+			end
+			local mark = marks[name]
+			local region = explicit
+				or ((mark and mark.pos1 and mark.pos2) and {pos1 = mark.pos1, pos2 = mark.pos2} or nil)
+			local err = recorder.start(#words > 0 and table.concat(words, " ") or nil, region)
 			if err then return false, err end
-			return true, "Recording to " .. tostring(recorder.get_recording_path())
+			return true, "Snapshotting the region; the recording starts when it is done " ..
+				"(see /recorder status)"
 		end
 		if command == "stop" then
 			local err = recorder.stop()
@@ -1114,6 +1417,7 @@ core.register_chatcommand("recorder", {
 			if err then return false, err end
 			return true, string.format("Recorded metadata %s.", key)
 		end
-		return false, "Usage: /recorder [start [name] | stop | status | meta <key> <value>]"
+		return false, "Usage: /recorder [start [name] [x1,y1,z1 x2,y2,z2] | stop | status | " ..
+			"pos1 | pos2 | unset | meta <key> <value>]"
 	end,
 })

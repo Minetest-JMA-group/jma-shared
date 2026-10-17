@@ -324,7 +324,10 @@ function M.new(opts)
 	core.objects_in_area = function(min, max)
 		local found = {}
 		for _, player in ipairs(mock.connected) do
-			local pos = player:get_pos()
+			-- The engine filters on the object's position; read the stored field
+			-- so an object whose get_pos raises is still returned - the mod is
+			-- expected to survive that, and a test can rely on it.
+			local pos = player.pos
 			if pos and pos.x >= min.x and pos.x <= max.x
 				and pos.y >= min.y and pos.y <= max.y
 				and pos.z >= min.z and pos.z <= max.z then

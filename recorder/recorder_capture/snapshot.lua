@@ -186,7 +186,9 @@ function snapshot.step(snap, budget)
 				snap.emerged.errors)
 			return "failed", snap.failure
 		end
-		return begin_walk(snap)
+		local state, err = begin_walk(snap)
+		if state ~= "working" then return state, err end
+		-- The read succeeded; spend this step's budget on the walk as well.
 	end
 
 	if snap.phase == "encode" then

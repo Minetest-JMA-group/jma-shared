@@ -9,7 +9,19 @@ single SQLite file per recording, in the order in which it happened, so the
 recording can later be replayed, analysed, or just read with the `sqlite3`
 shell.
 
+A recording covers one cuboid region. It begins with a snapshot of the world
+inside that region, and from then on only players and actions inside it are
+recorded. That is what makes the file self-contained: a replay needs the
+recording, not the game's map files.
+
 ## Features
+
+- **One region per recording**: a cuboid, decided when the recording starts.
+  Only players and actions inside it are recorded, so a recording of a match
+  does not carry the rest of the world.
+- **Self-contained**: the world inside the region is stored as a snapshot
+  before the recording begins, so a replay does not need the original game's
+  map files.
 
 - Records actions with their **subject** (who did it) and **object** (whom it was
   done to), plus the position, node, item and any event-specific detail.
@@ -47,6 +59,11 @@ shell.
 The mod exposes a global `recorder` table. `start`, `stop` and `add_meta` return
 `nil` on success and a string describing the failure otherwise.
 
+A recording needs a region: one can be given to `start`, marked with
+`/recorder pos1` and `pos2`, or provided by the game through
+`recorder_common.game_hooks.region` (the pack's shared half). Without one,
+`start` fails and says so.
+
 ```lua
 local err = recorder.start("ctf-match")     -- nil, or a message
 if err then core.log("error", err) end
@@ -67,7 +84,7 @@ recorder.stop()                             -- nil, or a message
 
 | Function | Behaviour |
 | --- | --- |
-| `recorder.start([name])` | Starts a recording. Fails if one is already running. `name` is used to build the file name and defaults to `"unnamed"`. |
+| `recorder.start([name], [region])` | Starts a recording. Fails if one is already running, or if no region can be found. `region` is `{pos1 = , pos2 = }`; without it the game's provider is asked. Returns before the region has been read: the snapshot phase runs in the following server steps (see below). `name` is used to build the file name and defaults to `"unnamed"`. |
 | `recorder.stop([reason])` | Stops the recording in progress. Fails if there is none, or if its last rows could not be written (see *Stopping* below). `reason` is stored in the recording; the automatic stops use their own. |
 | `recorder.add_meta(key, value)` | Stores a string pair about the recording. Works only while recording. Keys starting with `recorder.` describe the recording itself and are refused. |
 | `recorder.log_event(type, fields)` | Records an event of a mod's own making. Works only while recording. Use a `modname:what` type to stay clear of the types below. |
@@ -79,8 +96,13 @@ recorder.stop()                             -- nil, or a message
 `/recorder` needs the `server` privilege.
 
 - `/recorder` or `/recorder status` – what is being recorded, for how long, how
-  much has been written, how much was lost, and how big the file is.
-- `/recorder start [name]` – start recording.
+  much has been written, how much was lost, and how big the file is. While the
+  snapshot is being taken it reports that instead, with its progress.
+- `/recorder pos1` / `/recorder pos2` – mark a corner of the region at your
+  current position. The marks are yours, and are dropped when you disconnect.
+- `/recorder unset` – forget your marks.
+- `/recorder start [name] [x1,y1,z1 x2,y2,z2]` – start recording. Without
+  coordinates it uses your marks, then the region the game provides.
 - `/recorder stop` – stop recording.
 - `/recorder meta <key> <value>` – attach a pair to the current recording.
 
@@ -91,6 +113,7 @@ Settings are read when a recording starts, so a change applies to the next one.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `recorder.directory` | empty | Where recordings are written. A relative path is taken from the world directory, an absolute path as it is. Empty means `world/recordings/`. |
+| `recorder.snapshot_budget` | `20000` | Region nodes examined per server step while the snapshot is taken. Lower it on a server that must stay responsive while snapshotting a large region. |
 | `recorder.flush_interval` | `2.0` | Seconds of server time between commits. |
 | `recorder.max_buffered` | `20000` | Rows buffered before a commit is forced early. `0` leaves the timing to `flush_interval` alone. |
 | `recorder.max_duration` | `0` | Stop the recording after this many seconds. `0` is no limit. |
@@ -123,9 +146,42 @@ See `schema.sql` for the same information next to the tables.
 | Table | Holds |
 | --- | --- |
 | `Metadata` | `key`, `value` – what `recorder.add_meta` writes, plus the `recorder.*` keys describing the recording (name, start and stop times, engine version, game, tick count, why it ended, and any player whose row could not be written). |
+| `Snapshot` | One row: the region's low corner and size, the node names it uses, and the compressed body of non-air nodes as the world was when the recording began. |
 | `Players` | `id`, `name` – one row per player seen during the recording. |
 | `Movement` | Player kinematics, one row per player per server step in which something about that player changed. |
 | `Events` | One row per action. |
+
+### The region
+
+A recording covers one cuboid, decided before the snapshot. Everything the file
+says lies inside it:
+
+- Only players inside the region are sampled. A player who walks out gets a
+  `leave` with `data.reason = "region"`; a player who walks back in gets a
+  `join` with the same reason. Their per-player state is dropped on the way out,
+  so a re-entry starts like a fresh join (no acceleration from a stale sample).
+- An event is recorded when the subject, and the object when there is one, is
+  inside the region. An event with no player in it (a mob's dig, an explosion)
+  is judged by the position it is about. A mod's own event with neither a
+  player nor a position is kept: nothing in it could lie outside.
+- `join`, `leave`, `recording_start`, `recording_stop` and `write_error` are
+  never filtered: they are about the recording, not about the world.
+
+### The snapshot
+
+The snapshot is taken before the first recorded action and written as one row
+before `recording_start`. Only non-air nodes are stored, by name and param2, in
+the region's flat-array order (x fastest, then y, then z - the order VoxelManip
+numbers nodes); the body is deflated, and `encoding` says whether it is
+(`deflate`) or was stored raw. Content IDs are never stored: an id is only
+stable for one run of one server, and the file has to be readable elsewhere and
+later.
+
+Taking it happens in server steps: the area is emerged first, then read with one
+VoxelManip, then walked in slices of `recorder.snapshot_budget` nodes. Until it
+finishes the recording is not active - events and samples are dropped exactly as
+they are when nothing is being recorded - and `/recorder status` reports the
+phase. Stopping during the phase abandons the recording and removes the file.
 
 ### Movement
 
@@ -171,8 +227,8 @@ SQLite's JSON functions can dig into it, e.g.
 | `recording_start` | – | – | – | – |
 | `recording_stop` | – | – | – | `reason` (`api`, `shutdown`, `limit_duration`, `limit_size`, `write_error`) |
 | `write_error` | – | – | – | `dropped_rows`, `message` – a gap in the recording, see below |
-| `join` | player | – | `pos`, `item` (wielded) | `at_start`, `last_login`, `hp`, `breath`, `pitch`, `yaw`, `inventory` |
-| `leave` | player | – | `pos` (where they were, if the engine still answers for them) | `timed_out` |
+| `join` | player | – | `pos`, `item` (wielded) | `at_start`, `last_login`, `reason` (`region` for a walk-in), `hp`, `breath`, `pitch`, `yaw`, `inventory` |
+| `leave` | player | – | `pos` (where they were, if the engine still answers for them) | `timed_out`, `reason` (`region` for a walk-out) |
 | `die` | player | – | `pos` | `reason` |
 | `respawn` | player | – | `pos` (before being moved) | – |
 | `hp_change` | player | – | `pos` | `amount`, `reason` |
@@ -202,13 +258,17 @@ much of it moved.
 
 ### How a recording opens and closes
 
+Before any of that, `start()` takes the region's snapshot (see *The snapshot*
+above). The recording proper begins when it is done, so the file holds the world
+as it was before the first recorded action.
+
 A recording opens with a `recording_start` event, followed by a `join` event for
-everyone who was online at that moment (with `data.at_start`), and closes with a
+everyone in the region at that moment (with `data.at_start`), and closes with a
 `recording_stop` event carrying `data.reason`. The `at_start` joins are written
-at the first server step after `start()`, because a mod may start a recording
-while it is still loading and the engine answers no questions about the world
-before the server is running; a player who joins in that same moment is joined
-once, not twice.
+at the first server step after the recording begins, because a mod may start a
+recording while it is still loading and the engine answers no questions about
+the world before the server is running; a player who joins in that same moment
+is joined once, not twice.
 
 ### Order and time
 

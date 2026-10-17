@@ -33,19 +33,43 @@ local reader = dofile(modpath .. "/reader.lua")
 local ghost = dofile(modpath .. "/ghost.lua")
 local controls = dofile(modpath .. "/controls.lua")
 local recovery = dofile(modpath .. "/recovery.lua")
+local arena = dofile(modpath .. "/arena.lua")
+local reconstruct = dofile(modpath .. "/reconstruct.lua")
 local sessions = dofile(modpath .. "/sessions.lua")
 
-recovery.init(controls)
+recovery.init(controls, arena)
 sessions.init({
 	sqlite = sqlite,
 	reader = reader,
 	ghost = ghost,
 	recovery = recovery,
+	arena = arena,
+	reconstruct = reconstruct,
 })
+-- The storage object has to be taken while the mod loads; the arena keeps it
+-- so a session can say where it is before touching the world.
+arena.init({
+	storage = core.get_mod_storage(),
+	running = function()
+		local boxes = {}
+		for _, session in ipairs(sessions.list()) do
+			if session.arena then boxes[#boxes + 1] = session.arena end
+		end
+		return boxes
+	end,
+})
+
+-- Arenas of a previous run are still in a persistent world. The first server
+-- step is the earliest moment the map can be written; the recorder starts its
+-- first step the same way.
+core.after(0, arena.recover)
 
 -- The session registry and its lifecycle are part of the API: the game (or a
 -- test) may want to see what is running or end a session it knows about.
 recorder_replay.sessions = sessions
+-- The arena module is here for the same reason: a game or a test can ask what
+-- arena would be chosen, or mark one on a player's behalf.
+recorder_replay.arena = arena
 ---@param id string|nil
 ---@param reason string?
 function recorder_replay.end_session(id, reason)
@@ -168,7 +192,8 @@ end
 
 core.register_chatcommand("replay", {
 	description = "Play a recording back",
-	params = "[list | start <recording> | join [id] | leave | end <id> | status]",
+	params = "[list | start <recording> | join [id] | leave | end <id> | status |" ..
+		" pos1 | pos2 | unset]",
 	privs = {replay = true},
 	---@param name string
 	---@param params string
@@ -194,6 +219,22 @@ core.register_chatcommand("replay", {
 				core.chat_send_player(name, line)
 			end
 			return true
+		end
+
+		if command == "pos1" or command == "pos2" then
+			local pos = player:get_pos()
+			local marked, err = arena.set_mark(name, command, pos)
+			if not marked then return false, err end
+			if arena.has_marks(name) then
+				return true, "Arena corner marked. Start a replay to build it here, or /replay unset to drop it."
+			end
+			return true, string.format("Arena %s marked at %s; mark the other corner with /replay %s.",
+				command, core.pos_to_string(pos), command == "pos1" and "pos2" or "pos1")
+		end
+
+		if command == "unset" then
+			arena.clear_marks(name)
+			return true, "Arena marks cleared."
 		end
 
 		if command == "start" then
@@ -257,6 +298,7 @@ core.register_chatcommand("replay", {
 				session.paused and "paused" or "playing", tostring(session.speed))
 		end
 
-		return false, "Usage: /replay [list | start <recording> | join [id] | leave | end <id> | status]"
+		return false, "Usage: /replay [list | start <recording> | join [id] | leave | end <id> |" ..
+			" status | pos1 | pos2 | unset]"
 	end,
 })

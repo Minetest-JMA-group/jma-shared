@@ -347,10 +347,18 @@ function M.new(opts)
 
 	core.CONTENT_AIR = 1
 	core.CONTENT_IGNORE = 2
+	core.CONTENT_UNKNOWN = 125
 	core.get_content_id = function(name) return node_ids[name] or 0 end
 	core.get_name_from_content_id = function(id) return node_names[id] end
 	core.set_node = function(pos, node) mock.set_node(pos, node) end
 	core.get_node = function(pos) return mock.get_node(pos) end
+	-- A registered node becomes a content id straight away, as it does in the
+	-- engine; the definition itself is kept for tests that want to inspect it.
+	mock.node_defs = {}
+	core.register_node = function(name, def)
+		mock.node_defs[name] = def
+		mock.add_node_name(name)
+	end
 	core.pos_to_string = function(pos)
 		return string.format("(%s,%s,%s)", tostring(pos.x), tostring(pos.y), tostring(pos.z))
 	end
@@ -410,6 +418,8 @@ function M.new(opts)
 		end
 	end
 
+	mock.vms = {}
+	mock.liquids_updated = false
 	core.get_voxel_manip = function(p1, p2)
 		local emerged1 = {x = p1.x, y = p1.y, z = p1.z}
 		local emerged2 = {x = p2.x, y = p2.y, z = p2.z}
@@ -437,6 +447,7 @@ function M.new(opts)
 		end
 
 		local vm = {liquids_updated = false}
+		mock.vms[#mock.vms + 1] = vm
 		function vm:read_from_map()
 			for i = 1, volume do
 				local node = mock.get_node(position_of(i))
@@ -462,7 +473,10 @@ function M.new(opts)
 			data[index] = node_ids[node.name]
 			param2[index] = node.param2 or 0
 		end
-		function vm:update_liquids() vm.liquids_updated = true end
+		function vm:update_liquids()
+			vm.liquids_updated = true
+			mock.liquids_updated = true
+		end
 		function vm:write_to_map()
 			for i = 1, volume do
 				mock.set_node(position_of(i), {
@@ -540,6 +554,17 @@ function M.new(opts)
 			pipe:close()
 		end
 		return names
+	end
+
+	-- Mod storage is a table behind the two accessors the engine's ModStorage
+	-- offers; a test can read what was saved by looking at mock.modstorage.
+	mock.modstorage = {}
+	core.get_mod_storage = function()
+		local storage = mock.modstorage
+		return {
+			get_string = function(_, key) return storage[key] or "" end,
+			set_string = function(_, key, value) storage[key] = value end,
+		}
 	end
 
 	-- Just enough JSON for the event data the recorder writes.

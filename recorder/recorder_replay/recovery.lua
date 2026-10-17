@@ -11,10 +11,13 @@
 local recovery = {}
 
 local controls -- the controls module, handed in by init
+local arena    -- the arena module, for the viewing platform
 
----@param module table
-function recovery.init(module)
-	controls = module
+---@param controls_module table
+---@param arena_module table
+function recovery.init(controls_module, arena_module)
+	controls = controls_module
+	arena = arena_module
 end
 
 local STASH = "recorder_replay:stash"
@@ -42,6 +45,11 @@ function recovery.enter(player, session, already_stashed)
 		end
 	end
 	controls.fill(player)
+	-- The stash above holds the position from before this teleport, which is
+	-- where the player goes back to when they leave.
+	if session.arena then
+		player:set_pos(arena.viewing_position(session.arena))
+	end
 	local hook = recorder_common.game_hooks.on_enter
 	if hook then pcall(hook, player, session) end
 end

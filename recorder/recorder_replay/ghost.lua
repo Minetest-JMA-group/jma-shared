@@ -111,12 +111,18 @@ function ghost.set_observers(obj, observers)
 end
 
 -- Put a ghost where a movement sample says its player was, and pick the pose
--- the sample describes. The controls bitmask carries the dig bit; velocity
+-- the sample describes. `offset` moves the recorded position into the arena
+-- the session was given. The controls bitmask carries the dig bit; velocity
 -- tells walking from standing.
 ---@param obj ObjectRef
 ---@param row table
-function ghost.update(obj, row)
-	obj:move_to(row.pos, true)
+---@param offset table?
+function ghost.update(obj, row, offset)
+	local pos = row.pos
+	if offset then
+		pos = {x = pos.x + offset.x, y = pos.y + offset.y, z = pos.z + offset.z}
+	end
+	obj:move_to(pos, true)
 	obj:set_yaw(row.yaw)
 	local _, def = resolve_model()
 	if not def then return end

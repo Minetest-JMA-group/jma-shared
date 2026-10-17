@@ -2,12 +2,13 @@
 -- Copyright (c) 2026 Marko Petrović
 
 -- Replay sessions: who is watching what, the clock, and the cursors that walk
--- the recording in step with it. A session owns a read-only connection, a set
--- of ghosts and a list of participants; several can run at once.
+-- the recording in step with it. A session owns a read-only connection, an
+-- arena with the recording rebuilt inside it, a set of ghosts and a list of
+-- participants; several can run at once.
 
 local sessions = {}
 
-local deps -- {reader, ghost, recovery, sqlite}
+local deps -- {reader, ghost, recovery, arena, reconstruct, sqlite}
 local by_id = {}
 local by_player = {}
 local counter = 0
@@ -81,8 +82,8 @@ local function remove_ghost(session, pid)
 	session.cursors[pid] = nil
 end
 
--- Put every ghost back to where it was at a moment, and every cursor to the
--- rows that follow it.
+-- Put every ghost back to where it was at a moment, rebuild the reconstructed
+-- region for that moment, and every cursor to the rows that follow it.
 ---@param session table
 ---@param T number
 function sessions.seek(session, T)
@@ -93,7 +94,15 @@ function sessions.seek(session, T)
 	local tick = deps.reader.tick_at(session.rec, T)
 	session.event_last_id = deps.reader.last_event_id(session.rec, tick)
 	session.events = {rows = {}, next = 1}
+	session.reconstruct_dirty = false
 
+	deps.reconstruct.seek(session.reconstruct, session.rec, tick)
+	local rebuilt, rebuild_err = deps.reconstruct.write(session.reconstruct, session.offset)
+	if not rebuilt then
+		core.log("warning", "[replay] cannot rebuild the region: " .. tostring(rebuild_err))
+	end
+
+	local offset = session.offset
 	local present = {}
 	for _, ev in ipairs(deps.reader.join_leave_until(session.rec, tick)) do
 		if ev.type == "join" and ev.subject_player then
@@ -108,12 +117,13 @@ function sessions.seek(session, T)
 		local pos = (row and row.pos) or presence.pos
 		local name = session.rec.players[pid]
 		if pos and name then
-			local obj = deps.ghost.spawn(name, pos, textures_of(presence.data), observers)
+			local obj = deps.ghost.spawn(name, deps.arena.translate(pos, offset),
+				textures_of(presence.data), observers)
 			if obj then
 				session.ghosts[pid] = obj
 				session.joined[pid] = true
 				session.cursors[pid] = {last_tick = tick, rows = {}, next = 1, done = false}
-				if row then deps.ghost.update(obj, row) end
+				if row then deps.ghost.update(obj, row, offset) end
 			end
 		end
 	end
@@ -123,7 +133,8 @@ local function apply_event(session, ev)
 	if ev.type == "join" and ev.subject_player and not session.ghosts[ev.subject_player] then
 		local name = session.rec.players[ev.subject_player]
 		if name and ev.pos then
-			local obj = deps.ghost.spawn(name, ev.pos, textures_of(ev.data), observer_set(session))
+			local obj = deps.ghost.spawn(name, deps.arena.translate(ev.pos, session.offset),
+				textures_of(ev.data), observer_set(session))
 			if obj then
 				session.ghosts[ev.subject_player] = obj
 				session.joined[ev.subject_player] = true
@@ -135,6 +146,12 @@ local function apply_event(session, ev)
 	elseif ev.type == "leave" and ev.subject_player then
 		remove_ghost(session, ev.subject_player)
 		session.joined[ev.subject_player] = nil
+	elseif ev.type == "node_change" then
+		-- The arrays are written to the map once per step, however many nodes
+		-- changed in it; a step with no node changes touches nothing.
+		if deps.reconstruct.change(session.reconstruct, ev.pos, ev.node, ev.param2) then
+			session.reconstruct_dirty = true
+		end
 	end
 end
 
@@ -162,7 +179,7 @@ local function advance_player(session, pid, obj, cursor)
 			if row.t > session.T then return end
 			cursor.next = cursor.next + 1
 			cursor.last_tick = row.tick
-			deps.ghost.update(obj, row)
+			deps.ghost.update(obj, row, session.offset)
 		end
 		local more = deps.reader.movement_after(session.rec, pid, cursor.last_tick, 200)
 		if #more == 0 then
@@ -187,18 +204,54 @@ function sessions.start(arg, player)
 			return nil, string.format("too many replays are running (%d)", running)
 		end
 	end
+	local starter = player:get_player_name()
+	if by_player[starter] then
+		return nil, "you are already watching a replay"
+	end
+
 	local path, path_err = deps.reader.resolve(arg)
 	if not path then return nil, path_err end
 	local rec, rec_err = deps.reader.open(path, deps.sqlite)
 	if not rec then return nil, rec_err end
+
+	-- What the arena has to hold and where it goes are both known before the
+	-- session exists; a recording without a snapshot has nothing to rebuild.
+	local state, state_err = deps.reconstruct.load(rec)
+	if not state then
+		deps.reader.close(rec)
+		return nil, state_err
+	end
+	local box, box_err = deps.arena.resolve(starter, state.region)
+	if not box then
+		deps.reader.close(rec)
+		return nil, box_err
+	end
+
+	local id = new_id()
+	-- The flag goes down before the first node: if the server dies between here
+	-- and the end of the session, this is what tells the next boot what to
+	-- clear. The arena itself is not remembered anywhere else.
+	deps.arena.save_flag(box, id)
+	local prepared, prepare_err = deps.arena.prepare(box)
+	if not prepared then
+		deps.arena.clear_flag(id)
+		deps.arena.clear(box)
+		deps.reader.close(rec)
+		return nil, prepare_err
+	end
+
 	local session = {
-		id = new_id(),
+		id = id,
 		rec = rec,
 		path = path,
 		name = rec.name,
 		T = 0,
 		speed = 1,
 		paused = true,
+		arena = box,
+		offset = deps.arena.offset(box, state.region),
+		reconstruct = state,
+		reconstruct_dirty = false,
 		participants = {},
 		ghosts = {},
 		cursors = {},
@@ -207,9 +260,17 @@ function sessions.start(arg, player)
 		event_last_id = 0,
 	}
 	by_id[session.id] = session
-	sessions.join(session, player)
+	local joined, join_err = sessions.join(session, player)
+	if not joined then
+		-- The arena is already prepared; finish() takes it down again.
+		sessions.finish(session, "could not start")
+		return nil, join_err
+	end
 	sessions.seek(session, 0)
 	session.paused = false
+	-- The marks were this arena; the session now owns it, so they are not
+	-- left behind to look like another pending one.
+	if deps.arena.has_marks(starter) then deps.arena.clear_marks(starter) end
 	core.log("action", string.format("[replay] session %s watching %s (%s)",
 		session.id, session.name, path))
 	return session
@@ -254,12 +315,16 @@ function sessions.finish(session, reason)
 	if session.ended then return end
 	session.ended = true
 	for pid in pairs(session.ghosts) do remove_ghost(session, pid) end
+	-- The reconstruction shares the arena with the ghosts and the viewers, so
+	-- it goes with them; wiping the box is enough to remove every node of it.
+	deps.arena.clear(session.arena)
 	for name in pairs(session.participants) do
 		local player = core.get_player_by_name(name)
 		if player then deps.recovery.leave(player, session) end
 		by_player[name] = nil
 	end
 	session.participants = {}
+	deps.arena.clear_flag(session.id)
 	deps.reader.close(session.rec)
 	by_id[session.id] = nil
 	core.log("action", string.format("[replay] session %s ended: %s",
@@ -286,6 +351,13 @@ function sessions.step_all(dtime)
 				session.paused = true
 			end
 			advance_events(session)
+			if session.reconstruct_dirty then
+				session.reconstruct_dirty = false
+				local written, err = deps.reconstruct.write(session.reconstruct, session.offset)
+				if not written then
+					core.log("warning", "[replay] cannot apply a node change: " .. tostring(err))
+				end
+			end
 			for pid, obj in pairs(session.ghosts) do
 				local cursor = session.cursors[pid]
 				if cursor and not cursor.done then

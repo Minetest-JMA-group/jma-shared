@@ -1,13 +1,13 @@
 # recorder_replay – play a recording back
 
 recorder_replay is the playback half of the `recorder` modpack. It opens a
-recording read-only and shows the recorded players as ghosts to the people
-watching: only the watchers receive them, and the recording is never written to.
+recording read-only, builds an arena, reconstructs the recorded region inside
+it, and shows the recorded players as ghosts to the people watching. Only the
+watchers receive the ghosts, and the recording is never written to.
 
-**Status.** This is the first phase: the ghosts move through the live world. The
-recording's region snapshot is already in every file, but rebuilding it in an
-arena is the next step; until then a replay is a quick look at who did what,
-not a self-contained reconstruction.
+**Status.** The arena and the reconstruction are real: a replay is watched
+inside a rebuilt copy of the recording's region, not in the live world. The
+recording still carries only what capture records (see *Limits* below).
 
 ## Watching
 
@@ -17,10 +17,20 @@ not a self-contained reconstruction.
 | `/replay start <recording>` | start watching a recording, by name or `.sqlite` path |
 | `/replay join [id]` | join the running replay; a chooser when there are several |
 | `/replay leave` | stop watching |
-| `/replay end <id>` | end a replay and restore everyone in it |
+| `/replay end <id>` | end a replay, tear its arena down and restore everyone in it |
 | `/replay status` | where the replay you are watching is |
+| `/replay pos1` / `/replay pos2` | mark an arena corner where you stand |
+| `/replay unset` | drop your arena marks |
 
 The `replay` privilege is needed.
+
+Every replay is watched in an arena. A player who starts one gets the arena
+their marks describe; a game may provide one instead (see *For a game*), and a
+server with neither falls back to the `replay.arena` setting. An arena must be
+at least the recorded region plus one node on every side: the outer layer of
+the box is an invisible, see-through barrier, and the recording is rebuilt one
+node in from its low corner. Marked and provided arenas are refused if they
+overlap an arena already in use or one another player is about to use.
 
 While watching, the main inventory is replaced by the remote control, in the
 hotbar:
@@ -40,6 +50,24 @@ restores them otherwise. A game whose world is not persistent (CTF does this
 through `recorder_common.game_hooks.world_persistent = false`) keeps that job
 for itself: the game's `on_enter`/`on_leave` hooks put the player back.
 
+## The reconstruction
+
+- Every recording carries a snapshot of its region, taken before the first
+  recorded action. Replay reads it and resolves the node names against the
+  running game; a node the game does not have becomes `CONTENT_UNKNOWN`.
+- Node changes from the recording are applied on top of the snapshot as the
+  clock passes them. Seeking rebuilds the region from the snapshot and every
+  change up to that moment and writes it once, so seeking backwards undoes
+  changes.
+- The region is written through a VoxelManip without `update_liquids()`. That
+  is what keeps liquids inert: a paused replay holds still, and a seek shows
+  the recorded moment rather than a newly started flow.
+- Ending the replay - or the last participant leaving - fills the whole arena
+  with air, removes the ghosts and restores the participants. The arena's
+  bounds are written to mod storage before its first node, so if the server
+  dies mid-replay the next boot clears the leftover shell (on a world the game
+  rebuilds from scratch there is nothing to clear, and the flag is erased).
+
 ## What is played
 
 - Players appear when the recording says they joined and disappear when it says
@@ -51,19 +79,27 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
 - A ghost wears the game's player model and, when the recording carries them,
   the recorded textures.
 
-This phase does not draw chat, items or world changes; the world's changes are
-already in the file and are applied when the region is reconstructed.
+## Limits
+
+- Chat, items and inventories are not drawn.
+- Lua entities are not recorded, so mobs, dropped items and the like do not
+  appear.
+- Node metadata and node timers' state are not recorded or replayed; a node
+  timer's `node_change` output is replayed because it changes a node.
+- A recording made before the snapshot existed (or one missing it) cannot be
+  rebuilt; replay refuses it with that reason.
 
 ## A recording that is still being made
 
 The file is opened read-only, and WAL lets a reader see committed rows, so a
 live recording can be watched too. Its length is whatever it was when the replay
-started; rows that land later are not followed.
+started, and only the rows it had then are followed.
 
 ## Settings
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
+| `replay.arena` | empty | The fallback arena, `x1,y1,z1,x2,y2,z2`. Used only when the game registers no arena provider; one fixed box can serve one replay at a time. |
 | `replay.max_sessions` | `4` | How many replays may run at once; `0` is no limit. |
 | `replay.model` | empty | The model name for ghost bodies, overriding the one picked from the game's registry. |
 | `recorder.directory` | empty | Where recordings are read from, shared with capture. A relative path is taken from the world directory. |
@@ -75,10 +111,19 @@ registers hooks in `recorder_common`:
 
 ```lua
 recorder_common.register_game_hooks({
+	arena = function(size, taken)
+		-- Return two corners of a box at least `size` nodes on every axis that
+		-- does not overlap any box in `taken`; nil and a reason when there is
+		-- no room. Several replays can run at once.
+	end,
 	world_persistent = false,          -- its world is rebuilt at boot; it owns inventories
 	on_enter = function(player, session) ... end,
 	on_leave = function(player, session) ... end,
 })
 ```
 
-`recorder_replay.end_session(id, reason)` ends a session the game knows about.
+A registered `arena` provider is the only arena source consulted when the
+starting player has no marks of their own; `replay.arena` is not used next to
+it. A game can also mark arenas on a player's behalf through
+`recorder_replay.arena`, and end a session it knows about with
+`recorder_replay.end_session(id, reason)`.

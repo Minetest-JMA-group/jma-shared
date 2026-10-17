@@ -209,7 +209,9 @@ end
 
 local WATCHER_ARENA = box(100, 10, 100, 107, 14, 107)
 local WATCHER_OFFSET = {x = 101, y = 11, z = 101}
-local STARTER_ARENA = box(200, 20, 200, 207, 24, 207)
+-- Deliberately larger than the minimum 8 x 5 x 8: the recording goes in the
+-- low corner and the rest of the interior stays air.
+local STARTER_ARENA = box(200, 20, 200, 211, 26, 209)
 local THIRD_ARENA = box(300, 30, 300, 307, 34, 307)
 
 -- A fresh world has no arena to clean up; let the boot handler run now so that
@@ -654,11 +656,16 @@ local other = sessions.start(fixture_path, third)
 check(first and other, "two replays are running")
 check(mock.get_node({x = 201, y = 21, z = 201}).name == "default:stone",
 	"the first arena has its own reconstruction")
+check(mock.get_node({x = 211, y = 26, z = 209}).name == "recorder_replay:barrier",
+	"a larger arena gets its shell on its own outer layer")
+check(mock.get_node({x = 210, y = 25, z = 208}).name == "air",
+	"and the interior the recording does not use stays air")
 check(mock.get_node({x = 301, y = 31, z = 301}).name == "default:stone",
-	"and so has the second")
-check(near(starter.pos.x, 203.5) and starter.pos.y == 25,
-	"each starter stands on their own arena: " .. core.pos_to_string(starter.pos))
-check(near(third.pos.x, 303.5) and third.pos.y == 35, "...")
+	"the second session's arena has its own reconstruction too")
+check(near(starter.pos.x, 205.5) and starter.pos.y == 27,
+	"each starter stands on their own arena's top face: " .. core.pos_to_string(starter.pos))
+check(near(third.pos.x, 303.5) and third.pos.y == 35, "the second on theirs: "
+	.. core.pos_to_string(third.pos))
 check(flag_count() == 2, "both arenas are remembered")
 
 -- A provider has to be told both boxes are taken.

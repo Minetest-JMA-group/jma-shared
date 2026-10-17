@@ -119,9 +119,6 @@ local function new_player(name)
 			get_string = function(_, key) return self.meta[key] or "" end,
 		}
 	end
-	player.show_formspec = function(self, formname, formspec)
-		self.formspec = { name = formname, formspec = formspec }
-	end
 	player.get_wielded_item = function(self)
 		local who = self
 		return { to_string = function() return who.wield end }
@@ -552,6 +549,16 @@ function M.new(opts)
 	end
 	core.chat_send_player = function(name, message)
 		mock.chats[#mock.chats + 1] = {name = name, message = message}
+	end
+	-- The engine shows formspecs through the server, not through an ObjectRef
+	-- method; the mock does the same so a wrong call cannot pass a test.
+	core.show_formspec = function(playername, formname, formspec)
+		local player = mock.by_name[playername]
+		if player then player.formspec = {name = formname, formspec = formspec} end
+	end
+	core.close_formspec = function(playername, formname)
+		local player = mock.by_name[playername]
+		if player then player.formspec = {name = formname, formspec = ""} end
 	end
 	core.formspec_escape = function(text)
 		return tostring(text)

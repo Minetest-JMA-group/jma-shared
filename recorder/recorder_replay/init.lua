@@ -127,12 +127,12 @@ controls.register(function(kind, player, extra)
 			-- The recording or the arena could not be used; keep the list open
 			-- so another one can be picked.
 			core.chat_send_player(name, "Cannot watch " .. chosen.name .. ": " .. tostring(err))
-			player:show_formspec("recorder_replay:recordings",
+			core.show_formspec(name, "recorder_replay:recordings",
 				controls.recordings_formspec(choice.files, choice.selected))
 			return
 		end
 		choosing[name] = nil
-		player:show_formspec("recorder_replay:recordings", "")
+		core.close_formspec(name, "recorder_replay:recordings")
 		return
 	end
 
@@ -152,7 +152,7 @@ controls.register(function(kind, player, extra)
 	elseif kind == "forward" then
 		sessions.seek(session, session.T + 10)
 	elseif kind == "seek" then
-		player:show_formspec("recorder_replay:seek", controls.seek_formspec(session))
+		core.show_formspec(name, "recorder_replay:seek", controls.seek_formspec(session))
 	elseif kind == "leave" then
 		-- The engine writes the used stack back into its slot after this
 		-- callback returns, and leaving restores the player's own inventory.
@@ -270,7 +270,7 @@ core.register_chatcommand("replay", {
 				return false, "no recordings in " .. dir
 			end
 			choosing[name] = {files = files, selected = 1}
-			player:show_formspec("recorder_replay:recordings",
+			core.show_formspec(name, "recorder_replay:recordings",
 				controls.recordings_formspec(files, 1))
 			return true
 		end
@@ -338,7 +338,7 @@ core.register_chatcommand("replay", {
 				if not joined then return false, err end
 				return true, "Watching " .. active[1].name
 			end
-			player:show_formspec("recorder_replay:sessions", controls.sessions_formspec(active))
+			core.show_formspec(name, "recorder_replay:sessions", controls.sessions_formspec(active))
 			return true
 		end
 

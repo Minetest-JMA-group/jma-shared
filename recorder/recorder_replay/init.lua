@@ -99,6 +99,26 @@ end
 -- own.
 local choosing = {}
 
+-- A formspec shown from inside an input callback - a chat command, an item use
+-- - can be delivered the very keypress or click that triggered it, and the
+-- client then treats that as a click on the new form. That is how a bare
+-- /replay used to go straight through the list and start the first recording.
+-- Showing the form a moment later lets the input finish first.
+local function show_formspec_later(name, formname, build)
+	core.after(0.2, function()
+		if not core.get_player_by_name(name) then return end
+		local formspec = build()
+		if formspec then core.show_formspec(name, formname, formspec) end
+	end)
+end
+
+local function show_recording_chooser(name, choice, error)
+	show_formspec_later(name, "recorder_replay:recordings", function()
+		if choosing[name] ~= choice then return nil end
+		return controls.recordings_formspec(choice.files, choice.selected, error)
+	end)
+end
+
 -- The remote control's actions. Looked up by the player's session, so one item
 -- type drives whichever replay its holder is watching.
 controls.register(function(kind, player, extra)
@@ -114,7 +134,16 @@ controls.register(function(kind, player, extra)
 				start_now = event.type == "DCL"
 			end
 		elseif extra and extra.watch then
+			if not choice.selected then
+				show_recording_chooser(name, choice, "Choose a recording first.")
+				return
+			end
 			start_now = true
+		elseif extra and extra.key_enter then
+			-- The Enter that submitted the command that opened the form can
+			-- reach the form too; it is not a click.
+			if not choice.selected then show_recording_chooser(name, choice) end
+			return
 		elseif extra and (extra.quit or extra.cancel) then
 			choosing[name] = nil
 			return
@@ -126,9 +155,8 @@ controls.register(function(kind, player, extra)
 		if not started then
 			-- The recording or the arena could not be used; keep the list open
 			-- with the reason in it so another one can be picked.
-			core.show_formspec(name, "recorder_replay:recordings",
-				controls.recordings_formspec(choice.files, choice.selected,
-					"Cannot watch " .. chosen.name .. ": " .. tostring(err)))
+			show_recording_chooser(name, choice,
+				"Cannot watch " .. chosen.name .. ": " .. tostring(err))
 			return
 		end
 		choosing[name] = nil
@@ -152,7 +180,9 @@ controls.register(function(kind, player, extra)
 	elseif kind == "forward" then
 		sessions.seek(session, session.T + 10)
 	elseif kind == "seek" then
-		core.show_formspec(name, "recorder_replay:seek", controls.seek_formspec(session))
+		show_formspec_later(name, "recorder_replay:seek", function()
+			return controls.seek_formspec(session)
+		end)
 	elseif kind == "leave" then
 		-- The engine writes the used stack back into its slot after this
 		-- callback returns, and leaving restores the player's own inventory.
@@ -269,9 +299,8 @@ core.register_chatcommand("replay", {
 			if #files == 0 then
 				return false, "no recordings in " .. dir
 			end
-			choosing[name] = {files = files, selected = 1}
-			core.show_formspec(name, "recorder_replay:recordings",
-				controls.recordings_formspec(files, 1))
+			choosing[name] = {files = files, selected = nil}
+			show_recording_chooser(name, choosing[name])
 			return true
 		end
 
@@ -338,7 +367,9 @@ core.register_chatcommand("replay", {
 				if not joined then return false, err end
 				return true, "Watching " .. active[1].name
 			end
-			core.show_formspec(name, "recorder_replay:sessions", controls.sessions_formspec(active))
+			show_formspec_later(name, "recorder_replay:sessions", function()
+				return controls.sessions_formspec(active)
+			end)
 			return true
 		end
 

@@ -26,10 +26,15 @@ end
 
 -- The shell is invisible and see-through - the viewers look through it at the
 -- reconstruction - but solid, so nobody walks or falls out of the arena. Its
--- top face doubles as the viewing platform.
+-- top face doubles as the viewing platform. It also has to be transparent to
+-- light: a shell that blocked sunlight would turn the whole arena pitch black
+-- and cast a shadow on the world around it, which is very visible from
+-- outside where the shell itself is not.
 core.register_node(BARRIER, {
 	description = "Replay arena barrier",
 	drawtype = "airlike",
+	paramtype = "light",
+	sunlight_propagates = true,
 	walkable = true,
 	pointable = false,
 	diggable = false,
@@ -283,6 +288,23 @@ local function write_box(box, fill)
 	return true
 end
 
+-- write_to_map() recalculates the light of the blocks it writes, but the
+-- engine's incremental update is known to leave artefacts around large
+-- writes (the same thing WorldEdit runs into), and a dark arena is not
+-- something the viewer can see past. A full recalculation over the arena is
+-- cheap at the few moments a session builds or clears its world; during
+-- forward playback the per-step write is left to write_to_map().
+---@param box table
+function arena.relight(box)
+	if not core.fix_light then return end
+	local ok, fixed = pcall(core.fix_light, box.pos1, box.pos2)
+	if not ok then
+		core.log("warning", "[replay] cannot recalculate the arena's light: " .. tostring(fixed))
+	elseif fixed == false then
+		core.log("warning", "[replay] the arena's light could not be recalculated")
+	end
+end
+
 -- Every cell of the box is written - an explicit read_from_map() is not
 -- needed, because get_voxel_manip() already loaded the area. The outer layer
 -- becomes the barrier and the interior becomes air; the reconstruction then
@@ -297,7 +319,7 @@ function arena.prepare(box)
 		return nil, "the replay barrier node is not registered"
 	end
 	local size = region.size(box)
-	return write_box(box, function(origin, emerged_size, ids, param2)
+	local written, err = write_box(box, function(origin, emerged_size, ids, param2)
 		for z = 0, size.z - 1 do
 			local layer = (box.pos1.z + z - origin.z) * emerged_size.y * emerged_size.x
 			local edge_z = z == 0 or z == size.z - 1
@@ -313,13 +335,16 @@ function arena.prepare(box)
 			end
 		end
 	end)
+	if not written then return nil, err end
+	arena.relight(box)
+	return true
 end
 
 ---@param box table
 ---@return boolean|nil, string?
 function arena.clear(box)
 	local size = region.size(box)
-	return write_box(box, function(origin, emerged_size, ids, param2)
+	local written, err = write_box(box, function(origin, emerged_size, ids, param2)
 		for z = 0, size.z - 1 do
 			local layer = (box.pos1.z + z - origin.z) * emerged_size.y * emerged_size.x
 			for y = 0, size.y - 1 do
@@ -332,6 +357,9 @@ function arena.clear(box)
 			end
 		end
 	end)
+	if not written then return nil, err end
+	arena.relight(box)
+	return true
 end
 
 -- Where a participant stands while watching: the centre of the top face. The

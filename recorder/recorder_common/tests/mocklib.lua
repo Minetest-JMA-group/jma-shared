@@ -446,6 +446,14 @@ function M.new(opts)
 
 	mock.vms = {}
 	mock.liquids_updated = false
+	mock.relit = {}  -- boxes core.fix_light was asked to recalculate
+	core.fix_light = function(p1, p2)
+		mock.relit[#mock.relit + 1] = {
+			pos1 = {x = p1.x, y = p1.y, z = p1.z},
+			pos2 = {x = p2.x, y = p2.y, z = p2.z},
+		}
+		return true
+	end
 	core.get_voxel_manip = function(p1, p2)
 		local emerged1 = {x = p1.x, y = p1.y, z = p1.z}
 		local emerged2 = {x = p2.x, y = p2.y, z = p2.z}

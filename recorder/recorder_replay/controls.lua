@@ -136,7 +136,7 @@ function controls.recordings_formspec(files, selected, error)
 		"label[0.3,0.3;Watch a recording]",
 		"label[0.3,0.65;Select one and press Watch, or double-click it.]",
 		string.format("textlist[0.3,1.0;9.4,4.4;recordings;%s;%d;false]",
-			table.concat(items, ","), math.max(1, selected or 1)),
+			table.concat(items, ","), math.max(0, selected or 0)),
 	}
 	if error then
 		parts[#parts + 1] = "label[0.3,5.4;" ..

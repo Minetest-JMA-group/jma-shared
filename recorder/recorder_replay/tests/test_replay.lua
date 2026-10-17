@@ -161,6 +161,13 @@ local function use(kind, player)
 	return def.on_use(ItemStack("recorder_replay:" .. kind), player)
 end
 
+-- Forms opened from an input callback are shown a moment later, so the input
+-- cannot click them. Only the timer clock needs to move for that; stepping the
+-- server would also advance any running session.
+local function deferred_form()
+	mock.run_timers(0.2)
+end
+
 local function box(x1, y1, z1, x2, y2, z2)
 	return {pos1 = {x = x1, y = y1, z = z1}, pos2 = {x = x2, y = y2, z = z2}}
 end
@@ -357,10 +364,15 @@ mark(watcher, WATCHER_ARENA)
 watcher.pos = {x = 0, y = 0, z = 0}
 ok, message = cmd.func("Watcher", "")
 check(ok, "a bare /replay opens the recording chooser")
+-- The form is shown one step later so the Enter that sent the command cannot
+-- click it; the tests step the server the same way.
+deferred_form()
 check(watcher.formspec and watcher.formspec.name == "recorder_replay:recordings",
 	"with the recording formspec")
 check(watcher.formspec and watcher.formspec.formspec:find("fixture-", 1, true) ~= nil,
 	"the recordings in the directory are listed")
+check(watcher.formspec and watcher.formspec.formspec:find(";0;", 1, true) ~= nil,
+	"with nothing selected yet")
 
 -- A client can submit any form name it likes; the privilege is what makes the
 -- submission trustworthy.
@@ -370,6 +382,14 @@ mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordi
 check(sessions.for_player("Watcher") == nil,
 	"a submission without the replay privilege starts nothing")
 watcher.privs.replay = true
+
+-- Watch means the selected recording, and nothing is selected on opening.
+mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
+	{watch = "Watch"})
+check(sessions.for_player("Watcher") == nil, "Watch with nothing selected starts nothing")
+deferred_form()
+check(watcher.formspec and watcher.formspec.formspec:find("Choose a recording first", 1, true) ~= nil,
+	"and asks for a selection")
 
 -- Selecting remembers the choice; the Watch button starts it.
 mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
@@ -387,6 +407,7 @@ mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordi
 mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
 	{watch = "Watch"})
 check(sessions.for_player("Watcher") == nil, "a recording that cannot start does not start")
+deferred_form()
 check(watcher.formspec and watcher.formspec.name == "recorder_replay:recordings",
 	"the chooser stays open")
 check(watcher.formspec and watcher.formspec.formspec:find("no snapshot", 1, true) ~= nil,
@@ -455,6 +476,12 @@ check(mock.get_node({x = 101, y = 12, z = 101}).name == "air",
 	"nodes the snapshot does not name stay air")
 check(mock.get_node({x = 105, y = 12, z = 105}).name == "unknown",
 	"a node name this game does not have becomes unknown, not an error")
+local barrier_def = mock.node_defs["recorder_replay:barrier"]
+check(barrier_def and barrier_def.sunlight_propagates == true,
+	"the shell lets sunlight through, so the arena is not a dark box")
+check(barrier_def and barrier_def.paramtype == "light", "and takes part in lighting")
+check(#mock.relit > 0 and mock.relit[#mock.relit].pos1.x == 100,
+	"the arena's light is recalculated after the reconstruction")
 check(mock.liquids_updated == false, "the reconstruction does not start liquid flow")
 
 local alice = ghost_of("Alice")
@@ -519,6 +546,7 @@ use("forward", watcher)
 check(near(session.T, 1), "forward 10 s clamps to the end")
 
 use("seek", watcher)
+deferred_form()
 check(watcher.formspec and watcher.formspec.name == "recorder_replay:seek",
 	"the seek item opens a formspec")
 check(watcher.formspec and watcher.formspec.formspec:find("scrollbar", 1, true) ~= nil,
@@ -558,6 +586,7 @@ sessions.seek(session, 0.7)
 check(mock.get_node({x = 101, y = 11, z = 101}).name == "default:stone",
 	"before the change the floor is whole again")
 local vms = #mock.vms
+local relit = #mock.relit
 mock.step(0.25)
 check(near(session.T, 0.95), "playback crosses the change: " .. tostring(session.T))
 check(mock.get_node({x = 101, y = 11, z = 101}).name == "air",
@@ -565,6 +594,7 @@ check(mock.get_node({x = 101, y = 11, z = 101}).name == "air",
 check(mock.get_node({x = 103, y = 12, z = 103}).name == "default:dirt",
 	"the other change as well")
 check(#mock.vms == vms + 1, "the crossed changes are written once for the step")
+check(#mock.relit == relit, "forward changes leave the light to write_to_map()")
 check(mock.liquids_updated == false, "still without starting liquid flow")
 
 ----------------------------------------------------------------------------
@@ -600,6 +630,8 @@ check(sessions.for_player("Watcher") == nil, "the next step leaves the replay")
 check(next(mock.entities) == nil, "no ghosts are left")
 local empty, offender = box_is_air(WATCHER_ARENA)
 check(empty, "the whole arena is air again: " .. tostring(offender))
+check(#mock.relit > 0 and mock.relit[#mock.relit].pos1.x == 100,
+	"clearing it recalculates the light of the ground it covered")
 check(flag_count() == 0, "and the boot flag is gone")
 check(watcher.inventory.main[1] == "default:pick_stone",
 	"the player's things are back after the engine's write: " .. tostring(watcher.inventory.main[1]))
@@ -652,7 +684,7 @@ watcher.pos = {x = 4, y = 5, z = 6}
 local resumed = sessions.start("fixture", watcher)
 check(resumed ~= nil, "a replay starts again")
 check(near(watcher.pos.x, 103.5) and watcher.pos.y == 15, "the starter is on the platform")
-mock.step(0.2)
+deferred_form()
 mock.fire("register_on_leaveplayer", watcher, false)
 check(sessions.for_player("Watcher") == nil, "a disconnect removes them from the session")
 check(watcher.meta["recorder_replay:stash"] ~= "", "but keeps their things stashed")
@@ -706,6 +738,7 @@ check(resolved ~= nil and type(seen) == "table" and #seen == 2,
 	"the provider is told which arenas are taken")
 
 ok, message = cmd.func("Watcher", "join")
+deferred_form()
 check(ok and watcher.formspec and watcher.formspec.name == "recorder_replay:sessions",
 	"joining with more than one running opens the chooser")
 ok, message = cmd.func("Watcher", "join " .. first.id)

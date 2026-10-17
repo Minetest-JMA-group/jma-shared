@@ -25,6 +25,7 @@
 ---@field resolve fun(player_name: string, recorded: table): table|nil, string?
 ---@field prepare fun(box: table): boolean|nil, string?
 ---@field clear fun(box: table): boolean|nil, string?
+---@field relight fun(box: table)
 ---@field viewing_position fun(box: table): table
 ---@field offset fun(box: table, recorded: table): table
 ---@field translate fun(pos: table?, offset: table): table?

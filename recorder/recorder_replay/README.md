@@ -73,6 +73,10 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
 - The region is written through a VoxelManip without `update_liquids()`. That
   is what keeps liquids inert: a paused replay holds still, and a seek shows
   the recorded moment rather than a newly started flow.
+- The shell lets sunlight through: it is invisible, not a lid. The arena's
+  light is recalculated in full when it is built, when it is cleared and
+  whenever the clock jumps; node changes during forward playback rely on the
+  light the engine recalculates as the changed blocks are written.
 - Ending the replay - or the last participant leaving - fills the whole arena
   with air, removes the ghosts and restores the participants. The arena's
   bounds are written to mod storage before its first node, so if the server
@@ -97,6 +101,10 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
   appear.
 - Node metadata and node timers' state are not recorded or replayed; a node
   timer's `node_change` output is replayed because it changes a node.
+- Light values are not recorded. A reconstruction is lit by the replay
+  server's sky and by the nodes themselves, not by the light the recorded
+  world had: a cave, a lamp-lit room or a night-time scene will look
+  different.
 - A recording made before the snapshot existed (or one missing it) cannot be
   rebuilt; replay refuses it with that reason.
 

@@ -100,6 +100,10 @@ function sessions.seek(session, T)
 	local rebuilt, rebuild_err = deps.reconstruct.write(session.reconstruct, session.offset)
 	if not rebuilt then
 		core.log("warning", "[replay] cannot rebuild the region: " .. tostring(rebuild_err))
+	else
+		-- A seek rewrites the whole region at once; the light of the blocks
+		-- around it needs the same full pass as the arena itself.
+		deps.arena.relight(session.arena)
 	end
 
 	local offset = session.offset

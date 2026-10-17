@@ -53,10 +53,19 @@ function controls.register(handle)
 		})
 	end
 	core.register_on_player_receive_fields(function(player, formname, fields)
+		-- A client can submit any formname it likes, including one it was never
+		-- shown, so the privilege that lets a player use these forms is checked
+		-- here as well as on the commands. A player who has it is a player the
+		-- server would have let open the form in the first place.
+		if not core.check_player_privs(player:get_player_name(), {replay = true}) then
+			return
+		end
 		if formname == "recorder_replay:seek" then
 			handle("seek_value", player, fields)
 		elseif formname == "recorder_replay:sessions" then
 			handle("session_choice", player, fields)
+		elseif formname == "recorder_replay:recordings" then
+			handle("recording_choice", player, fields)
 		end
 	end)
 end
@@ -81,6 +90,29 @@ function controls.seek_formspec(session)
 		string.format("scrollbaroptions[min=0;max=%d;smallstep=1;largestep=10;thumbsize=20]", max_value),
 		string.format("scrollbar[0.3,1.2;7.4,0.6;horizontal;seek;%d]", value),
 		"button_exit[3.1,2.4;1.8,0.7;close;Close]",
+	}, "")
+end
+
+-- The recording chooser shown by a bare /replay. `files` is the list the
+-- session will be started from, so the selection is an index into a list the
+-- server already holds; a submission that names anything else is ignored.
+---@param files table[]  -- {name = <file name>, path = <full path>}, newest first
+---@param selected integer?
+---@return string
+function controls.recordings_formspec(files, selected)
+	local items = {}
+	for i, entry in ipairs(files) do
+		items[i] = core.formspec_escape(entry.name)
+	end
+	return table.concat({
+		"formspec_version[4]",
+		"size[10,6.8]",
+		"label[0.3,0.3;Watch a recording]",
+		"label[0.3,0.65;Select one and press Watch, or double-click it.]",
+		string.format("textlist[0.3,1.0;9.4,4.4;recordings;%s;%d;false]",
+			table.concat(items, ","), math.max(1, selected or 1)),
+		"button_exit[2.6,5.6;2,0.7;watch;Watch]",
+		"button_exit[5.4,5.6;2,0.7;cancel;Cancel]",
 	}, "")
 end
 

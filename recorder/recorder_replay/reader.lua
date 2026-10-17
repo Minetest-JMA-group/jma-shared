@@ -23,6 +23,12 @@ function reader.scalar(rec, sql)
 	return value
 end
 
+-- The tables a recording is made of. A file can carry the right identity and
+-- schema version without holding them - hand-made, or damaged after the
+-- header - and every query against such a file raises instead of returning an
+-- error, so their presence is checked before anything reads rows.
+local REQUIRED_TABLES = {"Metadata", "Snapshot", "Players", "Movement", "Events"}
+
 -- Open a recording and read the facts that do not change during a session.
 ---@param path string
 ---@param sqlite table
@@ -38,19 +44,39 @@ function reader.open(path, sqlite)
 		players = {},   -- player id -> name
 		duration = 0,
 	}
-	for row in db:nrows("SELECT key, value FROM Metadata") do
-		if row.key == "recorder.name" then rec.name = row.value
-		elseif row.key == "recorder.started_at" then rec.started_at = row.value
-		elseif row.key == "recorder.game" then rec.game = row.value
-		elseif row.key == "recorder.end_reason" then rec.end_reason = row.value
+	-- The whole read is under pcall: a damaged page makes lsqlite3 raise, and
+	-- a recording that cannot be read is a message, not a lost server step.
+	local ok, read_err = pcall(function()
+		local seen = {}
+		for row in db:nrows("SELECT name FROM sqlite_master WHERE type = 'table'") do
+			seen[row.name] = true
 		end
+		local missing = {}
+		for _, name in ipairs(REQUIRED_TABLES) do
+			if not seen[name] then missing[#missing + 1] = name end
+		end
+		if #missing > 0 then
+			error("it is missing " .. table.concat(missing, ", "), 0)
+		end
+
+		for row in db:nrows("SELECT key, value FROM Metadata") do
+			if row.key == "recorder.name" then rec.name = row.value
+			elseif row.key == "recorder.started_at" then rec.started_at = row.value
+			elseif row.key == "recorder.game" then rec.game = row.value
+			elseif row.key == "recorder.end_reason" then rec.end_reason = row.value
+			end
+		end
+		for row in db:nrows("SELECT id, name FROM Players") do
+			rec.players[row.id] = row.name
+		end
+		local movement_end = reader.scalar(rec, "SELECT MAX(t) FROM Movement")
+		local event_end = reader.scalar(rec, "SELECT MAX(t) FROM Events")
+		rec.duration = math.max(tonumber(movement_end) or 0, tonumber(event_end) or 0)
+	end)
+	if not ok then
+		db:close()
+		return nil, string.format("cannot read %s: %s", path, tostring(read_err))
 	end
-	for row in db:nrows("SELECT id, name FROM Players") do
-		rec.players[row.id] = row.name
-	end
-	local movement_end = reader.scalar(rec, "SELECT MAX(t) FROM Movement")
-	local event_end = reader.scalar(rec, "SELECT MAX(t) FROM Events")
-	rec.duration = math.max(tonumber(movement_end) or 0, tonumber(event_end) or 0)
 	return rec
 end
 

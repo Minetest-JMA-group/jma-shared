@@ -13,8 +13,8 @@ recording still carries only what capture records (see *Limits* below).
 
 | Command | What it does |
 | --- | --- |
+| `/replay` | choose a recording from a list and watch it |
 | `/replay list` | recordings on disk and replays running |
-| `/replay start <recording>` | start watching a recording, by name or `.sqlite` path |
 | `/replay join [id]` | join the running replay; a chooser when there are several |
 | `/replay leave` | stop watching |
 | `/replay end <id>` | end a replay, tear its arena down and restore everyone in it |
@@ -22,7 +22,18 @@ recording still carries only what capture records (see *Limits* below).
 | `/replay pos1` / `/replay pos2` | mark an arena corner where you stand |
 | `/replay unset` | drop your arena marks |
 
-The `replay` privilege is needed.
+The `replay` privilege is needed. Every formspec this mod handles checks that
+privilege again when it is submitted: the engine only shows a formspec to the
+player it was sent to, but a client can submit any form name it likes, so the
+submission is trusted only because its sender is.
+
+A bare `/replay` first checks that an arena source exists - your own marks, the
+game's provider, or the `replay.arena` setting - and refuses with instructions
+when there is none. Otherwise it lists every `.sqlite` file in the recording
+directory, newest first; selecting one and pressing *Watch* (or double-clicking
+it) starts the replay. The chosen recording's region is then checked against
+the arena: too small a box, or one already in use, keeps the chooser open with
+the reason. `/replay list` remains the plain-text listing.
 
 Every replay is watched in an arena. A player who starts one gets the arena
 their marks describe; a game may provide one instead (see *For a game*), and a

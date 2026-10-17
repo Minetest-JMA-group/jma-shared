@@ -156,18 +156,50 @@ local function setting_box()
 	return box
 end
 
--- A candidate box is usable when it holds the recording and does not sit on an
--- arena in use or on one somebody else is about to start.
+-- A candidate box is unusable when it sits on an arena in use or on one
+-- somebody else is about to start.
+local function overlap_reason(box, player_name, what)
+	if overlaps_any(box, running_boxes()) then
+		return what .. " overlaps an arena that is already in use"
+	end
+	if overlaps_any(box, pending_boxes(player_name)) then
+		return what .. " overlaps an arena another player is marking"
+	end
+	return nil
+end
+
+-- A candidate box is usable when it holds the recording and does not overlap.
 local function accept(box, recorded, player_name, what)
 	local ok, err = check_size(box, recorded, what)
 	if not ok then return nil, err end
-	if overlaps_any(box, running_boxes()) then
-		return nil, what .. " overlaps an arena that is already in use"
-	end
-	if overlaps_any(box, pending_boxes(player_name)) then
-		return nil, what .. " overlaps an arena another player is marking"
-	end
+	local overlap = overlap_reason(box, player_name, what)
+	if overlap then return nil, overlap end
 	return box
+end
+
+-- Is there a source that could give this player an arena? A recording has not
+-- been chosen yet, so the box's size cannot be checked - only the source and
+-- what can be known about it now. The size is decided when a recording is
+-- selected.
+---@param player_name string
+---@return boolean, string?  -- false and a reason when no source can be used
+function arena.available(player_name)
+	if arena.has_marks(player_name) then
+		local box = region.normalize(marks[player_name].pos1, marks[player_name].pos2)
+		if box then
+			local overlap = overlap_reason(box, player_name, "the arena you marked")
+			if overlap then return false, overlap end
+		end
+		return true
+	end
+	if recorder_common.game_hooks.arena then return true end
+	local configured, err = setting_box()
+	if err then return false, err end
+	if not configured then return false end
+	if overlaps_any(configured, running_boxes()) then
+		return false, "the configured arena is in use; mark another one or wait"
+	end
+	return true
 end
 
 -- The arena for a session, from the highest-priority source that has one.

@@ -21,6 +21,7 @@
 ---@field set_mark fun(name: string, which: string, pos: table): boolean|nil, string?
 ---@field clear_marks fun(name: string)
 ---@field has_marks fun(name: string): boolean
+---@field available fun(player_name: string): boolean, string?
 ---@field resolve fun(player_name: string, recorded: table): table|nil, string?
 ---@field prepare fun(box: table): boolean|nil, string?
 ---@field clear fun(box: table): boolean|nil, string?

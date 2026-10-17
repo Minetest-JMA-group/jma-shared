@@ -92,6 +92,7 @@ local function new_player(name)
 		breath = 10,
 		inventory = {},
 		meta = {},
+		privs = {},
 	}
 	player.get_player_name = function(self) return self.name end
 	player.is_player = function(self) return true end
@@ -266,6 +267,20 @@ function M.new(opts)
 	core.get_connected_players = function() return mock.connected end
 	core.get_player_by_name = function(name) return mock.by_name[name] end
 	core.is_player = function(obj) return type(obj) == "table" and obj.is_player_object == true end
+	core.check_player_privs = function(name, wanted)
+		local player = mock.by_name[name]
+		local held = player and player.privs or {}
+		local missing = {}
+		for priv in pairs(wanted or {}) do
+			if not held[priv] then missing[priv] = true end
+		end
+		if next(missing) == nil then return true end
+		return false, missing
+	end
+	core.get_player_privs = function(name)
+		local player = mock.by_name[name]
+		return player and player.privs or {}
+	end
 	core.write_json = function(data) return encode(data) end
 	core.log = function(a, b)
 		local level, message = a, b
@@ -544,6 +559,10 @@ function M.new(opts)
 	core.explode_scrollbar_event = function(value)
 		local kind, number = tostring(value):match("^(%a+):(%-?%d+)")
 		return {type = kind or "INV", value = tonumber(number)}
+	end
+	core.explode_textlist_event = function(value)
+		local kind, index = tostring(value):match("^(%a+):(%-?%d+)")
+		return {type = kind or "INV", index = tonumber(index)}
 	end
 	core.get_dir_list = function(path, want_dirs)
 		if want_dirs then return nil end

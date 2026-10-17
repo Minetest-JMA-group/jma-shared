@@ -93,10 +93,49 @@ local function clock(seconds)
 	return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
 end
 
+-- The recording chooser, per player: the file list the formspec was built from
+-- and the index selected in it. Keeping the list here means a submission can
+-- only name a recording the server actually offered, and adds no path of its
+-- own.
+local choosing = {}
+
 -- The remote control's actions. Looked up by the player's session, so one item
 -- type drives whichever replay its holder is watching.
 controls.register(function(kind, player, extra)
 	local name = player:get_player_name()
+	if kind == "recording_choice" then
+		local choice = choosing[name]
+		if not choice then return end
+		local start_now = false
+		if extra and extra.recordings then
+			local event = core.explode_textlist_event(extra.recordings)
+			if (event.type == "CHG" or event.type == "DCL") and choice.files[event.index] then
+				choice.selected = event.index
+				start_now = event.type == "DCL"
+			end
+		elseif extra and extra.watch then
+			start_now = true
+		elseif extra and (extra.quit or extra.cancel) then
+			choosing[name] = nil
+			return
+		end
+		if not start_now then return end
+		local chosen = choice.files[choice.selected]
+		if not chosen then return end
+		local started, err = sessions.start(chosen.path, player)
+		if not started then
+			-- The recording or the arena could not be used; keep the list open
+			-- so another one can be picked.
+			core.chat_send_player(name, "Cannot watch " .. chosen.name .. ": " .. tostring(err))
+			player:show_formspec("recorder_replay:recordings",
+				controls.recordings_formspec(choice.files, choice.selected))
+			return
+		end
+		choosing[name] = nil
+		player:show_formspec("recorder_replay:recordings", "")
+		return
+	end
+
 	local session = sessions.for_player(name)
 	if not session then
 		core.chat_send_player(name, "You are not watching a replay.")
@@ -159,6 +198,7 @@ core.register_on_joinplayer(function(player)
 end)
 
 core.register_on_leaveplayer(function(player)
+	choosing[player:get_player_name()] = nil
 	sessions.on_disconnect(player)
 end)
 
@@ -178,22 +218,32 @@ local function describe(session)
 		session.paused and "paused" or (tostring(session.speed) .. "x"), watching)
 end
 
-local function list_recordings()
+-- Every recording file in the directory, newest first. The UTC timestamp in
+-- the name is fixed width, so descending name order is chronological order.
+---@return table[], string  -- {name =, path =} newest first, and the directory
+local function all_recordings()
 	local dir = recorder_common.recordings_dir()
 	local names = core.get_dir_list(dir, false) or {}
 	table.sort(names, function(a, b) return a > b end)
 	local out = {}
 	for _, file in ipairs(names) do
-		if file:sub(-7) == ".sqlite" then out[#out + 1] = file end
-		if #out >= 15 then break end
+		if file:sub(-7) == ".sqlite" then
+			out[#out + 1] = {name = file, path = dir .. "/" .. file}
+		end
 	end
+	return out, dir
+end
+
+local function list_recordings()
+	local files, dir = all_recordings()
+	local out = {}
+	for i = 1, math.min(#files, 15) do out[i] = files[i].name end
 	return out, dir
 end
 
 core.register_chatcommand("replay", {
 	description = "Play a recording back",
-	params = "[list | start <recording> | join [id] | leave | end <id> | status |" ..
-		" pos1 | pos2 | unset]",
+	params = "[list | join [id] | leave | end <id> | status | pos1 | pos2 | unset]",
 	privs = {replay = true},
 	---@param name string
 	---@param params string
@@ -202,7 +252,30 @@ core.register_chatcommand("replay", {
 		local player = core.get_player_by_name(name)
 		if not player then return false, "no player" end
 
-		if command == nil or command == "" or command == "list" then
+		if command == nil or command == "" then
+			-- Choosing a recording happens here, before the formspec, so that a
+			-- player with nowhere to build is told what to do instead of being
+			-- shown a list that cannot start anything.
+			if sessions.for_player(name) then
+				return false, "you are already watching a replay; /replay leave first"
+			end
+			local available, availability_err = arena.available(name)
+			if not available then
+				return false, availability_err or
+					"there is no arena for this replay: mark one with /replay pos1 and /replay pos2," ..
+					" ask the game to provide one, or set replay.arena"
+			end
+			local files, dir = all_recordings()
+			if #files == 0 then
+				return false, "no recordings in " .. dir
+			end
+			choosing[name] = {files = files, selected = 1}
+			player:show_formspec("recorder_replay:recordings",
+				controls.recordings_formspec(files, 1))
+			return true
+		end
+
+		if command == "list" then
 			local lines = {"Active replays:"}
 			local active = sessions.list()
 			if #active == 0 then lines[#lines + 1] = "  (none)" end
@@ -237,13 +310,6 @@ core.register_chatcommand("replay", {
 			return true, "Arena marks cleared."
 		end
 
-		if command == "start" then
-			local session, err = sessions.start(rest, player)
-			if not session then return false, err end
-			return true, string.format("Watching %s (%s), %s long. Controls are in your hotbar.",
-				session.name, session.id, clock(session.rec.duration))
-		end
-
 		if command == "join" then
 			if sessions.for_player(name) then
 				return false, "you are already watching a replay; /replay leave first"
@@ -265,7 +331,7 @@ core.register_chatcommand("replay", {
 			end
 			local active = sessions.list()
 			if #active == 0 then
-				return false, "no replay is running; start one with /replay start <recording>"
+				return false, "no replay is running; start one with /replay"
 			end
 			if #active == 1 then
 				local joined, err = sessions.join(active[1], player)
@@ -298,7 +364,7 @@ core.register_chatcommand("replay", {
 				session.paused and "paused" or "playing", tostring(session.speed))
 		end
 
-		return false, "Usage: /replay [list | start <recording> | join [id] | leave | end <id> |" ..
-			" status | pos1 | pos2 | unset]"
+		return false, "Usage: /replay [list | join [id] | leave | end <id> | status |" ..
+			" pos1 | pos2 | unset]"
 	end,
 })

@@ -177,6 +177,14 @@ local function box_is_air(area)
 	return true
 end
 
+-- Test players are trusted by default; a test that cares takes the privilege
+-- away from one player and checks that the formspec submission is refused.
+local function add_player(name, fields)
+	fields = fields or {}
+	if fields.privs == nil then fields.privs = {replay = true} end
+	return mock.add_player(name, fields)
+end
+
 local function flag_entries()
 	local raw = mock.modstorage["recorder_replay:session"]
 	if not raw or raw == "" then return {} end
@@ -249,7 +257,7 @@ arena.clear_marks("Alice")
 arena.clear_marks("Bob")
 
 -- The commands mark where the player stands, and a mark dies with them.
-local marker = mock.add_player("Marker", {pos = {x = 50, y = 50, z = 50}})
+local marker = add_player("Marker", {pos = {x = 50, y = 50, z = 50}})
 mock.chatcommands.replay.func("Marker", "pos1")
 marker.pos = {x = 57, y = 54, z = 57}
 mock.chatcommands.replay.func("Marker", "pos2")
@@ -320,37 +328,45 @@ mock.settings["replay.arena"] = nil
 print("=== starting a replay in an arena ===")
 ----------------------------------------------------------------------------
 
-local planner = mock.add_player("Planner", {pos = {x = 0, y = 0, z = 0}})
+local planner = add_player("Planner", {pos = {x = 0, y = 0, z = 0}})
 local cmd = mock.chatcommands.replay
-local ok, message = cmd.func("Planner", "start fixture")
+local ok, message = cmd.func("Planner", "")
 check(not ok and tostring(message):find("/replay pos1", 1, true) ~= nil,
-	"a start without an arena fails with instructions: " .. tostring(message))
+	"a bare /replay without an arena says how to make one: " .. tostring(message))
 
--- A recording made without a snapshot has nothing to rebuild, and refusing it
--- must not leave an arena or a flag behind.
-local stale_path = world .. "/recordings/stale-20260101T000000Z.sqlite"
-local stale_writer = dbmanager.new(sqlite)
-assert(stale_writer:open(stale_path))
-stale_writer:set_meta("recorder.name", "stale")
-stale_writer:add_event({stale_writer:next_id(), 0, 0, "recording_start", nil, nil,
-	nil, nil, nil, nil, nil, nil, nil})
-stale_writer:flush()
-stale_writer:close()
-local vms_before = #mock.vms
-ok, message = cmd.func("Planner", "start stale")
-check(not ok and tostring(message):find("no snapshot", 1, true) ~= nil,
-	"a recording without a snapshot is refused: " .. tostring(message))
-check(#mock.vms == vms_before, "and no arena is built for it")
-check(flag_count() == 0, "nor remembered")
-
-local watcher = mock.add_player("Watcher", {pos = {x = 0, y = 0, z = 0}})
+local watcher = add_player("Watcher", {pos = {x = 0, y = 0, z = 0}})
 watcher.inventory = {main = {"default:pick_stone", "", "default:torch 10"}}
 watcher.meta = {}
 
 mark(watcher, WATCHER_ARENA)
 watcher.pos = {x = 0, y = 0, z = 0}
-ok, message = cmd.func("Watcher", "start fixture")
-check(ok, "the command starts a replay: " .. tostring(message))
+ok, message = cmd.func("Watcher", "")
+check(ok, "a bare /replay opens the recording chooser")
+check(watcher.formspec and watcher.formspec.name == "recorder_replay:recordings",
+	"with the recording formspec")
+check(watcher.formspec and watcher.formspec.formspec:find("fixture-", 1, true) ~= nil,
+	"the recordings in the directory are listed")
+
+-- A client can submit any form name it likes; the privilege is what makes the
+-- submission trustworthy.
+watcher.privs.replay = nil
+mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
+	{watch = "Watch"})
+check(sessions.for_player("Watcher") == nil,
+	"a submission without the replay privilege starts nothing")
+watcher.privs.replay = true
+
+-- Selecting remembers the choice; the Watch button starts it.
+mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
+	{recordings = "CHG:1"})
+check(sessions.for_player("Watcher") == nil, "selecting a recording does not start it")
+mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
+	{recordings = "DCL:99"})
+check(sessions.for_player("Watcher") == nil, "a double-click on nothing starts nothing")
+mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
+	{watch = "Watch"})
+check(sessions.for_player("Watcher") ~= nil, "the Watch button starts the selected recording")
+
 local session = sessions.for_player("Watcher")
 check(session ~= nil, "the watcher is in the session")
 check(session.rec.name == "fixture", "the recording is named: " .. tostring(session.rec.name))
@@ -362,6 +378,21 @@ check(session.arena and session.arena.pos1.x == 100 and session.arena.pos2.x == 
 check(session.offset and session.offset.x == 101 and session.offset.y == 11
 	and session.offset.z == 101, "the recording is placed one node in from the corner")
 check(not arena.has_marks("Watcher"), "the marks became the session's arena")
+
+-- What the bare command can know before a recording is chosen: whether a
+-- source exists, and whether the box it names is free.
+check(arena.available("Planner") == false, "no source means no chooser")
+arena.set_mark("Planner", "pos1", WATCHER_ARENA.pos1)
+arena.set_mark("Planner", "pos2", WATCHER_ARENA.pos2)
+local available, why = arena.available("Planner")
+check(available == false and tostring(why):find("in use", 1, true) ~= nil,
+	"a marked arena over a running one is refused before the chooser: " .. tostring(why))
+arena.clear_marks("Planner")
+mock.settings["replay.arena"] = "100,10,100,107,14,107"
+available, why = arena.available("Planner")
+check(available == false and tostring(why):find("in use", 1, true) ~= nil,
+	"a configured arena that is running is refused before the chooser")
+mock.settings["replay.arena"] = nil
 
 local entries = flag_entries()
 check(entries[session.id] ~= nil, "the arena is remembered in mod storage")
@@ -504,7 +535,7 @@ check(mock.liquids_updated == false, "still without starting liquid flow")
 print("=== a second viewer ===")
 ----------------------------------------------------------------------------
 
-local second = mock.add_player("Second", {pos = {x = 0, y = 0, z = 0}})
+local second = add_player("Second", {pos = {x = 0, y = 0, z = 0}})
 second.inventory = {main = {}}
 local joined = sessions.join(session, second)
 check(joined, "a second player joins")
@@ -541,6 +572,49 @@ check(watcher.meta["recorder_replay:stash"] == "", "and the stash is gone")
 check(near(watcher.pos.x, 0) and near(watcher.pos.y, 0), "the watcher is back where they started")
 
 ----------------------------------------------------------------------------
+print("=== recordings that cannot be read ===")
+----------------------------------------------------------------------------
+
+-- A file that is not SQLite at all.
+local garbage_path = world .. "/recordings/garbage-20240101T000000Z.sqlite"
+local garbage = assert(io.open(garbage_path, "wb"))
+garbage:write("this is not a database")
+garbage:close()
+local bad_session, bad_err = sessions.start(garbage_path, planner)
+check(bad_session == nil and tostring(bad_err):find("not a database", 1, true) ~= nil,
+	"a file that is not a database is refused: " .. tostring(bad_err))
+
+-- A file that carries the recording's identity but none of its tables. Every
+-- query against it raises, so it is refused before a session can be built.
+local crafted_path = world .. "/recordings/crafted-20240101T000000Z.sqlite"
+local crafted = assert(sqlite.open(crafted_path))
+crafted:exec(string.format("PRAGMA application_id = %d", common.APPLICATION_ID))
+crafted:exec(string.format("PRAGMA user_version = %d", common.SCHEMA_VERSION))
+crafted:close()
+bad_session, bad_err = sessions.start(crafted_path, planner)
+check(bad_session == nil and tostring(bad_err):find("cannot read", 1, true) ~= nil,
+	"a file with the identity but not the tables is refused: " .. tostring(bad_err))
+check(tostring(bad_err):find("missing", 1, true) ~= nil,
+	"and the error says what is missing")
+
+-- A recording that is complete but has no snapshot row: there is nothing to
+-- rebuild, and refusing it leaves no arena or flag behind.
+local stale_path = world .. "/recordings/stale-20260101T000000Z.sqlite"
+local stale_writer = dbmanager.new(sqlite)
+assert(stale_writer:open(stale_path))
+stale_writer:set_meta("recorder.name", "stale")
+stale_writer:add_event({stale_writer:next_id(), 0, 0, "recording_start", nil, nil,
+	nil, nil, nil, nil, nil, nil, nil})
+stale_writer:flush()
+stale_writer:close()
+local vms_before = #mock.vms
+bad_session, bad_err = sessions.start(stale_path, planner)
+check(bad_session == nil and tostring(bad_err):find("no snapshot", 1, true) ~= nil,
+	"a recording without a snapshot is refused: " .. tostring(bad_err))
+check(#mock.vms == vms_before, "and no arena is built for it")
+check(flag_count() == 0, "nor remembered")
+
+----------------------------------------------------------------------------
 print("=== a disconnect and a return ===")
 ----------------------------------------------------------------------------
 
@@ -566,9 +640,9 @@ check(watcher.pos.x == 4 and watcher.pos.y == 5, "where they were when they star
 print("=== several arenas at once ===")
 ----------------------------------------------------------------------------
 
-local starter = mock.add_player("Starter", {pos = {x = 0, y = 0, z = 0}})
+local starter = add_player("Starter", {pos = {x = 0, y = 0, z = 0}})
 starter.inventory = {main = {}}
-local third = mock.add_player("Third", {pos = {x = 0, y = 0, z = 0}})
+local third = add_player("Third", {pos = {x = 0, y = 0, z = 0}})
 third.inventory = {main = {}}
 
 mark(starter, STARTER_ARENA)

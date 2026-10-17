@@ -36,10 +36,15 @@ end
 ---@return table|nil, string?
 function reconstruct.load(rec)
 	local row
-	for candidate in rec.db:nrows(
-		"SELECT pos1_x, pos1_y, pos1_z, size_x, size_y, size_z, names, encoding, data " ..
-		"FROM Snapshot WHERE tick = 0") do
-		row = candidate
+	local queried, query_err = pcall(function()
+		for candidate in rec.db:nrows(
+			"SELECT pos1_x, pos1_y, pos1_z, size_x, size_y, size_z, names, encoding, data " ..
+			"FROM Snapshot WHERE tick = 0") do
+			row = candidate
+		end
+	end)
+	if not queried then
+		return nil, "cannot read this recording's snapshot: " .. tostring(query_err)
 	end
 	if not row then
 		return nil, "this recording has no snapshot; it cannot be rebuilt"

@@ -33,7 +33,7 @@ when there is none. Otherwise it lists every `.sqlite` file in the recording
 directory, newest first; selecting one and pressing *Watch* (or double-clicking
 it) starts the replay. The chosen recording's region is then checked against
 the arena: too small a box, or one already in use, keeps the chooser open with
-the reason. `/replay list` remains the plain-text listing.
+the reason shown in red. `/replay list` remains the plain-text listing.
 
 Every replay is watched in an arena. A player who starts one gets the arena
 their marks describe; a game may provide one instead (see *For a game*), and a

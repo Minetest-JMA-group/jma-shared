@@ -332,6 +332,17 @@ mock.settings["replay.arena"] = nil
 print("=== starting a replay in an arena ===")
 ----------------------------------------------------------------------------
 
+-- A recording with no snapshot row, for the chooser's failure path. Its name
+-- sorts before the fixture's, so the fixture stays first in the list.
+local stale_path = world .. "/recordings/aa_stale-20250101T000000Z.sqlite"
+local stale_writer = dbmanager.new(sqlite)
+assert(stale_writer:open(stale_path))
+stale_writer:set_meta("recorder.name", "stale")
+stale_writer:add_event({stale_writer:next_id(), 0, 0, "recording_start", nil, nil,
+	nil, nil, nil, nil, nil, nil, nil})
+stale_writer:flush()
+stale_writer:close()
+
 local planner = add_player("Planner", {pos = {x = 0, y = 0, z = 0}})
 local cmd = mock.chatcommands.replay
 local ok, message = cmd.func("Planner", "")
@@ -367,6 +378,25 @@ check(sessions.for_player("Watcher") == nil, "selecting a recording does not sta
 mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
 	{recordings = "DCL:99"})
 check(sessions.for_player("Watcher") == nil, "a double-click on nothing starts nothing")
+
+-- A start that fails keeps the chooser open with the reason in it, in red;
+-- it is not sent to chat, where the reopened form would hide it.
+local chats_before = #mock.chats
+mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
+	{recordings = "CHG:2"})  -- aa_stale, which has no snapshot
+mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
+	{watch = "Watch"})
+check(sessions.for_player("Watcher") == nil, "a recording that cannot start does not start")
+check(watcher.formspec and watcher.formspec.name == "recorder_replay:recordings",
+	"the chooser stays open")
+check(watcher.formspec and watcher.formspec.formspec:find("no snapshot", 1, true) ~= nil,
+	"with the reason in it")
+check(watcher.formspec and watcher.formspec.formspec:find("#FF5555", 1, true) ~= nil,
+	"as red text")
+check(#mock.chats == chats_before, "and not in chat")
+
+mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
+	{recordings = "CHG:1"})
 mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
 	{watch = "Watch"})
 check(sessions.for_player("Watcher") ~= nil, "the Watch button starts the selected recording")
@@ -603,16 +633,8 @@ check(bad_session == nil and tostring(bad_err):find("cannot read", 1, true) ~= n
 check(tostring(bad_err):find("missing", 1, true) ~= nil,
 	"and the error says what is missing")
 
--- A recording that is complete but has no snapshot row: there is nothing to
--- rebuild, and refusing it leaves no arena or flag behind.
-local stale_path = world .. "/recordings/stale-20260101T000000Z.sqlite"
-local stale_writer = dbmanager.new(sqlite)
-assert(stale_writer:open(stale_path))
-stale_writer:set_meta("recorder.name", "stale")
-stale_writer:add_event({stale_writer:next_id(), 0, 0, "recording_start", nil, nil,
-	nil, nil, nil, nil, nil, nil, nil})
-stale_writer:flush()
-stale_writer:close()
+-- The recording without a snapshot row, made for the chooser's failure path,
+-- is also refused when started through the API.
 local vms_before = #mock.vms
 bad_session, bad_err = sessions.start(stale_path, planner)
 check(bad_session == nil and tostring(bad_err):find("no snapshot", 1, true) ~= nil,

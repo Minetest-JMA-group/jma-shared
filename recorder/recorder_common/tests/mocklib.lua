@@ -577,6 +577,19 @@ function M.new(opts)
 	core.formspec_escape = function(text)
 		return tostring(text)
 	end
+	-- The engine's colour escape sequences, so a test can see the colour that
+	-- was asked for.
+	core.get_color_escape_sequence = function(color)
+		return string.char(0x1b) .. "(c@" .. tostring(color) .. ")"
+	end
+	core.colorize = function(color, message)
+		local code = core.get_color_escape_sequence(color)
+		local lines = {}
+		for line in (tostring(message) .. "\n"):gmatch("(.-)\n") do
+			lines[#lines + 1] = code .. line
+		end
+		return table.concat(lines, "\n") .. core.get_color_escape_sequence("#fff")
+	end
 	core.explode_scrollbar_event = function(value)
 		local kind, number = tostring(value):match("^(%a+):(%-?%d+)")
 		return {type = kind or "INV", value = tonumber(number)}

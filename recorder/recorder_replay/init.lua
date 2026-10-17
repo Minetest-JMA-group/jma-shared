@@ -125,10 +125,10 @@ controls.register(function(kind, player, extra)
 		local started, err = sessions.start(chosen.path, player)
 		if not started then
 			-- The recording or the arena could not be used; keep the list open
-			-- so another one can be picked.
-			core.chat_send_player(name, "Cannot watch " .. chosen.name .. ": " .. tostring(err))
+			-- with the reason in it so another one can be picked.
 			core.show_formspec(name, "recorder_replay:recordings",
-				controls.recordings_formspec(choice.files, choice.selected))
+				controls.recordings_formspec(choice.files, choice.selected,
+					"Cannot watch " .. chosen.name .. ": " .. tostring(err)))
 			return
 		end
 		choosing[name] = nil

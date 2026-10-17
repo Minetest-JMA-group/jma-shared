@@ -93,27 +93,58 @@ function controls.seek_formspec(session)
 	}, "")
 end
 
+-- Labels do not wrap, so an error is broken into lines that fit the form.
+local function wrap(text, width, max_lines)
+	local lines, line = {}, ""
+	for word in tostring(text):gmatch("%S+") do
+		if line == "" then
+			line = word
+		elseif #line + 1 + #word <= width then
+			line = line .. " " .. word
+		else
+			lines[#lines + 1] = line
+			line = word
+		end
+	end
+	if line ~= "" then lines[#lines + 1] = line end
+	if max_lines and #lines > max_lines then
+		local truncated = {}
+		for i = 1, max_lines do truncated[i] = lines[i] end
+		truncated[max_lines] = truncated[max_lines] .. "..."
+		lines = truncated
+	end
+	return table.concat(lines, "\n")
+end
+
 -- The recording chooser shown by a bare /replay. `files` is the list the
 -- session will be started from, so the selection is an index into a list the
 -- server already holds; a submission that names anything else is ignored.
+-- `error` is shown under the list in red; the form grows to make room for it.
 ---@param files table[]  -- {name = <file name>, path = <full path>}, newest first
 ---@param selected integer?
+---@param error string?   -- why the last choice could not be started
 ---@return string
-function controls.recordings_formspec(files, selected)
+function controls.recordings_formspec(files, selected, error)
 	local items = {}
 	for i, entry in ipairs(files) do
 		items[i] = core.formspec_escape(entry.name)
 	end
-	return table.concat({
+	local button_y = error and 6.65 or 5.6
+	local parts = {
 		"formspec_version[4]",
-		"size[10,6.8]",
+		error and "size[10,7.6]" or "size[10,6.8]",
 		"label[0.3,0.3;Watch a recording]",
 		"label[0.3,0.65;Select one and press Watch, or double-click it.]",
 		string.format("textlist[0.3,1.0;9.4,4.4;recordings;%s;%d;false]",
 			table.concat(items, ","), math.max(1, selected or 1)),
-		"button_exit[2.6,5.6;2,0.7;watch;Watch]",
-		"button_exit[5.4,5.6;2,0.7;cancel;Cancel]",
-	}, "")
+	}
+	if error then
+		parts[#parts + 1] = "label[0.3,5.4;" ..
+			core.formspec_escape(core.colorize("#FF5555", wrap(error, 78, 4))) .. "]"
+	end
+	parts[#parts + 1] = string.format("button_exit[2.6,%.2f;2,0.7;watch;Watch]", button_y)
+	parts[#parts + 1] = string.format("button_exit[5.4,%.2f;2,0.7;cancel;Cancel]", button_y)
+	return table.concat(parts, "")
 end
 
 -- The chooser shown by /replay join when more than one replay is running.

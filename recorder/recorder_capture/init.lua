@@ -17,12 +17,13 @@ local MAX_FAILURES = 10           -- failed commits in a row before giving up
 -- keys are its own.
 local META_PREFIX = "recorder."
 
--- The events that say what a recording is and where its holes are; switching
--- these off would leave a file that cannot be read for what it is.
+-- The events a recording cannot be read for what it is without: where it starts
+-- and stops, where its holes are, and the changes that keep its snapshot true.
 local MANDATORY_EVENTS = {
 	recording_start = true,
 	recording_stop = true,
 	write_error = true,
+	node_change = true,
 }
 
 -- Events that describe the recording rather than the region, and that must not
@@ -99,6 +100,7 @@ local state = {
 	sampled = {},        -- player id -> name, from the last pass through the region
 	known_ids = nil,     -- region flat index -> content id, what the recording knows
 	known_param2 = nil,  -- and the param2 that goes with it
+	pending_blocks = {}, -- mapblock changes waiting to be diffed, with their tick
 	prev = {},           -- player id -> last sample, for deriving acceleration
 	written = {},        -- player id -> last sample written, to spot no-ops
 	wield = {},          -- player id -> last wielded itemstring
@@ -423,7 +425,7 @@ record_event = function(ev)
 	if state.disabled[ev.type] then return end
 	local x, y, z = position_of(ev.pos)
 	dbmanager.add_event({
-		dbmanager.next_id(), state.tick, state.elapsed, ev.type,
+		dbmanager.next_id(), ev.tick or state.tick, ev.t or state.elapsed, ev.type,
 		player_id(ev.subject), player_id(ev.object),
 		x, y, z,
 		type(ev.node) == "string" and ev.node or nil,
@@ -758,6 +760,7 @@ local function abort_start(reason)
 	state.snapshot = nil
 	state.region = nil
 	state.known_ids, state.known_param2 = nil, nil
+	state.pending_blocks = {}
 	state.name, state.path = nil, nil
 end
 
@@ -882,6 +885,7 @@ recorder.start = function(record_name, region_arg)
 	state.prev, state.written, state.wield, state.joined = {}, {}, {}, {}
 	state.sampled = {}
 	state.known_ids, state.known_param2 = nil, nil
+	state.pending_blocks = {}
 	state.snapshot_budget = math.max(1,
 		math.floor(tonumber(core.settings:get("recorder.snapshot_budget")) or 20000))
 
@@ -916,6 +920,7 @@ recorder.stop = function(reason)
 		state.recording = false
 		state.region = nil
 		state.known_ids, state.known_param2 = nil, nil
+		state.pending_blocks = {}
 		state.sampled = {}
 		state.name, state.path = nil, nil
 		core.log("action", "[recorder] recording abandoned while snapshotting; the file is gone")
@@ -953,6 +958,7 @@ recorder.stop = function(reason)
 	state.region = nil
 	state.known_ids, state.known_param2 = nil, nil
 	state.pending_start = false
+	state.pending_blocks = {}
 	if ok and closed then return nil end
 	return tostring(err)
 end
@@ -1263,6 +1269,111 @@ hook("cheat", core.register_on_cheat, function(player, cheat)
 	})
 end)
 
+----------------------------------------------------------------------------
+-- Changes to the region's nodes
+----------------------------------------------------------------------------
+
+-- The engine calls this at most once per server step, with the mapblocks in
+-- which anything changed. The changes are collected here and diffed against the
+-- recording's known state in the next step: a node that differs becomes a
+-- node_change row. This is what catches changes no callback announces - an
+-- explosion, flowing water, an ABM, a mod's set_node - because it watches the
+-- world instead of asking mods to report.
+core.register_on_mapblocks_changed(function(modified_blocks, count)
+	if not (state.recording or state.snapshot) then return end
+	if not modified_blocks or not count or count == 0 then return end
+	state.pending_blocks[#state.pending_blocks + 1] = {
+		tick = state.tick,     -- the step the change belongs to, which may be
+		t = state.elapsed,     -- one before the step that diffs it
+		blocks = modified_blocks,
+	}
+end)
+
+-- Read one mapblock back and compare it with what the recording last knew. Only
+-- nodes that differ become rows; the block's nodes are addressed by arithmetic
+-- rather than by building a position table for each of the 4096 of them.
+local function diff_block(block, tick, t)
+	local reg = state.region
+	local size = region_module.size(reg)
+	local p2 = {x = block.x + 15, y = block.y + 15, z = block.z + 15}
+	local vm = core.get_voxel_manip(block, p2)
+	if not vm then return end
+	if not vm:read_from_map(block, p2) then
+		vm:close()
+		return
+	end
+	local emerged1, emerged2 = vm:get_emerged_area()
+	local data = vm:get_data()
+	local param2 = vm:get_param2_data()
+	vm:close()
+	local emerged_size = {
+		x = emerged2.x - emerged1.x + 1,
+		y = emerged2.y - emerged1.y + 1,
+		z = emerged2.z - emerged1.z + 1,
+	}
+
+	for z = 0, 15 do
+		local world_z = block.z + z
+		local dz = world_z - reg.pos1.z
+		if dz >= 0 and dz < size.z then
+			for y = 0, 15 do
+				local world_y = block.y + y
+				local dy = world_y - reg.pos1.y
+				if dy >= 0 and dy < size.y then
+					local row = dz * size.y * size.x + dy * size.x
+					for x = 0, 15 do
+						local world_x = block.x + x
+						local dx = world_x - reg.pos1.x
+						if dx >= 0 and dx < size.x then
+							local index = row + dx + 1
+							local lvm_index = (world_z - emerged1.z) * emerged_size.y * emerged_size.x
+								+ (world_y - emerged1.y) * emerged_size.x
+								+ (world_x - emerged1.x) + 1
+							local id = data[lvm_index]
+							local value = param2[lvm_index]
+							local old_id = state.known_ids[index]
+							local old_param2 = state.known_param2[index]
+							if id ~= old_id or value ~= old_param2 then
+								state.known_ids[index] = id
+								state.known_param2[index] = value
+								record_event({
+									type = "node_change",
+									tick = tick,
+									t = t,
+									pos = {x = world_x, y = world_y, z = world_z},
+									node = core.get_name_from_content_id(id),
+									param2 = value,
+									data = {
+										old_node = core.get_name_from_content_id(old_id),
+										old_param2 = old_param2,
+									},
+								})
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+local function process_block_changes()
+	local pending = state.pending_blocks
+	if #pending == 0 then return end
+	state.pending_blocks = {}
+	local block_min, block_max = region_module.blocks(state.region)
+	for _, entry in ipairs(pending) do
+		for hash in pairs(entry.blocks) do
+			local block = core.get_position_from_hash(hash)
+			if block and block.x >= block_min.x and block.x <= block_max.x
+				and block.y >= block_min.y and block.y <= block_max.y
+				and block.z >= block_min.z and block.z <= block_max.z then
+				diff_block(block, entry.tick, entry.t)
+			end
+		end
+	end
+end
+
 -- A region marked by someone who has gone is theirs no more.
 core.register_on_leaveplayer(function(player)
 	local name = player_name(player)
@@ -1299,6 +1410,7 @@ core.register_globalstep(function(dtime)
 	state.tick = state.tick + 1
 	state.elapsed = state.elapsed + dtime
 	observe_region(dtime)
+	process_block_changes()
 	maybe_flush()
 end)
 

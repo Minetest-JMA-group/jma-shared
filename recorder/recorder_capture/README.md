@@ -22,6 +22,9 @@ recording, not the game's map files.
 - **Self-contained**: the world inside the region is stored as a snapshot
   before the recording begins, so a replay does not need the original game's
   map files.
+- **World changes, without cooperation**: a changed mapblock is read back and
+  diffed, so explosions, flowing liquids, ABMs, node timers and a mod's own
+  `set_node` all land in the file as `node_change` rows.
 
 - Records actions with their **subject** (who did it) and **object** (whom it was
   done to), plus the position, node, item and any event-specific detail.
@@ -118,7 +121,7 @@ Settings are read when a recording starts, so a change applies to the next one.
 | `recorder.max_buffered` | `20000` | Rows buffered before a commit is forced early. `0` leaves the timing to `flush_interval` alone. |
 | `recorder.max_duration` | `0` | Stop the recording after this many seconds. `0` is no limit. |
 | `recorder.max_size_mb` | `0` | Stop the recording once the file reaches this size. `0` is no limit. |
-| `recorder.disabled_events` | empty | Comma-separated event types not to record, e.g. `chat, chatcommand, punch_node`. The recording's own markers (`recording_start`, `recording_stop`, `write_error`) cannot be disabled. |
+| `recorder.disabled_events` | empty | Comma-separated event types not to record, e.g. `chat, chatcommand, punch_node`. The recording's own markers (`recording_start`, `recording_stop`, `write_error`) and `node_change` cannot be disabled. |
 
 ## The recording file
 
@@ -183,6 +186,23 @@ finishes the recording is not active - events and samples are dropped exactly as
 they are when nothing is being recorded - and `/recorder status` reports the
 phase. Stopping during the phase abandons the recording and removes the file.
 
+### World changes
+
+The snapshot is kept true by watching the region, not by asking mods to report.
+The engine says which mapblocks changed, at most once per server step; the
+recorder reads those blocks back and compares them with what it last knew, and
+every node that differs becomes a `node_change` row carrying the node it became
+and, in `data`, what it was. That is what captures an explosion, a flowing
+liquid, an ABM, a node timer and a mod's own `set_node`, with no cooperation
+from any of them.
+
+The comparison is against the snapshot plus every change since, so the rows are
+exactly the difference between the snapshot and the world. A row is buffered one
+step after the step it belongs to, so its `id` can be later than that of other
+rows sharing its `tick`; the `tick` and `t` columns are what say when it
+happened. `node_change` cannot be switched off: a recording whose world drifts
+from its snapshot would be a recording of something else.
+
 ### Movement
 
 `id`, `tick`, `t`, `dtime`, `player_id`, `pos_x/y/z`, `pitch`, `yaw`,
@@ -246,6 +266,7 @@ SQLite's JSON functions can dig into it, e.g.
 | `chatcommand` | player | – | `pos` | `command`, `params` |
 | `protection_violation` | player | – | `pos` | – |
 | `cheat` | player | – | `pos` | `cheat` |
+| `node_change` | – | – | `pos`, `node` (what it became), `param2` | `old_node`, `old_param2` |
 
 `reason` is a `PlayerHPChangeReason` with its ObjectRef replaced by the name of the
 player it points at: `type`, `custom_type`, `from`, `object`, `node`, `node_pos`.
@@ -346,13 +367,12 @@ rather than reporting a clean stop, and the `-wal` file has to travel with the
   has no global callback; hooking it would mean wrapping every item definition of
   every mod, so it is not done. Digging, placing, eating and crafting are covered
   because they do have one.
-- **World changes that no player caused**, unless they come through the callbacks
-  above: TNT explosions (which remove nodes without digging them), liquid flow,
-  ABMs, node timers, and any `set_node` a mod does on its own. The recording is a
-  record of what players did, not a full world diff.
-- **Node inventories.** Chests and other node metadata inventories can only be
-  watched per node definition, not globally. Player inventories are covered
-  (`inventory_*` events, plus the snapshot in `join`).
+- **Entities.** Mobs, item drops and projectiles are not recorded; the recording
+  follows players and the region's nodes, not other objects.
+- **Node metadata and inventories.** The node's name and param2 are recorded, but
+  not the metadata behind it: chest contents, sign text and a node timer's state
+  are not in the file. Changes to them are noticed by the mapblock callback, but
+  a replay cannot put them back.
 - **Formspec and GUI input**, and anything else a mod does without a callback.
 - **Login and IP data.** `ipdb` is the place for who connected from where.
 

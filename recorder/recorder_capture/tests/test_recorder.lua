@@ -890,6 +890,50 @@ rdb:close()
 mock.remove_player("Outsider")
 
 ----------------------------------------------------------------------------
+print("=== changes to the nodes ===")
+----------------------------------------------------------------------------
+
+mock.set_node({x = 5, y = 5, z = 5}, {name = "default:stone"})
+check(start_recording("changes") == nil, "a recording starts")
+local changes_path = recorder.get_recording_path()
+mock.step(0.1)      -- tick 1
+
+-- A change inside the region, announced by the engine's mapblock callback.
+local inside_hash = core.hash_node_position({x = 5, y = 5, z = 5})
+mock.set_node({x = 5, y = 5, z = 5}, {name = "default:dirt", param2 = 3})
+mock.fire("register_on_mapblocks_changed", {[inside_hash] = true}, 1)
+mock.step(0.1)      -- tick 2: the change is diffed and tagged with tick 1
+
+-- A change outside the region: its block is not even read.
+local outside_hash = core.hash_node_position({x = 500, y = 5, z = 5})
+mock.set_node({x = 500, y = 5, z = 5}, {name = "default:stone"})
+mock.fire("register_on_mapblocks_changed", {[outside_hash] = true}, 1)
+mock.step(0.1)      -- tick 3
+
+-- A node removed.
+mock.set_node({x = 5, y = 5, z = 5}, {name = "air"})
+mock.fire("register_on_mapblocks_changed", {[inside_hash] = true}, 1)
+mock.step(0.1)      -- tick 4
+
+check(recorder.stop() == nil, "it stops")
+
+local cdb = open_recording(changes_path)
+local changes = rows(cdb, "SELECT * FROM Events WHERE type = 'node_change' ORDER BY id")
+check(#changes == 2, "only changes inside the region are recorded (got " .. #changes .. ")")
+check(changes[1].tick == 1, "a change carries the tick it happened on")
+check(changes[1].pos_x == 5 and changes[1].pos_y == 5 and changes[1].pos_z == 5,
+	"and the position")
+check(changes[1].node == "default:dirt" and changes[1].param2 == 3, "the node it became")
+check(changes[1].data:find('"old_node":"default:stone"', 1, true) ~= nil,
+	"and what it was: " .. tostring(changes[1].data))
+check(changes[2].node == "air", "removal is recorded as a change to air")
+check(changes[2].data:find('"old_node":"default:dirt"', 1, true) ~= nil,
+	"with the removed node's name")
+check(value(cdb, "SELECT COUNT(*) FROM Events WHERE type = 'node_change' AND pos_x = 500") == 0,
+	"a change outside the region leaves no row")
+cdb:close()
+
+----------------------------------------------------------------------------
 print("=== marking a region by hand ===")
 ----------------------------------------------------------------------------
 

@@ -137,36 +137,51 @@ function controls.seek_formspec(session)
 	}, "")
 end
 
--- Labels do not wrap, so an error is broken into lines that fit the form. The
--- width is deliberately conservative: clients do not all use the same font,
--- and the text is laid out as one label per line so the vertical positions do
--- not depend on how a multi-line label is centred. A single word longer than
--- the line (a long recording name) is broken rather than allowed to overflow.
+-- Width of one character in formspec units. The client has no API for the
+-- formspec font's metrics, so this is measured; ipdb's merge GUI uses the same
+-- figure to work out how much text a window holds.
+local CHAR_W = 0.15
+
+-- The label spans from x = 0.3 to the right edge of a 10-unit form.
+local LABEL_WIDTH = 9.4
+
+-- Split prose into lines that fit `width` form units, on word boundaries
+-- where possible and inside a word when a single token is too long (a long
+-- recording name has nothing else to break on). Each returned line is drawn
+-- as its own label, so the vertical layout does not depend on how a client
+-- centres a multi-line label.
 ---@param text string
----@param width integer
+---@param width number
 ---@param max_lines integer?
 ---@return string[]
 local function wrap(text, width, max_lines)
-	local words = {}
-	for word in tostring(text):gmatch("%S+") do
-		while #word > width do
-			words[#words + 1] = word:sub(1, width)
-			word = word:sub(width + 1)
-		end
-		if word ~= "" then words[#words + 1] = word end
-	end
-	local lines, line = {}, ""
-	for _, word in ipairs(words) do
-		if line == "" then
-			line = word
-		elseif #line + 1 + #word <= width then
-			line = line .. " " .. word
-		else
+	local budget = math.max(20, math.floor(width / CHAR_W))
+	local lines = {}
+	local line = ""
+	local function push()
+		if line ~= "" then
 			lines[#lines + 1] = line
-			line = word
+			line = ""
 		end
 	end
-	if line ~= "" then lines[#lines + 1] = line end
+	for word in tostring(text):gmatch("%S+") do
+		while #word > budget do
+			push()
+			lines[#lines + 1] = word:sub(1, budget)
+			word = word:sub(budget + 1)
+		end
+		if word ~= "" then
+			if line == "" then
+				line = word
+			elseif #line + 1 + #word <= budget then
+				line = line .. " " .. word
+			else
+				push()
+				line = word
+			end
+		end
+	end
+	push()
 	if max_lines and #lines > max_lines then
 		local truncated = {}
 		for i = 1, max_lines do truncated[i] = lines[i] end
@@ -189,7 +204,7 @@ function controls.recordings_formspec(files, selected, error)
 	for i, entry in ipairs(files) do
 		items[i] = core.formspec_escape(entry.name)
 	end
-	local lines = error and wrap(error, 60, 4) or {}
+	local lines = error and wrap(error, LABEL_WIDTH, 5) or {}
 	local first_line_y, line_height = 5.7, 0.45
 	local button_y = 5.6
 	if #lines > 0 then

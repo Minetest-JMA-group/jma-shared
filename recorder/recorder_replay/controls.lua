@@ -137,10 +137,26 @@ function controls.seek_formspec(session)
 	}, "")
 end
 
--- Labels do not wrap, so an error is broken into lines that fit the form.
+-- Labels do not wrap, so an error is broken into lines that fit the form. The
+-- width is deliberately conservative: clients do not all use the same font,
+-- and the text is laid out as one label per line so the vertical positions do
+-- not depend on how a multi-line label is centred. A single word longer than
+-- the line (a long recording name) is broken rather than allowed to overflow.
+---@param text string
+---@param width integer
+---@param max_lines integer?
+---@return string[]
 local function wrap(text, width, max_lines)
-	local lines, line = {}, ""
+	local words = {}
 	for word in tostring(text):gmatch("%S+") do
+		while #word > width do
+			words[#words + 1] = word:sub(1, width)
+			word = word:sub(width + 1)
+		end
+		if word ~= "" then words[#words + 1] = word end
+	end
+	local lines, line = {}, ""
+	for _, word in ipairs(words) do
 		if line == "" then
 			line = word
 		elseif #line + 1 + #word <= width then
@@ -157,13 +173,13 @@ local function wrap(text, width, max_lines)
 		truncated[max_lines] = truncated[max_lines] .. "..."
 		lines = truncated
 	end
-	return table.concat(lines, "\n")
+	return lines
 end
 
 -- The recording chooser shown by a bare /replay. `files` is the list the
 -- session will be started from, so the selection is an index into a list the
 -- server already holds; a submission that names anything else is ignored.
--- `error` is shown under the list in red; the form grows to make room for it.
+-- `error` is shown under the list in red, and the form grows to make room.
 ---@param files table[]  -- {name = <file name>, path = <full path>}, newest first
 ---@param selected integer?
 ---@param error string?   -- why the last choice could not be started
@@ -173,18 +189,24 @@ function controls.recordings_formspec(files, selected, error)
 	for i, entry in ipairs(files) do
 		items[i] = core.formspec_escape(entry.name)
 	end
-	local button_y = error and 6.65 or 5.6
+	local lines = error and wrap(error, 60, 4) or {}
+	local first_line_y, line_height = 5.7, 0.45
+	local button_y = 5.6
+	if #lines > 0 then
+		button_y = first_line_y + (#lines - 1) * line_height + 0.45
+	end
 	local parts = {
 		"formspec_version[4]",
-		error and "size[10,7.6]" or "size[10,6.8]",
+		string.format("size[10,%.2f]", button_y + 1.2),
 		"label[0.3,0.3;Watch a recording]",
 		"label[0.3,0.65;Select one and press Watch, or double-click it.]",
 		string.format("textlist[0.3,1.0;9.4,4.4;recordings;%s;%d;false]",
 			table.concat(items, ","), math.max(0, selected or 0)),
 	}
-	if error then
-		parts[#parts + 1] = "label[0.3,5.4;" ..
-			core.formspec_escape(core.colorize("#FF5555", wrap(error, 78, 4))) .. "]"
+	for i, line in ipairs(lines) do
+		parts[#parts + 1] = string.format("label[0.3,%.2f;%s]",
+			first_line_y + (i - 1) * line_height,
+			core.formspec_escape(core.colorize("#FF5555", line)))
 	end
 	parts[#parts + 1] = string.format("button_exit[2.6,%.2f;2,0.7;watch;Watch]", button_y)
 	parts[#parts + 1] = string.format("button_exit[5.4,%.2f;2,0.7;cancel;Cancel]", button_y)

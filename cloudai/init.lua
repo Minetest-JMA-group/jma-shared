@@ -134,7 +134,9 @@ local function refresh_models()
 	model_fetch_lock = model_fetch_lock + 1
 	http_api.fetch(request, callback)
 end
-refresh_models()
+if working then
+	refresh_models()
+end
 
 local function send_debug(context, label, data)
 	if not context._debug or not is_xmpp then return end
@@ -522,6 +524,9 @@ core.register_chatcommand("cloudai", {
 			return true, "New timeout: "..tostring(timeout)
 		end
 		if cmd == "balance" then
+			if not working then
+				return false, "cloudai isn't properly configured to make HTTP requests"
+			end
 			local callback = function(response)
 				balance_fetch_lock = balance_fetch_lock - 1
 				local ok, parsed = parse_response(response)
@@ -596,6 +601,9 @@ core.register_chatcommand("cloudai", {
 				end
 			end
 			if subcommand == "refresh" then
+				if not working then
+					return false, "cloudai isn't properly configured to make HTTP requests"
+				end
 				if model_fetch_lock > 0 then
 					return true, "A model list refresh is already in progress"
 				end

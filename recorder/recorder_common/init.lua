@@ -161,3 +161,4 @@ function recorder_common.open_read_only(path, sqlite)
 end
 
 recorder_common.snapshot = dofile(core.get_modpath("recorder_common") .. "/snapshot.lua")
+recorder_common.region = dofile(core.get_modpath("recorder_common") .. "/region.lua")

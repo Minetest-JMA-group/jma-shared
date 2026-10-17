@@ -23,5 +23,6 @@ run() {
 }
 
 run "test_snapshot (the snapshot body codec)" test_snapshot.lua
+run "test_region (the region arithmetic)" test_region.lua
 run "test_common (paths, names, game hooks, read-only access)" test_common.lua
 echo "ALL TESTS PASSED"

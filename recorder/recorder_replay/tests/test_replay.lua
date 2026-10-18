@@ -1023,4 +1023,12 @@ check(planner.formspec and planner.formspec.formspec:find("Cannot delete", 1, tr
 	"and the reason is in the list")
 recorder_replay.end_session(in_use.id, "test")
 
+-- The chooser does not offer a recording capture is still writing.
+recorder = {list = function() return {{path = fixture_path}} end}
+cmd.func("Planner", "")
+deferred_form()
+check(planner.formspec and planner.formspec.formspec:find("fixture-", 1, true) == nil,
+	"a recording still being made is not offered")
+recorder = nil
+
 print(("\n%d checks passed"):format(checks))

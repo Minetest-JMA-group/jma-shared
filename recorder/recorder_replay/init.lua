@@ -397,6 +397,26 @@ local function list_recordings()
 	return out, dir
 end
 
+-- Recordings still being written are not offered for watching: a recording is
+-- something to watch when it is finished, and one that is still taking its
+-- snapshot has no snapshot row to rebuild from yet. Capture knows which files
+-- those are; when it is not loaded there is nothing to ask, and the file list
+-- is what it is.
+---@return table[], string
+local function available_recordings()
+	local files, dir = all_recordings()
+	if type(recorder) ~= "table" or not recorder.list then return files, dir end
+	local active = {}
+	for _, entry in ipairs(recorder.list()) do
+		if entry.path then active[entry.path] = true end
+	end
+	local out = {}
+	for _, entry in ipairs(files) do
+		if not active[entry.path] then out[#out + 1] = entry end
+	end
+	return out, dir
+end
+
 core.register_chatcommand("replay", {
 	description = "Play a recording back",
 	params = "[list | join [id] | leave | end <id> | status | pos1 | pos2 | unset]",
@@ -421,7 +441,7 @@ core.register_chatcommand("replay", {
 					"there is no arena for this replay: mark one with /replay pos1 and /replay pos2," ..
 					" ask the game to provide one, or set replay.arena"
 			end
-			local files, dir = all_recordings()
+			local files, dir = available_recordings()
 			if #files == 0 then
 				return false, "no recordings in " .. dir
 			end

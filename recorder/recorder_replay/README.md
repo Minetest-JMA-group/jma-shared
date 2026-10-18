@@ -130,9 +130,13 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
 
 ## A recording that is still being made
 
-The file is opened read-only, and WAL lets a reader see committed rows, so a
-live recording can be watched too. Its length is whatever it was when the replay
-started, and only the rows it had then are followed.
+The file is opened read-only, and WAL lets a reader see committed rows, so the
+replay code can read a live recording without blocking the writer; its length
+is whatever it was when the replay started. The chooser, however, leaves out
+recordings that capture is still making (when capture is loaded and can say
+which they are): a recording is meant to be watched when it is done, and a file
+that is still taking its snapshot has nothing to rebuild from yet.
+`/replay list` still shows every file, including the one being written.
 
 ## Settings
 

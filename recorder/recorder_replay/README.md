@@ -35,6 +35,11 @@ it) starts the replay. The chosen recording's region is then checked against
 the arena: too small a box, or one already in use, keeps the chooser open with
 the reason shown in red. `/replay list` remains the plain-text listing.
 
+A player with the `server` privilege also gets a **Delete** button in the
+chooser. It asks for confirmation, removes the recording file and its
+write-ahead sidecars, and refuses a recording that is being watched or is
+still being recorded.
+
 Every replay is watched in an arena. A player who starts one gets the arena
 their marks describe; a game may provide one instead (see *For a game*), and a
 server with neither falls back to the `replay.arena` setting. An arena must be

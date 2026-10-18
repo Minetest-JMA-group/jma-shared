@@ -96,8 +96,46 @@ end
 -- The recording chooser, per player: the file list the formspec was built from
 -- and the index selected in it. Keeping the list here means a submission can
 -- only name a recording the server actually offered, and adds no path of its
--- own.
+-- own. `deleting` holds the recording a confirmation is open for.
 local choosing = {}
+local deleting = {}
+
+-- Deleting a recording touches the server's files, so it needs the privilege
+-- that owns them, not just the one for watching them.
+local function can_delete_recordings(name)
+	return core.check_player_privs(name, {server = true})
+end
+
+local function recording_in_use(path)
+	for _, session in ipairs(sessions.list()) do
+		if session.path == path then
+			return "it is being watched; leave the replay first"
+		end
+	end
+	-- Capture may not be loaded on every server; when it is, it knows which
+	-- files are still being written.
+	if type(recorder) == "table" and recorder.list then
+		for _, entry in ipairs(recorder.list()) do
+			if entry.path == path then
+				return "it is still being recorded; stop the recording first"
+			end
+		end
+	end
+	return nil
+end
+
+local function delete_recording_files(path)
+	local removed, err = os.remove(path)
+	if not removed and recorder_common.file_exists(path) then
+		return nil, tostring(err)
+	end
+	-- The write-ahead sidecars belong to the recording; a stale one would only
+	-- be litter next to a file that no longer exists.
+	for _, suffix in ipairs({"-wal", "-shm"}) do
+		os.remove(path .. suffix)
+	end
+	return true
+end
 
 -- A formspec shown from inside an input callback - a chat command, an item use
 -- - can be delivered the very keypress or click that triggered it, and the
@@ -115,7 +153,8 @@ end
 local function show_recording_chooser(name, choice, error)
 	show_formspec_later(name, "recorder_replay:recordings", function()
 		if choosing[name] ~= choice then return nil end
-		return controls.recordings_formspec(choice.files, choice.selected, error)
+		return controls.recordings_formspec(choice.files, choice.selected, error,
+			can_delete_recordings(name))
 	end)
 end
 
@@ -139,6 +178,31 @@ controls.register(function(kind, player, extra)
 				return
 			end
 			start_now = true
+		elseif extra and extra.delete then
+			if not choice.selected then
+				show_recording_chooser(name, choice, "Choose a recording first.")
+				return
+			end
+			if not can_delete_recordings(name) then
+				show_recording_chooser(name, choice, "You do not have the server privilege.")
+				return
+			end
+			local chosen = choice.files[choice.selected]
+			if not chosen then return end
+			deleting[name] = {
+				choice = choice,
+				entry = chosen,
+				path = chosen.path,
+				name = chosen.name,
+			}
+			-- The destructive button is the first one on the confirmation, so
+			-- the form is shown only after this click has been handled.
+			show_formspec_later(name, "recorder_replay:delete", function()
+				local current = deleting[name]
+				if not current or choosing[name] ~= current.choice then return nil end
+				return controls.delete_formspec(chosen.name)
+			end)
+			return
 		elseif extra and extra.key_enter then
 			-- The Enter that submitted the command that opened the form can
 			-- reach the form too; it is not a click.
@@ -146,6 +210,7 @@ controls.register(function(kind, player, extra)
 			return
 		elseif extra and (extra.quit or extra.cancel) then
 			choosing[name] = nil
+			deleting[name] = nil
 			return
 		end
 		if not start_now then return end
@@ -160,7 +225,61 @@ controls.register(function(kind, player, extra)
 			return
 		end
 		choosing[name] = nil
+		deleting[name] = nil
 		core.close_formspec(name, "recorder_replay:recordings")
+		return
+	end
+
+	if kind == "delete_confirm" then
+		local pending = deleting[name]
+		if not pending then return end
+		if extra and extra.confirm then
+			if not can_delete_recordings(name) then
+				deleting[name] = nil
+				core.close_formspec(name, "recorder_replay:delete")
+				return
+			end
+			local reason = recording_in_use(pending.path)
+			if not reason then
+				local ok, err = delete_recording_files(pending.path)
+				if not ok then reason = tostring(err) end
+			end
+			deleting[name] = nil
+			if reason then
+				if choosing[name] == pending.choice then
+					show_recording_chooser(name, pending.choice,
+						"Cannot delete " .. pending.name .. ": " .. tostring(reason))
+				end
+				return
+			end
+			local choice = pending.choice
+			if choosing[name] == choice then
+				for i, entry in ipairs(choice.files) do
+					if entry == pending.entry then
+						table.remove(choice.files, i)
+						break
+					end
+				end
+				choice.selected = nil
+			end
+			core.chat_send_player(name, "Deleted " .. pending.name .. ".")
+			if choosing[name] == choice then
+				if #choice.files == 0 then
+					choosing[name] = nil
+					core.close_formspec(name, "recorder_replay:recordings")
+				else
+					show_recording_chooser(name, choice)
+				end
+			end
+			return
+		end
+		if extra and (extra.cancel or extra.quit) then
+			deleting[name] = nil
+			if choosing[name] == pending.choice then
+				show_recording_chooser(name, pending.choice)
+			end
+			return
+		end
 		return
 	end
 
@@ -235,6 +354,7 @@ end)
 
 core.register_on_leaveplayer(function(player)
 	choosing[player:get_player_name()] = nil
+	deleting[player:get_player_name()] = nil
 	sessions.on_disconnect(player)
 end)
 
@@ -306,6 +426,7 @@ core.register_chatcommand("replay", {
 				return false, "no recordings in " .. dir
 			end
 			choosing[name] = {files = files, selected = nil}
+			deleting[name] = nil
 			show_recording_chooser(name, choosing[name])
 			return true
 		end

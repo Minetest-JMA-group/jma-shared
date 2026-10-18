@@ -401,6 +401,8 @@ check(watcher.formspec and watcher.formspec.formspec:find("fixture-", 1, true) ~
 	"the recordings in the directory are listed")
 check(watcher.formspec and watcher.formspec.formspec:find(";0;", 1, true) ~= nil,
 	"with nothing selected yet")
+check(watcher.formspec and watcher.formspec.formspec:find(";delete;", 1, true) == nil,
+	"a replay-only player gets no Delete button")
 
 -- A client can submit any form name it likes; the privilege is what makes the
 -- submission trustworthy.
@@ -916,5 +918,109 @@ check(planner.inventory.main == nil or planner.inventory.main[7] == nil
 	or planner.inventory.main[7] == "", "so no lighting switch is offered")
 recorder_replay.end_session(dark_session.id, "test")
 check(sessions.for_player("Planner") == nil, "and it ends cleanly")
+
+----------------------------------------------------------------------------
+print("=== deleting a recording ===")
+----------------------------------------------------------------------------
+
+local DELETE_NAME = "zz_delete_me-20250101T000000Z.sqlite"
+local DELETE_PATH = world .. "/recordings/" .. DELETE_NAME
+local delete_file = assert(io.open(DELETE_PATH, "wb"))
+delete_file:write("a file that only has to be listed and removed")
+delete_file:close()
+local delete_wal = assert(io.open(DELETE_PATH .. "-wal", "wb"))
+delete_wal:write("wal")
+delete_wal:close()
+
+local function chooser_index(file_name)
+	local names = {}
+	for _, name in ipairs(core.get_dir_list(world .. "/recordings", false) or {}) do
+		if name:sub(-7) == ".sqlite" then names[#names + 1] = name end
+	end
+	table.sort(names, function(a, b) return a > b end)
+	for i, name in ipairs(names) do
+		if name == file_name then return i end
+	end
+	return nil
+end
+
+local DELETE_ARENA = box(900, 90, 900, 907, 94, 907)
+mark(planner, DELETE_ARENA)
+planner.pos = {x = 0, y = 0, z = 0}
+planner.privs.server = true
+
+local ok, message = cmd.func("Planner", "")
+check(ok, "a chooser opens for the delete test: " .. tostring(message))
+deferred_form()
+check(planner.formspec and planner.formspec.formspec:find(";delete;", 1, true) ~= nil,
+	"a server-privileged player gets a Delete button")
+
+local delete_index = chooser_index(DELETE_NAME)
+check(delete_index ~= nil, "the test recording is in the list")
+mock.fire("register_on_player_receive_fields", planner, "recorder_replay:recordings",
+	{recordings = "CHG:" .. delete_index})
+mock.fire("register_on_player_receive_fields", planner, "recorder_replay:recordings",
+	{delete = "Delete"})
+deferred_form()
+check(planner.formspec and planner.formspec.name == "recorder_replay:delete",
+	"Delete asks for confirmation")
+check(planner.formspec and planner.formspec.formspec:find(DELETE_NAME, 1, true) ~= nil,
+	"naming the recording")
+
+mock.fire("register_on_player_receive_fields", planner, "recorder_replay:delete",
+	{cancel = "Cancel", quit = "true"})
+deferred_form()
+check(planner.formspec and planner.formspec.name == "recorder_replay:recordings",
+	"Cancel returns to the list")
+check(recorder_common.file_exists(DELETE_PATH), "and the file is still there")
+
+delete_index = chooser_index(DELETE_NAME)
+mock.fire("register_on_player_receive_fields", planner, "recorder_replay:recordings",
+	{recordings = "CHG:" .. delete_index})
+mock.fire("register_on_player_receive_fields", planner, "recorder_replay:recordings",
+	{delete = "Delete"})
+deferred_form()
+mock.fire("register_on_player_receive_fields", planner, "recorder_replay:delete",
+	{confirm = "Delete", quit = "true"})
+deferred_form()
+check(not recorder_common.file_exists(DELETE_PATH), "Delete removes the recording")
+check(not recorder_common.file_exists(DELETE_PATH .. "-wal"), "and its write-ahead sidecar")
+check(planner.formspec and planner.formspec.name == "recorder_replay:recordings",
+	"and the list comes back")
+check(planner.formspec and planner.formspec.formspec:find("zz_delete_me", 1, true) == nil,
+	"without the deleted file")
+check(#mock.chats > 0 and mock.chats[#mock.chats].message:find("Deleted", 1, true) ~= nil,
+	"and the player is told")
+
+planner.privs.server = nil
+cmd.func("Planner", "")
+deferred_form()
+check(planner.formspec and planner.formspec.formspec:find(";delete;", 1, true) == nil,
+	"without the server privilege there is no Delete button")
+planner.privs.server = true
+
+-- A recording a session is reading cannot be deleted.
+local IN_USE_ARENA = box(950, 90, 950, 957, 94, 957)
+mark(watcher, IN_USE_ARENA)
+watcher.pos = {x = 0, y = 0, z = 0}
+local in_use = sessions.start(fixture_path, watcher)
+check(in_use ~= nil, "a session opens on the fixture")
+cmd.func("Planner", "")
+deferred_form()
+local fixture_name = fixture_path:match("([^/]+)$")
+local fixture_index = chooser_index(fixture_name)
+check(fixture_index ~= nil, "the watched recording is in the list")
+mock.fire("register_on_player_receive_fields", planner, "recorder_replay:recordings",
+	{recordings = "CHG:" .. fixture_index})
+mock.fire("register_on_player_receive_fields", planner, "recorder_replay:recordings",
+	{delete = "Delete"})
+deferred_form()
+mock.fire("register_on_player_receive_fields", planner, "recorder_replay:delete",
+	{confirm = "Delete", quit = "true"})
+deferred_form()
+check(recorder_common.file_exists(fixture_path), "a recording being watched is not deleted")
+check(planner.formspec and planner.formspec.formspec:find("Cannot delete", 1, true) ~= nil,
+	"and the reason is in the list")
+recorder_replay.end_session(in_use.id, "test")
 
 print(("\n%d checks passed"):format(checks))

@@ -110,6 +110,8 @@ function controls.register(handle)
 			handle("session_choice", player, fields)
 		elseif formname == "recorder_replay:recordings" then
 			handle("recording_choice", player, fields)
+		elseif formname == "recorder_replay:delete" then
+			handle("delete_confirm", player, fields)
 		end
 	end)
 end
@@ -195,11 +197,14 @@ end
 -- session will be started from, so the selection is an index into a list the
 -- server already holds; a submission that names anything else is ignored.
 -- `error` is shown under the list in red, and the form grows to make room.
+-- `can_delete` adds the delete control, for a player the server trusts with
+-- its files.
 ---@param files table[]  -- {name = <file name>, path = <full path>}, newest first
 ---@param selected integer?
 ---@param error string?   -- why the last choice could not be started
+---@param can_delete boolean?
 ---@return string
-function controls.recordings_formspec(files, selected, error)
+function controls.recordings_formspec(files, selected, error, can_delete)
 	local items = {}
 	for i, entry in ipairs(files) do
 		items[i] = core.formspec_escape(entry.name)
@@ -223,9 +228,43 @@ function controls.recordings_formspec(files, selected, error)
 			first_line_y + (i - 1) * line_height,
 			core.formspec_escape(core.colorize("#FF5555", line)))
 	end
-	parts[#parts + 1] = string.format("button_exit[2.6,%.2f;2,0.7;watch;Watch]", button_y)
-	parts[#parts + 1] = string.format("button_exit[5.4,%.2f;2,0.7;cancel;Cancel]", button_y)
+	if can_delete then
+		parts[#parts + 1] = string.format("button[0.8,%.2f;2,0.7;delete;Delete]", button_y)
+		parts[#parts + 1] = string.format("button_exit[4.0,%.2f;2,0.7;watch;Watch]", button_y)
+		parts[#parts + 1] = string.format("button_exit[7.2,%.2f;2,0.7;cancel;Cancel]", button_y)
+	else
+		parts[#parts + 1] = string.format("button_exit[2.6,%.2f;2,0.7;watch;Watch]", button_y)
+		parts[#parts + 1] = string.format("button_exit[5.4,%.2f;2,0.7;cancel;Cancel]", button_y)
+	end
 	return table.concat(parts, "")
+end
+
+-- The confirmation shown before a recording is deleted. Its first button is
+-- the destructive one, so it is always opened a moment after the click that
+-- asked for it (the click must not land on Delete here).
+---@param name string  -- the recording file's name
+---@return string
+function controls.delete_formspec(name)
+	local name_lines = wrap(name, LABEL_WIDTH, 2)
+	local y = 0.8
+	local name_parts = {}
+	for _, line in ipairs(name_lines) do
+		name_parts[#name_parts + 1] = string.format("label[0.3,%.2f;%s]", y,
+			core.formspec_escape(line))
+		y = y + 0.45
+	end
+	local warning_y = y + 0.05
+	local button_y = warning_y + 0.8
+	return table.concat({
+		"formspec_version[4]",
+		string.format("size[10,%.2f]", button_y + 1.2),
+		"label[0.3,0.3;Delete this recording?]",
+		table.concat(name_parts, ""),
+		string.format("label[0.3,%.2f;The file is removed from disk and cannot be recovered.]",
+			warning_y),
+		string.format("button_exit[1.6,%.2f;2,0.7;confirm;Delete]", button_y),
+		string.format("button_exit[5.4,%.2f;2,0.7;cancel;Cancel]", button_y),
+	}, "")
 end
 
 -- The chooser shown by /replay join when more than one replay is running.

@@ -519,23 +519,25 @@ function M.new(opts)
 		return true
 	end
 
-	-- A block hash that can be undone, for the mapblock-changed callback.
-	local BLOCK_BIAS = 512
+	-- The engine's hash is a plain unique encoding of a position, and the
+	-- mapblock callback hashes mapblock positions (in mapblock units). The
+	-- mock does the same, so a hash handed to the callback is decoded as-is.
+	local HASH_BIAS = 32768
 	core.hash_node_position = function(pos)
-		local bx = math.floor(pos.x / 16) + BLOCK_BIAS
-		local by = math.floor(pos.y / 16) + BLOCK_BIAS
-		local bz = math.floor(pos.z / 16) + BLOCK_BIAS
-		return (bx * 1024 + by) * 1024 + bz
+		local x = math.floor(pos.x) + HASH_BIAS
+		local y = math.floor(pos.y) + HASH_BIAS
+		local z = math.floor(pos.z) + HASH_BIAS
+		return (x * 65536 + y) * 65536 + z
 	end
 	core.get_position_from_hash = function(hash)
-		local bz = hash % 1024
-		hash = math.floor(hash / 1024)
-		local by = hash % 1024
-		local bx = math.floor(hash / 1024)
+		local z = hash % 65536
+		hash = math.floor(hash / 65536)
+		local y = hash % 65536
+		local x = math.floor(hash / 65536)
 		return {
-			x = (bx - BLOCK_BIAS) * 16,
-			y = (by - BLOCK_BIAS) * 16,
-			z = (bz - BLOCK_BIAS) * 16,
+			x = x - HASH_BIAS,
+			y = y - HASH_BIAS,
+			z = z - HASH_BIAS,
 		}
 	end
 

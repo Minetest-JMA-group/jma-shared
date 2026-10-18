@@ -130,6 +130,17 @@ local function value(db, sql)
 	return result
 end
 
+-- The engine's mapblock callback hands out the positions of the changed
+-- mapblocks in mapblock units (a block index), not the node-space base corner.
+-- Tests fire the callback the way the engine does.
+local function block_hash(pos)
+	return core.hash_node_position({
+		x = math.floor(pos.x / 16),
+		y = math.floor(pos.y / 16),
+		z = math.floor(pos.z / 16),
+	})
+end
+
 ----------------------------------------------------------------------------
 print("=== the API exists without a recording ===")
 ----------------------------------------------------------------------------
@@ -931,13 +942,13 @@ local changes_path = recorder.get_recording_path()
 mock.step(0.1)      -- tick 1
 
 -- A change inside the region, announced by the engine's mapblock callback.
-local inside_hash = core.hash_node_position({x = 5, y = 5, z = 5})
+local inside_hash = block_hash({x = 5, y = 5, z = 5})
 mock.set_node({x = 5, y = 5, z = 5}, {name = "default:dirt", param2 = 3})
 mock.fire("register_on_mapblocks_changed", {[inside_hash] = true}, 1)
 mock.step(0.1)      -- tick 2: the change is diffed and tagged with tick 1
 
--- A change outside the region: its block is not even read.
-local outside_hash = core.hash_node_position({x = 500, y = 5, z = 5})
+-- A change outside the region: no node inside the region differs, so no row.
+local outside_hash = block_hash({x = 500, y = 5, z = 5})
 mock.set_node({x = 500, y = 5, z = 5}, {name = "default:stone"})
 mock.fire("register_on_mapblocks_changed", {[outside_hash] = true}, 1)
 mock.step(0.1)      -- tick 3
@@ -965,6 +976,27 @@ check(value(cdb, "SELECT COUNT(*) FROM Events WHERE type = 'node_change' AND pos
 	"a change outside the region leaves no row")
 cdb:close()
 
+-- The callback names a mapblock in mapblock units: block index (25,0,0) is
+-- the block whose node base is (400,0,0). The engine does this even though
+-- the hash format is shared with hash_node_position; this is the shape that
+-- used to be filtered out and produced no node_change rows at all.
+local far_region = {pos1 = {x = 400, y = 0, z = 0}, pos2 = {x = 415, y = 4, z = 15}}
+check(start_recording("farblock", far_region) == nil, "a recording far from the origin starts")
+local far_path = recorder.get_recording_path()
+mock.step(0.1)
+mock.set_node({x = 404, y = 1, z = 2}, {name = "default:stone"})
+mock.fire("register_on_mapblocks_changed",
+	{[core.hash_node_position({x = 25, y = 0, z = 0})] = true}, 1)
+mock.step(0.1)
+check(recorder.stop() == nil, "it stops")
+local far_db = open_recording(far_path)
+local far_changes = rows(far_db,
+	"SELECT pos_x, pos_y, pos_z FROM Events WHERE type = 'node_change'")
+check(#far_changes == 1 and far_changes[1].pos_x == 404
+	and far_changes[1].pos_y == 1 and far_changes[1].pos_z == 2,
+	"a block named in mapblock units is diffed at its node-space base")
+far_db:close()
+
 ----------------------------------------------------------------------------
 print("=== two recordings over two regions ===")
 ----------------------------------------------------------------------------
@@ -987,7 +1019,7 @@ mock.fire("register_on_dignode", {x = -5, y = 0, z = 1}, {name = "default:stone"
 mock.fire("register_on_dignode", {x = 100, y = 0, z = 1}, {name = "default:stone", param2 = 0}, in_b)
 mock.set_node({x = -5, y = 5, z = 0}, {name = "default:stone"})
 mock.fire("register_on_mapblocks_changed",
-	{[core.hash_node_position({x = -5, y = 5, z = 0})] = true}, 1)
+	{[block_hash({x = -5, y = 5, z = 0})] = true}, 1)
 mock.step(0.1)
 mock.step(0.1)
 check(recorder.stop(id_a) == nil and recorder.stop(id_b) == nil, "both stop")
@@ -1163,7 +1195,7 @@ local light_path = recorder.get_recording_path()
 mock.step(0.1)
 mock.set_node(dark, {name = "default:stone", light = 7})
 mock.fire("register_on_mapblocks_changed",
-	{[core.hash_node_position(dark)] = true}, 1)
+	{[block_hash(dark)] = true}, 1)
 mock.step(0.1)
 check(recorder.stop() == nil, "it stops")
 

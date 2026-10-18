@@ -201,12 +201,14 @@ phase. Stopping during the phase abandons the recording and removes the file.
 ### World changes
 
 The snapshot is kept true by watching the region, not by asking mods to report.
-The engine says which mapblocks changed, at most once per server step; the
-recorder reads those blocks back and compares them with what it last knew, and
-every node that differs becomes a `node_change` row carrying the node it became
-and, in `data`, what it was. That is what captures an explosion, a flowing
-liquid, an ABM, a node timer and a mod's own `set_node`, with no cooperation
-from any of them.
+The engine says which mapblocks changed, at most once per server step; it names
+them by their mapblock position in mapblock units (the hash format is shared
+with `hash_node_position`, but the position inside is not a node position), and
+the recorder turns that into the node-space base corner. It reads those blocks
+back and compares them with what it last knew, and every node that differs
+becomes a `node_change` row carrying the node it became and, in `data`, what it
+was. That is what captures an explosion, a flowing liquid, an ABM, a node timer
+and a mod's own `set_node`, with no cooperation from any of them.
 
 The comparison is against the snapshot plus every change since, so the rows are
 exactly the difference between the snapshot and the world. A row is buffered one

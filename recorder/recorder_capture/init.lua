@@ -1699,6 +1699,21 @@ local function diff_block(rec, block, tick, t, light_changes)
 	end
 end
 
+-- The mapblock callback's hashes use the hash_node_position encoding, but the
+-- position they encode is a mapblock position in mapblock units - not the
+-- node-space base corner the documentation's wording suggests. The node-space
+-- base is 16 times that. Both readings are tried and the region's bounds
+-- discard the wrong one, so an engine that hands out node positions instead
+-- keeps working as well.
+---@param block table
+---@return table[]
+local function block_candidates(block)
+	return {
+		{x = block.x * 16, y = block.y * 16, z = block.z * 16},
+		block,
+	}
+end
+
 local function process_block_changes(rec)
 	local pending = rec.pending_blocks
 	if #pending == 0 then return end
@@ -1707,11 +1722,20 @@ local function process_block_changes(rec)
 	for _, entry in ipairs(pending) do
 		local light_changes = {}
 		for hash in pairs(entry.blocks) do
-			local block = core.get_position_from_hash(hash)
-			if block and block.x >= block_min.x and block.x <= block_max.x
-				and block.y >= block_min.y and block.y <= block_max.y
-				and block.z >= block_min.z and block.z <= block_max.z then
-				diff_block(rec, block, entry.tick, entry.t, light_changes)
+			local decoded = core.get_position_from_hash(hash)
+			if decoded then
+				local seen = {}
+				for _, block in ipairs(block_candidates(decoded)) do
+					local key = block.x .. "," .. block.y .. "," .. block.z
+					if not seen[key] then
+						seen[key] = true
+						if block.x >= block_min.x and block.x <= block_max.x
+							and block.y >= block_min.y and block.y <= block_max.y
+							and block.z >= block_min.z and block.z <= block_max.z then
+							diff_block(rec, block, entry.tick, entry.t, light_changes)
+						end
+					end
+				end
 			end
 		end
 		if #light_changes > 0 then

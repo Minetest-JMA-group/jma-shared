@@ -1029,6 +1029,21 @@ cmd.func("Planner", "")
 deferred_form()
 check(planner.formspec and planner.formspec.formspec:find("fixture-", 1, true) == nil,
 	"a recording still being made is not offered")
+local live_session, live_err = sessions.start(fixture_path, planner)
+check(live_session == nil and tostring(live_err):find("still being made", 1, true) ~= nil,
+	"and a session refuses to start on it")
+
+-- replay.allow_unfinished restores the old behaviour: offer it, and let it be
+-- watched up to the moment the replay started.
+mock.settings["replay.allow_unfinished"] = "true"
+cmd.func("Planner", "")
+deferred_form()
+check(planner.formspec and planner.formspec.formspec:find("fixture-", 1, true) ~= nil,
+	"the setting offers recordings that are still being made")
+live_session, live_err = sessions.start(fixture_path, planner)
+check(live_session ~= nil, "and a session can start on one: " .. tostring(live_err))
+recorder_replay.end_session(live_session.id, "test")
 recorder = nil
+mock.settings["replay.allow_unfinished"] = nil
 
 print(("\n%d checks passed"):format(checks))

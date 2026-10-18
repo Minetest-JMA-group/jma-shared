@@ -130,19 +130,23 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
 
 ## A recording that is still being made
 
-The file is opened read-only, and WAL lets a reader see committed rows, so the
-replay code can read a live recording without blocking the writer; its length
-is whatever it was when the replay started. The chooser, however, leaves out
-recordings that capture is still making (when capture is loaded and can say
-which they are): a recording is meant to be watched when it is done, and a file
-that is still taking its snapshot has nothing to rebuild from yet.
-`/replay list` still shows every file, including the one being written.
+By default a recording can only be watched when it is finished: the chooser
+leaves out files capture is still writing, and a session refuses to start on
+one. A file that is still taking its snapshot has nothing to rebuild from yet
+in any case.
+
+With `replay.allow_unfinished = true` the older behaviour returns. The file is
+opened read-only, and WAL lets a reader see committed rows without blocking the
+writer; the replay's length is whatever it was when it started, so it shows the
+part recorded so far and stops. `/replay list` always shows every file,
+including the one being written.
 
 ## Settings
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `replay.arena` | empty | The fallback arena, `x1,y1,z1,x2,y2,z2`. Used only when the game registers no arena provider; one fixed box can serve one replay at a time. |
+| `replay.allow_unfinished` | `false` | Offer recordings that capture is still making, and let sessions start on them. Off by default: the chooser hides them and a session refuses one. |
 | `replay.max_sessions` | `4` | How many replays may run at once; `0` is no limit. |
 | `replay.model` | empty | The model name for ghost bodies, overriding the one picked from the game's registry. |
 | `recorder.directory` | empty | Where recordings are read from, shared with capture. A relative path is taken from the world directory. |

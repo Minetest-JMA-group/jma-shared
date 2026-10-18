@@ -397,14 +397,16 @@ local function list_recordings()
 	return out, dir
 end
 
--- Recordings still being written are not offered for watching: a recording is
--- something to watch when it is finished, and one that is still taking its
--- snapshot has no snapshot row to rebuild from yet. Capture knows which files
--- those are; when it is not loaded there is nothing to ask, and the file list
--- is what it is.
+-- Recordings still being written are not offered for watching by default: a
+-- recording is something to watch when it is finished, and one that is still
+-- taking its snapshot has no snapshot row to rebuild from yet. Capture knows
+-- which files those are; when it is not loaded there is nothing to ask, and
+-- the file list is what it is. `replay.allow_unfinished` restores the older
+-- behaviour and offers them too.
 ---@return table[], string
 local function available_recordings()
 	local files, dir = all_recordings()
+	if core.settings:get_bool("replay.allow_unfinished") then return files, dir end
 	if type(recorder) ~= "table" or not recorder.list then return files, dir end
 	local active = {}
 	for _, entry in ipairs(recorder.list()) do

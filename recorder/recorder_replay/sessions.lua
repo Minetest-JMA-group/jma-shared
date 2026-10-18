@@ -273,6 +273,18 @@ function sessions.toggle_light(session)
 	return session.light
 end
 
+-- Whether capture is still writing this file. Capture may not be loaded, in
+-- which case no file can be known to be in progress.
+---@param path string
+---@return boolean
+local function unfinished(path)
+	if type(recorder) ~= "table" or not recorder.list then return false end
+	for _, entry in ipairs(recorder.list()) do
+		if entry.path == path then return true end
+	end
+	return false
+end
+
 ---@param session table
 function sessions.start(arg, player)
 	local limit = tonumber(core.settings:get("replay.max_sessions")) or 4
@@ -290,6 +302,9 @@ function sessions.start(arg, player)
 
 	local path, path_err = deps.reader.resolve(arg)
 	if not path then return nil, path_err end
+	if unfinished(path) and not core.settings:get_bool("replay.allow_unfinished") then
+		return nil, "that recording is still being made; wait until it is finished"
+	end
 	local rec, rec_err = deps.reader.open(path, deps.sqlite)
 	if not rec then return nil, rec_err end
 

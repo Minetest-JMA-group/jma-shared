@@ -44,6 +44,8 @@ All commands require `ban` privilege (for bans) or `pmute` privilege (for mutes)
 
 Time format examples: `30m`, `2h`, `1d`, `2w`, `3M` (month = 30 days). If omitted, the punishment is permanent.
 
+`--new` applies to IP scope: when the target is not yet known to `ipdb`, it is registered before the ban/mute is applied.
+
 ## GUI
 
 Opened with `/sb`. Four tabs:
@@ -52,7 +54,7 @@ Opened with `/sb`. Four tabs:
 - **Active Mutes** – lists all name and IP mutes.
 - **Player Log** – enter a name and click "View Log" to see that player's combined history.
 - **Actions** – perform bans/unbans/mutes/unmutes with reason templates (spam, grief, hack, language, custom). Fields can be prefilled by selecting an entry in the first two tabs and clicking "Open In Actions".  
-  For IP scope, you can also enter raw IPv4 targets, and the `Ban/Mute unknown` checkbox will auto-register unknown targets in `ipdb` before ban/mute.
+  For IP scope, you can also enter raw IPv4 targets, and the `Ban/Mute unknown` checkbox will auto-register unknown targets (name or IP) in `ipdb` before ban/mute.
 
 ## API
 
@@ -68,14 +70,14 @@ simplemod.unmute_name(target, source, reason)              → success, err
 simplemod.is_muted_name(target)                             → boolean
 
 -- IP bans
-simplemod.ban_ip(target, source, reason, duration_sec)    → success, err
-simplemod.unban_ip(target, source, reason)                 → success, err
-simplemod.is_banned_ip(target)                              → boolean
+simplemod.ban_ip(target, source, reason, duration_sec, allow_unknown) → success, err
+simplemod.unban_ip(target, source, reason)                            → success, err
+simplemod.is_banned_ip(target)                                        → boolean
 
 -- IP mutes
-simplemod.mute_ip(target, source, reason, duration_sec)   → success, err
-simplemod.unmute_ip(target, source, reason)                → success, err
-simplemod.is_muted_ip(target)                               → boolean
+simplemod.mute_ip(target, source, reason, duration_sec, allow_unknown) → success, err
+simplemod.unmute_ip(target, source, reason)                            → success, err
+simplemod.is_muted_ip(target)                                          → boolean
 
 -- Name or IP mute (combined)
 simplemod.is_muted(target)                                  → boolean
@@ -87,10 +89,34 @@ simplemod.is_restricted(target)                             → boolean
 simplemod.get_player_log(player) → { {type, scope, target, source, reason, duration, time}, ... }
 ```
 
-- `target` – player name (string)
-- `source` – moderator name or `"(console)"` (string)
+- `target` – player name for the `*_name` functions; player name or IPv4 address for the `*_ip` functions.
+- `source` – moderator name or `"(console)"` (string); `nil` or `""` is treated like console.
 - `reason` – optional reason (string)
 - `duration_sec` – seconds, `0` or `nil` = permanent
+- `allow_unknown` – `ban_ip`/`mute_ip` only. When truthy, a target that `ipdb` has never seen is registered first (as an IP-only entry for an IPv4 address, as a name-only entry otherwise) and then punished. When `nil` or `false`, an unknown target returns `false, "This id is unknown to ipdb"` and nothing is stored.
+
+### Overriding an existing punishment
+
+`simplemod.ban_name()` and `simplemod.ban_ip()` do not replace an active ban
+unless one of these holds:
+
+- `source` is `nil`, `""`, or a player with the `ban` privilege – the new ban
+  replaces the existing one, including when it is shorter;
+- the new ban extends the existing one:
+  - an existing permanent ban is never extended by a source without the `ban` privilege;
+  - a new permanent ban always extends a timed existing ban;
+  - a new timed ban extends a timed existing ban only if it expires later.
+
+Otherwise the call returns `false, "Ban already exists; new ban must extend
+current ban duration"` and changes nothing. An expired ban is deleted and
+treated as absent.
+
+`simplemod.mute_name()` and `simplemod.mute_ip()` always replace an existing mute.
+
+The API never asks for confirmation; the chat commands and GUI prompt before
+overriding an active punishment. If that punishment changes while a
+confirmation is pending (for example because a merge replaced it), they
+re-prompt with the current punishment instead of acting on stale details.
 
 ## Storage Details
 

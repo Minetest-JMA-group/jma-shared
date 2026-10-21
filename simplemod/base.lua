@@ -9,6 +9,8 @@ return function(shared)
 	local db, db_err = ipdb.get_internal(5, "database")
 	local SQLITE_ROW = 100
 	local LOG_LIMIT = 100
+	-- Error ipdb returns when a name or IP has no user entry yet.
+	local IPDB_UNKNOWN_TARGET_ERROR = "This id is unknown to ipdb"
 	local MODERATOR_MAX_BAN_DURATION = 15 * 60
 	shared.OVERRIDE_CONFIRM_WINDOW_SEC = 30
 	local BAN_APPEAL_SUFFIX = [[
@@ -83,6 +85,18 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 			expiry = type(duration_sec) == "number" and duration_sec > 0 and now + duration_sec or nil,
 			target = target,
 		}
+	end
+
+	-- Whether two punishment entries describe the same punishment.
+	function shared.punishments_equal(a, b)
+		if not a or not b then
+			return a == b
+		end
+		return a.source == b.source
+			and a.reason == b.reason
+			and a.time == b.time
+			and a.expiry == b.expiry
+			and a.target == b.target
 	end
 
 	function shared.format_ban_message(scope, ban)
@@ -330,100 +344,62 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 		return
 	end
 
-	local ipdb_storage, ipdb_storage_err = ipdb.get_mod_storage()
-	if not ipdb_storage then
-		shared.disabled = true
-		shared.disable_reason = "ipdb mod storage unavailable: " .. tostring(ipdb_storage_err or "unknown")
-		return
-	end
-
-	local function is_ipv4(value)
-		return type(value) == "string" and value:match("^%d+%.%d+%.%d+%.%d+$") ~= nil
-	end
-
-	local function ipdb_ctx(target)
-		if is_ipv4(target) then
-			return ipdb_storage:get_context_by_ip(target)
+	-- The ipdb row for a name or IP, or nil when ipdb doesn't know the target.
+	local function ipdb_target_row(target)
+		local ok, row_or_err
+		if algorithms.is_ipv4(target) then
+			ok, row_or_err = pcall(dbmanager.ip_exists, target)
+		else
+			ok, row_or_err = pcall(dbmanager.user_exists, target)
 		end
-		return ipdb_storage:get_context_by_name(target)
+		if not ok then
+			return nil, tostring(row_or_err)
+		end
+		return row_or_err
 	end
 
+	-- The userentry id for a name or IP. A nil id without an error means ipdb
+	-- doesn't know the target.
+	local function get_ip_userentry_id(target)
+		local row, err = ipdb_target_row(target)
+		if err then
+			return nil, err
+		end
+		return row and row.userentry_id or nil
+	end
+
+	-- Ensure ipdb knows the target. Returns true plus its userentry id, or
+	-- false plus an error. With allow_unknown, an unknown target is registered.
 	local function ensure_ip_target_known(target, allow_unknown)
-		local probe_ctx, probe_err = ipdb_ctx(target)
-		if probe_ctx then
-			probe_err = probe_err or probe_ctx:finalize()
-			if probe_err then
-				return false, probe_err
-			end
-			return true
+		local userentry_id, err = get_ip_userentry_id(target)
+		if err then
+			return false, err
+		end
+		if userentry_id then
+			return true, userentry_id
 		end
 		if not allow_unknown then
-			return false, probe_err or "This id is unknown to ipdb"
+			return false, IPDB_UNKNOWN_TARGET_ERROR
 		end
-		if is_ipv4(target) then
+		if algorithms.is_ipv4(target) then
 			ipdb.register_new_ids(nil, target)
 		else
 			ipdb.register_new_ids(target, nil)
 		end
-		probe_ctx, probe_err = ipdb_ctx(target)
-		if not probe_ctx then
-			return false, probe_err or "Failed to register target in ipdb"
-		end
-		probe_err = probe_err or probe_ctx:finalize()
-		if probe_err then
-			return false, probe_err
-		end
-		return true
-	end
-
-	local function set_ip_data(target, key, value, aux)
-		local ip_ctx, err = ipdb_ctx(target)
-		if not ip_ctx then
-			return false, err or "This id is unknown to ipdb"
-		end
-		err = err or ip_ctx:set_string(key, value, aux)
-		err = err or ip_ctx:finalize()
+		userentry_id, err = get_ip_userentry_id(target)
 		if err then
 			return false, err
 		end
-		return true
+		if not userentry_id then
+			return false, "Failed to register target in ipdb"
+		end
+		return true, userentry_id
 	end
 
-	local function clear_ip_data(target, key)
-		local ip_ctx, err = ipdb_ctx(target)
-		if not ip_ctx then
-			return err
-		end
-		err = err or ip_ctx:set_string(key, nil)
-		err = err or ip_ctx:finalize()
-		return err
-	end
-
-	local function get_ip_userentry_id(target)
-		local ip_ctx, err = ipdb_ctx(target)
-		if not ip_ctx then
-			return nil, err
-		end
-		local userentry_id = ip_ctx._userentry_id
-		err = err or ip_ctx:finalize()
-		if err then
-			return nil, err
-		end
-		return userentry_id
-	end
-
-	local function get_ip_identifiers(target)
-		local ip_ctx, err = ipdb_ctx(target)
-		if not ip_ctx then
-			return nil, err
-		end
-		local ok, identifiers_or_err = pcall(dbmanager.get_all_identifiers, ip_ctx._userentry_id)
-		err = err or ip_ctx:finalize()
+	local function get_ip_identifiers(userentry_id)
+		local ok, identifiers_or_err = pcall(dbmanager.get_all_identifiers, userentry_id)
 		if not ok then
 			return nil, identifiers_or_err
-		end
-		if err then
-			return nil, err
 		end
 		return identifiers_or_err
 	end
@@ -511,20 +487,26 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 		return best
 	end
 
+	local function get_ip_punishment_by_entry(userentry_id, key)
+		local data = get_best_ip_punishment(userentry_id, key)
+		if data and data.expiry and data.expiry <= os.time() then
+			with_txn(function()
+				dbmanager.delete_modstorage(userentry_id, MODNAME, key)
+			end)
+			return nil
+		end
+		return data
+	end
+
 	function shared.get_ip_ban(target)
 		local userentry_id, err = get_ip_userentry_id(target)
 		if err then
 			return nil, err
 		end
-		local ban = get_best_ip_punishment(userentry_id, "ban")
-		if not ban then
+		if not userentry_id then
 			return nil
 		end
-		if ban and ban.expiry and ban.expiry <= os.time() then
-			clear_ip_data(target, "ban")
-			return nil
-		end
-		return ban
+		return get_ip_punishment_by_entry(userentry_id, "ban")
 	end
 
 	local function get_ip_mute(target)
@@ -532,15 +514,10 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 		if err then
 			return nil, err
 		end
-		local mute = get_best_ip_punishment(userentry_id, "mute")
-		if not mute then
+		if not userentry_id then
 			return nil
 		end
-		if mute and mute.expiry and mute.expiry <= os.time() then
-			clear_ip_data(target, "mute")
-			return nil
-		end
-		return mute
+		return get_ip_punishment_by_entry(userentry_id, "mute")
 	end
 
 	local function prune_expired_ip_entry_rows(key_name)
@@ -606,24 +583,16 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 		return get_active_ip_table("mute")
 	end
 
-	local function upsert_name_entry(userentry_id, target, value_table)
-		local serialized = core.serialize(value_table)
-		local aux = value_table.expiry or nil
+	local function upsert_entry_row(userentry_id, key, serialized, aux)
 		local ok, err = with_txn(function()
-			local ok_rows, rows_or_err = pcall(dbmanager.get_from_modstorage, userentry_id, MODNAME, target, 1)
+			local ok_rows, rows_or_err = pcall(dbmanager.get_from_modstorage, userentry_id, MODNAME, key, 1)
 			if not ok_rows then
 				error(rows_or_err)
 			end
-			local rows = rows_or_err
-			local has_row = false
-			for _ in pairs(rows) do
-				has_row = true
-				break
-			end
-			if has_row then
-				dbmanager.update_modstorage2(userentry_id, MODNAME, target, serialized, aux)
+			if next(rows_or_err) then
+				dbmanager.update_modstorage2(userentry_id, MODNAME, key, serialized, aux)
 			else
-				dbmanager.insert_into_modstorage(userentry_id, MODNAME, target, serialized, aux)
+				dbmanager.insert_into_modstorage(userentry_id, MODNAME, key, serialized, aux)
 			end
 		end)
 		if not ok then
@@ -632,7 +601,11 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 		return true
 	end
 
-	local function add_action_log(scope, action_type, target, source, reason, duration_sec, time)
+	local function upsert_name_entry(userentry_id, target, value_table)
+		return upsert_entry_row(userentry_id, target, core.serialize(value_table), value_table.expiry or nil)
+	end
+
+	local function add_action_log(scope, action_type, target, source, reason, duration_sec, time, userentry_id)
 		local now = time or os.time()
 		local entry = {
 			type = action_type,
@@ -649,19 +622,17 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 				core.log("warning", "[simplemod] failed writing name log entry: " .. tostring(err))
 			end
 		else
-			local ip_ctx, err = ipdb_ctx(target)
-			if not ip_ctx then
-				core.log("warning", "[simplemod] failed writing IP log entry for " .. tostring(target) .. ": " .. tostring(err))
+			local entry_id = userentry_id
+			local err
+			if not entry_id then
+				entry_id, err = get_ip_userentry_id(target)
+			end
+			if not entry_id then
+				core.log("warning", "[simplemod] failed writing IP log entry for " .. tostring(target) .. ": " .. tostring(err or IPDB_UNKNOWN_TARGET_ERROR))
 			else
-				local userentry_id = ip_ctx._userentry_id
-				err = err or ip_ctx:finalize()
-				if err then
-					core.log("warning", "[simplemod] failed finalizing IP log context for " .. tostring(target) .. ": " .. tostring(err))
-				else
-					local ok, add_err = add_log_row(userentry_id, "log", entry)
-					if not ok then
-						core.log("warning", "[simplemod] failed writing IP log row for " .. tostring(target) .. ": " .. tostring(add_err))
-					end
+				local ok, add_err = add_log_row(entry_id, "log", entry)
+				if not ok then
+					core.log("warning", "[simplemod] failed writing IP log row for " .. tostring(target) .. ": " .. tostring(add_err))
 				end
 			end
 		end
@@ -805,14 +776,34 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 		return mute ~= nil
 	end
 
-	function simplemod.ban_ip(target, source, reason, duration_sec, allow_unknown)
-		local known_ok, known_err = ensure_ip_target_known(target, allow_unknown)
-		if not known_ok then
-			return false, known_err
+	-- The target must already be known to ipdb. simplemod.ban_ip() ensures it.
+	-- run_action() callers pass the userentry id and punishment they resolved
+	-- beforehand; when no resolution is supplied, both are looked up here.
+	local function resolve_ip_entry(target, resolved)
+		if resolved and resolved.userentry_id then
+			return resolved.userentry_id
 		end
-		local existing_ban, err = shared.get_ip_ban(target)
+		local userentry_id, err = get_ip_userentry_id(target)
 		if err then
-			return false, err
+			return nil, err
+		end
+		if not userentry_id then
+			return nil, IPDB_UNKNOWN_TARGET_ERROR
+		end
+		return userentry_id
+	end
+
+	local function ban_ip_resolved(target, source, reason, duration_sec, resolved)
+		local userentry_id, resolve_err = resolve_ip_entry(target, resolved)
+		if not userentry_id then
+			return false, resolve_err
+		end
+		local existing_ban
+		local err
+		if resolved then
+			existing_ban = resolved.existing
+		else
+			existing_ban = get_ip_punishment_by_entry(userentry_id, "ban")
 		end
 		local can_overwrite_existing = not source or source == "" or core.check_player_privs(source, {ban = true})
 		if existing_ban and not can_overwrite_existing and not ban_extends_existing(existing_ban, duration_sec) then
@@ -821,16 +812,16 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 		local now = os.time()
 		local ban = make_punishment_entry(source, reason, duration_sec, target, now)
 		local ok
-		ok, err = set_ip_data(target, "ban", core.serialize(ban), ban.expiry)
+		ok, err = upsert_entry_row(userentry_id, "ban", core.serialize(ban), ban.expiry)
 		if not ok then
 			return false, err
 		end
 
-		add_action_log("ip", "ban", target, source, reason, duration_sec, now)
+		add_action_log("ip", "ban", target, source, reason, duration_sec, now, userentry_id)
 		report_action("IP", "ban", target, source, reason, duration_sec)
 
 		local msg = shared.format_ban_message("ip", ban)
-		local ids, names_err = get_ip_identifiers(target)
+		local ids, names_err = get_ip_identifiers(userentry_id)
 		if names_err then
 			core.log("warning", "[simplemod] failed to get linked names for IP ban target " .. target .. ": " .. tostring(names_err))
 			if core.get_player_by_name(target) then
@@ -855,19 +846,33 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 		return true
 	end
 
+	function simplemod.ban_ip(target, source, reason, duration_sec, allow_unknown)
+		local known, userentry_id_or_err = ensure_ip_target_known(target, allow_unknown)
+		if not known then
+			return false, userentry_id_or_err
+		end
+		local existing_ban = get_ip_punishment_by_entry(userentry_id_or_err, "ban")
+		return ban_ip_resolved(target, source, reason, duration_sec, { existing = existing_ban, userentry_id = userentry_id_or_err })
+	end
+
 	function simplemod.unban_ip(target, source, reason)
-		local existing, err = shared.get_ip_ban(target)
+		local userentry_id, err = get_ip_userentry_id(target)
 		if err then
 			return false, err
 		end
+		if not userentry_id then
+			return false, "Not IP-banned"
+		end
+		local existing = get_ip_punishment_by_entry(userentry_id, "ban")
 		if not existing then
 			return false, "Not IP-banned"
 		end
-		err = clear_ip_data(target, "ban")
-		if err then
+		local ok
+		ok, err = delete_modstorage_key(userentry_id, "ban")
+		if not ok then
 			return false, err
 		end
-		add_action_log("ip", "unban", target, source, reason)
+		add_action_log("ip", "unban", target, source, reason, nil, nil, userentry_id)
 		report_action("IP", "unban", target, source, reason)
 		return true
 	end
@@ -909,36 +914,51 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 		return true
 	end
 
-	function simplemod.mute_ip(target, source, reason, duration_sec, allow_unknown)
-		local known_ok, known_err = ensure_ip_target_known(target, allow_unknown)
-		if not known_ok then
-			return false, known_err
+	-- The target must already be known to ipdb. simplemod.mute_ip() ensures it;
+	-- run_action() callers pass the userentry id they resolved beforehand.
+	local function mute_ip_resolved(target, source, reason, duration_sec, resolved)
+		local userentry_id, resolve_err = resolve_ip_entry(target, resolved)
+		if not userentry_id then
+			return false, resolve_err
 		end
 		local now = os.time()
 		local mute = make_punishment_entry(source, reason, duration_sec, target, now)
-		local ok, err = set_ip_data(target, "mute", core.serialize(mute), mute.expiry)
+		local ok, err = upsert_entry_row(userentry_id, "mute", core.serialize(mute), mute.expiry)
 		if not ok then
 			return false, err
 		end
 
-		add_action_log("ip", "mute", target, source, reason, duration_sec, now)
+		add_action_log("ip", "mute", target, source, reason, duration_sec, now, userentry_id)
 		report_action("IP", "mute", target, source, reason, duration_sec)
 		return true
 	end
 
+	function simplemod.mute_ip(target, source, reason, duration_sec, allow_unknown)
+		local known, userentry_id_or_err = ensure_ip_target_known(target, allow_unknown)
+		if not known then
+			return false, userentry_id_or_err
+		end
+		return mute_ip_resolved(target, source, reason, duration_sec, { userentry_id = userentry_id_or_err })
+	end
+
 	function simplemod.unmute_ip(target, source, reason)
-		local existing, err = get_ip_mute(target)
+		local userentry_id, err = get_ip_userentry_id(target)
 		if err then
 			return false, err
 		end
+		if not userentry_id then
+			return false, "Not IP-muted"
+		end
+		local existing = get_ip_punishment_by_entry(userentry_id, "mute")
 		if not existing then
 			return false, "Not IP-muted"
 		end
-		err = clear_ip_data(target, "mute")
-		if err then
+		local ok
+		ok, err = delete_modstorage_key(userentry_id, "mute")
+		if not ok then
 			return false, err
 		end
-		add_action_log("ip", "unmute", target, source, reason)
+		add_action_log("ip", "unmute", target, source, reason, nil, nil, userentry_id)
 		report_action("IP", "unmute", target, source, reason)
 		return true
 	end
@@ -1040,20 +1060,24 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 		end
 	end
 
-	function shared.run_action(action_type, scope, target, source, reason, duration_sec, allow_unknown)
+	-- IP-scope ban and mute require the target to be known to ipdb. The chat
+	-- command and GUI resolve it (registering it when allow_unknown is set) and
+	-- pass the result in `resolved`. Direct API callers use simplemod.ban_ip /
+	-- simplemod.mute_ip, which perform the check themselves.
+	function shared.run_action(action_type, scope, target, source, reason, duration_sec, resolved)
 		if action_type == "ban" then
 			if scope == "name" then
 				return simplemod.ban_name(target, source, reason, duration_sec)
 			end
 			if scope == "ip" then
-				return simplemod.ban_ip(target, source, reason, duration_sec, allow_unknown)
+				return ban_ip_resolved(target, source, reason, duration_sec, resolved)
 			end
 		elseif action_type == "mute" then
 			if scope == "name" then
 				return simplemod.mute_name(target, source, reason, duration_sec)
 			end
 			if scope == "ip" then
-				return simplemod.mute_ip(target, source, reason, duration_sec, allow_unknown)
+				return mute_ip_resolved(target, source, reason, duration_sec, resolved)
 			end
 		elseif action_type == "unban" then
 			if scope == "name" then
@@ -1094,6 +1118,22 @@ email: support.jma@proton.me︱discord: https://discord.gg/5sGQfVnJDD︱xmpp: xm
 			return get_name_entry(name_mutes_entry_id, target)
 		end
 		return get_name_entry(name_bans_entry_id, target)
+	end
+
+	-- Resolve the punishment an action would override, in one pass. An ip-scope
+	-- target ipdb doesn't know has no punishment; when allow_unknown is set it
+	-- is registered here so the action that follows can write to it, otherwise
+	-- the unknown target is an error.
+	function shared.resolve_action_punishment(scope, target, kind, allow_unknown)
+		if scope ~= "ip" then
+			return shared.get_active_punishment_entry(scope, target, kind)
+		end
+		local known, userentry_id_or_err = ensure_ip_target_known(target, allow_unknown)
+		if not known then
+			return nil, userentry_id_or_err
+		end
+		local existing = get_ip_punishment_by_entry(userentry_id_or_err, kind == "mute" and "mute" or "ban")
+		return existing, nil, userentry_id_or_err
 	end
 
 	function shared.can_override_punishment(action_type, source, existing, duration_sec)

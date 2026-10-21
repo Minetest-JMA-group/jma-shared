@@ -69,7 +69,30 @@ end
 			if args[1] == "abort" then
 				return true, "Override request aborted."
 			end
-			local ok, err = internal.run_action(pending.action_type, pending.scope, pending.target, pending.source, pending.reason, pending.duration, pending.allow_unknown)
+			local existing, existing_err, userentry_id = internal.resolve_action_punishment(pending.scope, pending.target, pending.action_type, false)
+			if existing_err then
+				return false, existing_err
+			end
+			if existing and not internal.punishments_equal(pending.existing, existing) then
+				set_cli_confirmation(name, cmd, {
+					action_type = pending.action_type,
+					scope = pending.scope,
+					target = pending.target,
+					source = pending.source,
+					reason = pending.reason,
+					duration = pending.duration,
+					existing = existing,
+				})
+				for _, line in ipairs(internal.format_existing_punishment_lines(pending.action_type, pending.scope, pending.target, existing)) do
+					core.chat_send_player(name, line)
+				end
+				for _, line in ipairs(internal.format_new_punishment_lines(pending.action_type, pending.scope, pending.target, pending.source, pending.reason, pending.duration)) do
+					core.chat_send_player(name, line)
+				end
+				core.chat_send_player(name, "The existing punishment changed while this confirmation was pending. Type /" .. cmd .. " confirm to proceed with the current one, or /" .. cmd .. " abort.")
+				return true, "Confirmation required again."
+			end
+			local ok, err = internal.run_action(pending.action_type, pending.scope, pending.target, pending.source, pending.reason, pending.duration, { existing = existing, userentry_id = userentry_id })
 			if not ok then
 				return false, ("%s failed for %s (%s): %s"):format(
 					pending.action_type == "mute" and "Mute" or "Ban",
@@ -125,7 +148,7 @@ end
 			end
 		end
 
-		local existing, existing_err = internal.get_active_punishment_entry(scope, target, action_type)
+		local existing, existing_err, userentry_id = internal.resolve_action_punishment(scope, target, action_type, force_unknown)
 		if existing_err then
 			return false, existing_err
 		end
@@ -141,7 +164,7 @@ end
 				source = name,
 				reason = expanded_reason,
 				duration = duration,
-				allow_unknown = force_unknown,
+				existing = existing,
 			})
 			for _, line in ipairs(internal.format_existing_punishment_lines(action_type, scope, target, existing)) do
 				core.chat_send_player(name, line)
@@ -153,7 +176,7 @@ end
 			return true, "Override confirmation required."
 		end
 
-		local ok, err = internal.run_action(action_type, scope, target, name, expanded_reason, duration, force_unknown)
+		local ok, err = internal.run_action(action_type, scope, target, name, expanded_reason, duration, { existing = existing, userentry_id = userentry_id })
 		if not ok then
 			local action = is_mute and "Mute" or "Ban"
 			return false, ("%s failed for %s (%s): %s"):format(action, target, scope, err or "unknown")

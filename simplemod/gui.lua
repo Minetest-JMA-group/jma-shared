@@ -206,19 +206,28 @@ return function(internal)
 		end
 
 		if fields.override_confirm_yes then
-			local success, msg = internal.run_action(
-				pending.action_type,
-				pending.scope,
-				pending.target,
-				pending.source,
-				pending.reason,
-				pending.duration,
-				pending.allow_unknown
-			)
-			if success then
-				core.chat_send_player(name, "Action completed")
+			local existing, existing_err, userentry_id = internal.resolve_action_punishment(pending.scope, pending.target, pending.action_type, false)
+			if existing_err then
+				core.chat_send_player(name, "Error: " .. existing_err)
+			elseif existing and not internal.punishments_equal(pending.existing, existing) then
+				pending.existing = existing
+				show_override_confirm_gui(name, pending)
+				return
 			else
-				core.chat_send_player(name, "Error: " .. (msg or "unknown"))
+				local success, msg = internal.run_action(
+					pending.action_type,
+					pending.scope,
+					pending.target,
+					pending.source,
+					pending.reason,
+					pending.duration,
+					{ existing = existing, userentry_id = userentry_id }
+				)
+				if success then
+					core.chat_send_player(name, "Action completed")
+				else
+					core.chat_send_player(name, "Error: " .. (msg or "unknown"))
+				end
 			end
 		end
 		internal.show_gui(
@@ -449,8 +458,10 @@ return function(internal)
 				action_type = "unmute"
 			end
 
+			local existing, userentry_id
 			if action_type == "ban" or action_type == "mute" then
-				local existing, existing_err = internal.get_active_punishment_entry(scope, target, action_type)
+				local existing_err
+				existing, existing_err, userentry_id = internal.resolve_action_punishment(scope, target, action_type, allow_unknown)
 				if existing_err then
 					core.chat_send_player(name, "Error: " .. existing_err)
 					internal.show_gui(name, "4", "", target, scope, template_key, duration_str, custom, allow_unknown)
@@ -481,7 +492,7 @@ return function(internal)
 				end
 			end
 
-			local success, msg = internal.run_action(action_type, scope, target, name, reason, duration, allow_unknown)
+			local success, msg = internal.run_action(action_type, scope, target, name, reason, duration, { existing = existing, userentry_id = userentry_id })
 			if success then
 				core.chat_send_player(name, "Action completed")
 			else

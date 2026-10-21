@@ -91,7 +91,7 @@ end
 core.register_chatcommand("regtime", {
 	description = "Get registration time",
 	params = "<playername>",
-	privs = {moderator = true},
+	privs = {server = true},
 	func = function(name, param)
 		local target_name = param:trim()
 		if target_name == "" then
@@ -118,7 +118,7 @@ core.register_chatcommand("playtime", {
 		local target_name = param:trim()
 		if target_name == "" then
 			target_name = name
-		elseif name ~= target_name and not core.check_player_privs(name, {moderator = true}) then
+		elseif name ~= target_name and not core.check_player_privs(name, { server = true }) then
 			return false, "You do not have permission to see other players' playtime"
 		end
 

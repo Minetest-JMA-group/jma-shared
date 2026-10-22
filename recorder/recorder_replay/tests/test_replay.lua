@@ -699,6 +699,37 @@ check(mock.get_node(glass_cell).light == 3,
 check(#mock.relit == relit_before, "without recalculating it live")
 
 ----------------------------------------------------------------------------
+print("=== a ghost that disappears ===")
+----------------------------------------------------------------------------
+
+sessions.seek(session, 0.5)
+alice = ghost_of("Alice")
+check(alice ~= nil, "Alice has a ghost")
+local vanished = alice
+vanished:remove()
+check(mock.entities[vanished.id] == nil, "the object is gone, as if its mapblocks unloaded")
+sessions.update_observers(session)
+local stale = false
+for _, obj in pairs(session.ghosts) do
+	if obj == vanished then stale = true end
+end
+check(not stale, "updating observers drops the stale ghost instead of raising")
+
+sessions.seek(session, 0.5)
+alice = ghost_of("Alice")
+check(alice ~= nil, "a seek brings it back")
+vanished = alice
+vanished:remove()
+mock.step(0.1)
+stale = false
+for _, obj in pairs(session.ghosts) do
+	if obj == vanished then stale = true end
+end
+check(not stale, "a movement step also drops a ghost that vanished")
+sessions.seek(session, 0.5)
+check(ghost_of("Alice") ~= nil, "and a later seek still restores it")
+
+----------------------------------------------------------------------------
 print("=== a second viewer ===")
 ----------------------------------------------------------------------------
 

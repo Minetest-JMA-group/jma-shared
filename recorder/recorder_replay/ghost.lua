@@ -106,44 +106,56 @@ end
 
 ---@param obj ObjectRef
 ---@param observers table
+---@return boolean  -- false when the object has been invalidated in the meantime
 function ghost.set_observers(obj, observers)
-	if obj.set_observers then obj:set_observers(observers) end
+	if not obj then return false end
+	-- An entity can vanish from under a session: its mapblocks may be unloaded
+	-- once the viewers leave (the arena can be far from where they go back to),
+	-- or the game may clear objects. Every call on a removed ObjectRef raises,
+	-- so the session is told instead and drops the ghost.
+	local ok = pcall(function()
+		if obj.set_observers then obj:set_observers(observers) end
+	end)
+	return ok
 end
 
 -- Put a ghost where a movement sample says its player was, and pick the pose
 -- the sample describes. `offset` moves the recorded position into the arena
--- the session was given. The controls bitmask carries the dig bit; velocity
--- tells walking from standing.
+-- the session was given. Returns false when the object is no longer usable.
 ---@param obj ObjectRef
 ---@param row table
 ---@param offset table?
+---@return boolean
 function ghost.update(obj, row, offset)
-	local pos = row.pos
-	if offset then
-		pos = {x = pos.x + offset.x, y = pos.y + offset.y, z = pos.z + offset.z}
-	end
-	obj:move_to(pos, true)
-	obj:set_yaw(row.yaw)
-	local _, def = resolve_model()
-	if not def then return end
-	if obj.set_bone_override then
-		-- The head bone follows the recorded pitch (radians, relative to the
-		-- animated pose).
-		obj:set_bone_override("Head", {
-			rotation = {vec = {x = row.pitch, y = 0, z = 0}},
-		})
-	end
-	local digging = math.floor((row.controls or 0) / 128) % 2 == 1
-	local animation = "stand"
-	if row.speed > 0.1 then
-		animation = digging and "walk_mine" or "walk"
-	elseif digging then
-		animation = "mine"
-	end
-	local frames = def.animations and def.animations[animation]
-	if frames then
-		obj:set_animation(frames, def.animation_speed or 30, 0, true)
-	end
+	local ok = pcall(function()
+		local pos = row.pos
+		if offset then
+			pos = {x = pos.x + offset.x, y = pos.y + offset.y, z = pos.z + offset.z}
+		end
+		obj:move_to(pos, true)
+		obj:set_yaw(row.yaw)
+		local _, def = resolve_model()
+		if not def then return end
+		if obj.set_bone_override then
+			-- The head bone follows the recorded pitch (radians, relative to the
+			-- animated pose).
+			obj:set_bone_override("Head", {
+				rotation = {vec = {x = row.pitch, y = 0, z = 0}},
+			})
+		end
+		local digging = math.floor((row.controls or 0) / 128) % 2 == 1
+		local animation = "stand"
+		if row.speed > 0.1 then
+			animation = digging and "walk_mine" or "walk"
+		elseif digging then
+			animation = "mine"
+		end
+		local frames = def.animations and def.animations[animation]
+		if frames then
+			obj:set_animation(frames, def.animation_speed or 30, 0, true)
+		end
+	end)
+	return ok
 end
 
 return ghost

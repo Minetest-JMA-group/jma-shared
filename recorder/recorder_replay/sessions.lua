@@ -57,12 +57,29 @@ local function participant_count(session)
 end
 sessions.participant_count = participant_count
 
--- Everyone watching sees every ghost; anyone else sees none of them.
+local function remove_ghost(session, pid)
+	local obj = session.ghosts[pid]
+	if obj then
+		-- A second removal, or one of an object the engine has already dropped,
+		-- raises; it is not worth a server error either way.
+		pcall(function()
+			if obj.remove then obj:remove() end
+		end)
+	end
+	session.ghosts[pid] = nil
+	session.cursors[pid] = nil
+end
+
+-- Everyone watching sees every ghost; anyone else sees none of them. A ghost
+-- whose object has been invalidated (the arena's blocks unloaded, the game
+-- cleared objects) is dropped here rather than raising.
 ---@param session table
 function sessions.update_observers(session)
 	local set = observer_set(session)
-	for _, obj in pairs(session.ghosts) do
-		deps.ghost.set_observers(obj, set)
+	for pid, obj in pairs(session.ghosts) do
+		if not deps.ghost.set_observers(obj, set) then
+			remove_ghost(session, pid)
+		end
 	end
 end
 
@@ -73,13 +90,6 @@ local function textures_of(json)
 		return data.textures
 	end
 	return nil
-end
-
-local function remove_ghost(session, pid)
-	local obj = session.ghosts[pid]
-	if obj and obj.remove then obj:remove() end
-	session.ghosts[pid] = nil
-	session.cursors[pid] = nil
 end
 
 -- Put every ghost back to where it was at a moment, rebuild the reconstructed
@@ -197,7 +207,10 @@ local function advance_player(session, pid, obj, cursor)
 			if row.t > session.T then return end
 			cursor.next = cursor.next + 1
 			cursor.last_tick = row.tick
-			deps.ghost.update(obj, row, session.offset)
+			if not deps.ghost.update(obj, row, session.offset) then
+				remove_ghost(session, pid)
+				return
+			end
 		end
 		local more = deps.reader.movement_after(session.rec, pid, cursor.last_tick, 200)
 		if #more == 0 then

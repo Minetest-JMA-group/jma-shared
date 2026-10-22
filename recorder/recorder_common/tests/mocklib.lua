@@ -680,22 +680,34 @@ function M.new(opts)
 			properties = {},
 			removed = false,
 		}
+		-- A removed object is invalid: the engine raises on any further call,
+		-- which is what a ghost must survive when its mapblocks unload.
+		local function check(self)
+			if self.removed then error("Invalid ObjectRef", 0) end
+		end
 		function obj:set_properties(values)
+			check(self)
 			for key, value in pairs(values) do self.properties[key] = value end
 		end
-		function obj:set_observers(set) self.observers = set end
-		function obj:move_to(target) self.pos = {x = target.x, y = target.y, z = target.z} end
-		function obj:set_yaw(value) self.yaw = value end
-		function obj:set_velocity(value) self.velocity = value end
+		function obj:set_observers(set) check(self) self.observers = set end
+		function obj:move_to(target)
+			check(self)
+			self.pos = {x = target.x, y = target.y, z = target.z}
+		end
+		function obj:set_yaw(value) check(self) self.yaw = value end
+		function obj:set_velocity(value) check(self) self.velocity = value end
 		function obj:set_animation(frames, speed)
+			check(self)
 			self.animation = frames
 			self.animation_speed = speed
 		end
 		function obj:set_bone_override(bone, override)
+			check(self)
 			self.bones = self.bones or {}
 			self.bones[bone] = override
 		end
 		function obj:remove()
+			if self.removed then return end
 			self.removed = true
 			mock.entities[self.id] = nil
 		end

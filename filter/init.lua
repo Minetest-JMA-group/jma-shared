@@ -60,7 +60,7 @@ local violation_types = {
 		chat_msg = "Your message contained a blocked word,\nplease be respectful in the chat.",
 		kick_msg = "Kicked by chat filter for repeatedly trying to send messages containing blocked words.",
 		log_msg = "VIOLATION (inappropriate content)",
-		formspec_title = "Message could not be send.",
+		formspec_title = "Message could not be sent.",
 		formspec_image = "filter_warning.png",
 	},
 }

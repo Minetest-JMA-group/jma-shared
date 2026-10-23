@@ -49,6 +49,17 @@ local back = snapshot.decode(body)
 check(back ~= nil, "and decodes")
 check(same(back, entries), "with every index, name and param2 unchanged")
 
+print("=== the encoder fed one entry at a time ===")
+local encoder = snapshot.encoder()
+local fed = true
+for _, entry in ipairs(entries) do
+	if not encoder:add(entry.i, entry.n, entry.p) then fed = false end
+end
+check(fed and encoder:finish() == body, "an incremental encoder builds the same body")
+local strict = snapshot.encoder()
+check(strict:add(1, 1) == true and strict:add(1, 1) == nil,
+	"an index that does not advance is refused")
+
 print("=== air is not stored ===")
 -- One node a million positions into the region costs a few bytes, not one
 -- entry per air node.

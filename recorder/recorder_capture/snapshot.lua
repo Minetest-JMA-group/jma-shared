@@ -20,15 +20,18 @@ local EMERGE_TIMEOUT = 120
 
 local region = recorder_common.region
 local codec = recorder_common.snapshot
+local light_codec = recorder_common.light
 
 ---@param pos1 table
 ---@param pos2 table
 ---@param record_light boolean?  -- false leaves the light layers out
+---@param compression_level integer?  -- deflate level, 1 (fast) to 9 (small)
 ---@return table|nil, string?
-function snapshot.new(pos1, pos2, record_light)
+function snapshot.new(pos1, pos2, record_light, compression_level)
 	local normalized, err = region.normalize(pos1, pos2)
 	if not normalized then return nil, err end
 	pos1, pos2 = normalized.pos1, normalized.pos2
+	compression_level = math.max(1, math.min(9, math.floor(tonumber(compression_level) or 6)))
 	local snap = {
 		region = {pos1 = pos1, pos2 = pos2},
 		size = region.size({pos1 = pos1, pos2 = pos2}),
@@ -36,7 +39,6 @@ function snapshot.new(pos1, pos2, record_light)
 		emerged = {done = false, errors = 0},
 		deadline = os.time() + EMERGE_TIMEOUT,
 		node_index = 0,
-		entries = {},
 		names = {},
 		name_index = {},   -- content id -> index into names
 		ids = {},          -- region flat index -> content id (the known state)
@@ -44,6 +46,9 @@ function snapshot.new(pos1, pos2, record_light)
 		record_light = record_light ~= false,
 		light = {},        -- region flat index -> light byte, when recorded
 		light_data = nil,  -- the emerged area's light, while walking
+		encoder = nil,     -- the body, built entry by entry during the walk
+		light_encoder = nil, -- the light body, byte by byte during the walk
+		compression_level = compression_level,
 		failure = nil,
 	}
 	core.emerge_area(pos1, pos2, function(blockpos, action, calls_remaining)
@@ -86,6 +91,8 @@ local function begin_walk(snap)
 	vm:close()
 	snap.data, snap.param2_data = data, param2
 	snap.light_data = light
+	snap.encoder = codec.encoder()
+	snap.light_encoder = snap.record_light and light_codec.encoder() or nil
 	snap.emerged1 = emerged1
 	snap.emerged_size = {
 		x = emerged2.x - emerged1.x + 1,
@@ -117,7 +124,9 @@ local function encode_step(snap, budget)
 		snap.ids[index] = id
 		snap.param2[index] = value
 		if snap.record_light then
-			snap.light[index] = light_data and light_data[lvm_index] or 0
+			local light_value = light_data and light_data[lvm_index] or 0
+			snap.light[index] = light_value
+			snap.light_encoder:add(light_value)
 		end
 
 		if id == core.CONTENT_IGNORE then
@@ -139,7 +148,11 @@ local function encode_step(snap, budget)
 				end
 			end
 			if name_index then
-				snap.entries[#snap.entries + 1] = {i = index, n = name_index, p = value}
+				local added, err = snap.encoder:add(index, name_index, value)
+				if not added then
+					snap.failure = err
+					return "failed", snap.failure
+				end
 			end
 		end
 
@@ -151,19 +164,17 @@ local function encode_step(snap, budget)
 		return "working", nil
 	end
 
-	local body, err = codec.encode(snap.entries)
-	if not body then
-		snap.failure = err or "cannot encode the snapshot"
-		return "failed", snap.failure
-	end
+	local body = snap.encoder:finish()
+	local light_body = snap.light_encoder and snap.light_encoder:finish() or nil
 	local encoding = "raw"
 	if core.compress then
-		local packed = core.compress(body, "deflate", 9)
+		local packed = core.compress(body, "deflate", snap.compression_level)
 		if packed then
 			body, encoding = packed, "deflate"
 		end
 	end
-	snap.entries = nil
+	snap.encoder = nil
+	snap.light_encoder = nil
 	snap.data, snap.param2_data = nil, nil
 	snap.light_data = nil
 	snap.phase = "done"
@@ -174,6 +185,7 @@ local function encode_step(snap, budget)
 		ids = snap.ids,
 		param2 = snap.param2,
 		light = snap.record_light and snap.light or nil,
+		light_body = light_body,
 	}
 end
 
@@ -214,7 +226,8 @@ end
 -- Let go of the large temporary tables when a snapshot is abandoned.
 ---@param snap table
 function snapshot.free(snap)
-	snap.entries = nil
+	snap.encoder = nil
+	snap.light_encoder = nil
 	snap.data, snap.param2_data = nil, nil
 	snap.light_data = nil
 	snap.ids, snap.param2 = nil, nil

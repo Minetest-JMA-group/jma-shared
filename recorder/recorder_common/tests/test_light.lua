@@ -34,6 +34,11 @@ for i = 1, 300 do
 end
 check(same, "every value survives")
 
+print("=== the encoder fed byte by byte ===")
+local encoder = light.encoder()
+for i = 1, 300 do encoder:add(values[i]) end
+check(encoder:finish() == body, "an incremental encoder builds the same body")
+
 print("=== byte boundaries ===")
 local edges = light.encode({0, 1, 127, 128, 254, 255}, 6)
 local edge_values = light.decode(edges, 6)

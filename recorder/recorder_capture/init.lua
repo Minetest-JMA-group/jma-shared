@@ -80,7 +80,6 @@ local modpath = core.get_modpath(core.get_current_modname())
 local dbmanager = dofile(modpath .. "/dbmanager.lua")
 local snapshot_module = dofile(modpath .. "/snapshot.lua")
 local region_module = recorder_common.region
-local light_codec = recorder_common.light
 local snapshot_codec = recorder_common.snapshot
 
 -- One recording's state. Everything below that takes a `rec` gets one of these;
@@ -110,6 +109,8 @@ local function new_state()
 		region = nil,        -- the cuboid this recording covers
 		snapshot = nil,      -- the snapshot phase, while it runs
 		snapshot_budget = 20000,  -- region nodes examined per step while snapshotting
+		compression_level = 6,    -- deflate level for the snapshot and light bodies
+		diff_budget = 8,     -- mapblock entries diffed per step after a snapshot
 		sampled = {},        -- player id -> name, from the last pass through the region
 		known_ids = nil,     -- region flat index -> content id, what the recording knows
 		known_param2 = nil,  -- and the param2 that goes with it
@@ -970,11 +971,12 @@ end
 ---@param result table
 local function finish_start(rec, result)
 	local light_body, light_encoding
-	if result.light then
-		light_body = light_codec.encode(result.light, region_module.volume(rec.region))
+	if result.light_body then
+		-- The walk already encoded the layer; only the compression is left.
+		light_body = result.light_body
 		light_encoding = "raw"
 		if core.compress then
-			local packed = core.compress(light_body, "deflate", 9)
+			local packed = core.compress(light_body, "deflate", rec.compression_level)
 			if packed then
 				light_body, light_encoding = packed, "deflate"
 			end
@@ -1176,8 +1178,19 @@ recorder.start = function(record_name, region_arg)
 	rec.pending_blocks = {}
 	rec.snapshot_budget = math.max(1,
 		math.floor(tonumber(core.settings:get("recorder.snapshot_budget")) or 20000))
+	-- Deflate level: 9 is the smallest file, 1 the fastest. The snapshot is
+	-- compressed in one step, and at level 9 a large region holds the step for
+	-- seconds; 6 is the middle the recorder starts from.
+	rec.compression_level = math.max(1, math.min(9,
+		math.floor(tonumber(core.settings:get("recorder.compression_level")) or 6)))
+	-- Mapblock entries diffed per step while catching up after a snapshot; 0
+	-- processes everything at once, which is what used to make the first
+	-- recording step pause for seconds.
+	rec.diff_budget = math.max(0,
+		math.floor(tonumber(core.settings:get("recorder.diff_budget")) or 8))
 
-	local snap, snap_err = snapshot_module.new(region.pos1, region.pos2, rec.light_enabled)
+	local snap, snap_err = snapshot_module.new(region.pos1, region.pos2, rec.light_enabled,
+		rec.compression_level)
 	if not snap then
 		abort_start(rec, snap_err)
 		return nil, snap_err
@@ -1996,9 +2009,16 @@ end
 local function process_block_changes(rec)
 	local pending = rec.pending_blocks
 	if #pending == 0 then return end
-	rec.pending_blocks = {}
+	-- A snapshot queues every changed mapblock for its whole length. Diffing
+	-- all of them in the first recording step is a multi-second pause, so a
+	-- few entries are processed per step instead. The rows keep the tick the
+	-- entry was queued with, so the timeline is the same either way.
+	local budget = rec.diff_budget or 8
+	local processed = 0
 	local block_min, block_max = region_module.blocks(rec.region)
-	for _, entry in ipairs(pending) do
+	while #pending > 0 and (budget <= 0 or processed < budget) do
+		local entry = table.remove(pending, 1)
+		processed = processed + 1
 		local light_changes = {}
 		for hash in pairs(entry.blocks) do
 			local decoded = core.get_position_from_hash(hash)
@@ -2025,7 +2045,7 @@ local function process_block_changes(rec)
 			if body then
 				local encoding = "raw"
 				if core.compress then
-					local packed = core.compress(body, "deflate", 9)
+					local packed = core.compress(body, "deflate", rec.compression_level)
 					if packed then
 						body, encoding = packed, "deflate"
 					end

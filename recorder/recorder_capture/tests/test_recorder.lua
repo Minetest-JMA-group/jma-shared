@@ -1356,6 +1356,44 @@ order_db:close()
 end
 
 ----------------------------------------------------------------------------
+print("=== catching up after a snapshot ===")
+----------------------------------------------------------------------------
+
+-- Changes queued while the snapshot ran are diffed at the start of the
+-- recording. The catch-up is budgeted, so a long snapshot does not become one
+-- multi-second step.
+do
+	mock.settings["recorder.flush_interval"] = "0.01"
+	mock.settings["recorder.diff_budget"] = "1"
+	check(start_recording("catchup", TEST_REGION) == nil, "a recording with a diff budget starts")
+	local catchup_path = recorder.get_recording_path()
+	mock.step(0.1)  -- tick 1
+	local first = {x = 30, y = 5, z = 5}
+	local second = {x = 50, y = 5, z = 5}
+	mock.set_node(first, {name = "default:stone"})
+	mock.set_node(second, {name = "default:dirt"})
+	mock.fire("register_on_mapblocks_changed", {[block_hash(first)] = true}, 1)
+	mock.fire("register_on_mapblocks_changed", {[block_hash(second)] = true}, 1)
+	mock.step(0.1)  -- tick 2: one queued entry is diffed
+	local mid_db = open_recording(catchup_path)
+	check(value(mid_db, "SELECT COUNT(*) FROM Events WHERE type = 'node_change'") == 1,
+		"one queued entry is diffed in the first step")
+	mid_db:close()
+	mock.step(0.1)  -- tick 3: the second entry
+	local end_db = open_recording(catchup_path)
+	local changes = rows(end_db, "SELECT pos_x, tick FROM Events WHERE type = 'node_change' ORDER BY id")
+	check(#changes == 2, "the second entry follows on the next step")
+	check(changes[1].tick == 1 and changes[2].tick == 1,
+		"both carry the tick they were queued on")
+	check(changes[1].pos_x == 30 and changes[2].pos_x == 50,
+		"and both blocks are in the file")
+	end_db:close()
+	check(recorder.stop() == nil, "it stops")
+	mock.settings["recorder.flush_interval"] = nil
+	mock.settings["recorder.diff_budget"] = nil
+end
+
+----------------------------------------------------------------------------
 print("=== two recordings over two regions ===")
 ----------------------------------------------------------------------------
 

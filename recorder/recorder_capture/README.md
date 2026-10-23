@@ -125,6 +125,8 @@ Settings are read when a recording starts, so a change applies to the next one.
 | `recorder.directory` | empty | Where recordings are written. A relative path is taken from the world directory, an absolute path as it is. Empty means `world/recordings/`. |
 | `recorder.max_recordings` | `4` | How many recordings may run at once; `0` is no limit. |
 | `recorder.snapshot_budget` | `20000` | Region nodes examined per server step while the snapshot is taken. Lower it on a server that must stay responsive while snapshotting a large region. |
+| `recorder.compression_level` | `6` | Deflate level for the snapshot body and the light layer: `1` is fastest, `9` smallest. The final compression runs in one step, so lower it if a large snapshot causes a pause. |
+| `recorder.diff_budget` | `8` | Mapblock entries diffed per server step while catching up after a snapshot. `0` processes them all at once. Lower it if the first recording steps still pause. |
 | `recorder.flush_interval` | `2.0` | Seconds of server time between commits. |
 | `recorder.max_buffered` | `20000` | Rows buffered before a commit is forced early. `0` leaves the timing to `flush_interval` alone. |
 | `recorder.max_duration` | `0` | Stop the recording after this many seconds. `0` is no limit. |
@@ -195,10 +197,13 @@ stable for one run of one server, and the file has to be readable elsewhere and
 later.
 
 Taking it happens in server steps: the area is emerged first, then read with one
-VoxelManip, then walked in slices of `recorder.snapshot_budget` nodes. Until it
-finishes the recording is not active - events and samples are dropped exactly as
-they are when nothing is being recorded - and `/recorder status` reports the
-phase. Stopping during the phase abandons the recording and removes the file.
+VoxelManip, then walked in slices of `recorder.snapshot_budget` nodes. The node
+body and the light layer are encoded as the walk proceeds, so only the final
+compression and the database write happen when the phase ends; the deflate
+level is `recorder.compression_level`. Until the phase finishes the recording
+is not active - events and samples are dropped exactly as they are when nothing
+is being recorded - and `/recorder status` reports the phase. Stopping during
+the phase abandons the recording and removes the file.
 
 ### World changes
 
@@ -213,11 +218,15 @@ was. That is what captures an explosion, a flowing liquid, an ABM, a node timer
 and a mod's own `set_node`, with no cooperation from any of them.
 
 The comparison is against the snapshot plus every change since, so the rows are
-exactly the difference between the snapshot and the world. A row is buffered one
-step after the step it belongs to, so its `id` can be later than that of other
-rows sharing its `tick`; the `tick` and `t` columns are what say when it
-happened. `node_change` cannot be switched off: a recording whose world drifts
-from its snapshot would be a recording of something else.
+exactly the difference between the snapshot and the world. A change that
+happened while the snapshot was being taken is queued and diffed when the
+recording starts; the catch-up is limited to `recorder.diff_budget` entries per
+step, so a long snapshot does not turn into one long first step. Those rows
+keep the tick they were queued on (usually 0). A row is buffered one step after
+the step it belongs to, so its `id` can be later than that of other rows sharing
+its `tick`; the `tick` and `t` columns are what say when it happened.
+`node_change` cannot be switched off: a recording whose world drifts from its
+snapshot would be a recording of something else.
 
 ### Node metadata
 

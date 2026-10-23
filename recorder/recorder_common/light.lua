@@ -14,6 +14,41 @@ local light = {}
 
 local unpack = table.unpack or unpack
 
+-- An encoder fed one value at a time, so the capture walk can build the light
+-- body while it walks instead of making a full pass at the end.
+---
+---@return table  -- {add = fun(value), finish = fun(): string}
+function light.encoder()
+	local parts = {}
+	local chunk = {}
+	local encoder = {}
+
+	---@param value number?
+	function encoder:add(value)
+		local byte = math.floor(tonumber(value) or 0)
+		if byte < 0 then
+			byte = 0
+		elseif byte > 255 then
+			byte = 255
+		end
+		chunk[#chunk + 1] = byte
+		if #chunk == 512 then
+			parts[#parts + 1] = string.char(unpack(chunk))
+			chunk = {}
+		end
+	end
+
+	---@return string
+	function encoder:finish()
+		if #chunk > 0 then
+			parts[#parts + 1] = string.char(unpack(chunk))
+		end
+		return table.concat(parts)
+	end
+
+	return encoder
+end
+
 -- Bytes from a table of values, in chunks because string.char takes a bounded
 -- number of arguments. Values outside a byte are clamped: a byte column is not
 -- worth losing the snapshot over.
@@ -21,25 +56,11 @@ local unpack = table.unpack or unpack
 ---@param volume integer
 ---@return string
 function light.encode(values, volume)
-	local parts = {}
-	local chunk = {}
+	local encoder = light.encoder()
 	for i = 1, volume do
-		local value = math.floor(tonumber(values[i]) or 0)
-		if value < 0 then
-			value = 0
-		elseif value > 255 then
-			value = 255
-		end
-		chunk[#chunk + 1] = value
-		if #chunk == 512 then
-			parts[#parts + 1] = string.char(unpack(chunk))
-			chunk = {}
-		end
+		encoder:add(values[i])
 	end
-	if #chunk > 0 then
-		parts[#parts + 1] = string.char(unpack(chunk))
-	end
-	return table.concat(parts)
+	return encoder:finish()
 end
 
 -- The values back, or nil when the body is not one byte per node.

@@ -21,17 +21,33 @@ local snapshot = {}
 ---@field n integer  -- 1-based index into the snapshot's name table
 ---@field p integer? -- param2, 0 when absent
 
----@param entries SnapshotEntry[]
----@return string|nil, string?
-function snapshot.encode(entries)
+-- An encoder fed one entry at a time. The capture walk builds its body while
+-- it walks, so a large region is not encoded in a single step at the end.
+---
+---@return table  -- {add = fun(index, name, param2): boolean|nil, string?, finish = fun(): string}
+function snapshot.encoder()
 	local parts = {}
 	local previous = 0
-	for k = 1, #entries do
-		local entry = entries[k]
-		local index = entry.i
+	local encoder = {}
+
+	---@param index integer
+	---@param name integer
+	---@param param2 integer?
+	---@return boolean|nil, string?
+	function encoder:add(index, name, param2)
+		-- Validate before touching `previous`: a rejected entry must not leave
+		-- the encoder believing it has advanced.
 		if type(index) ~= "number" or index % 1 ~= 0 or index <= previous then
 			return nil, "snapshot entries must have whole, increasing indexes"
 		end
+		if type(name) ~= "number" or name % 1 ~= 0 or name < 1 or name > 65535 then
+			return nil, "snapshot name index must be a whole number in 1..65535"
+		end
+		param2 = param2 or 0
+		if type(param2) ~= "number" or param2 % 1 ~= 0 or param2 < 0 or param2 > 255 then
+			return nil, "snapshot param2 must be a whole number in 0..255"
+		end
+
 		local delta = index - previous
 		previous = index
 		repeat
@@ -40,18 +56,28 @@ function snapshot.encode(entries)
 			if delta > 0 then byte = byte + 128 end
 			parts[#parts + 1] = string.char(byte)
 		until delta == 0
-
-		local name = entry.n
-		if type(name) ~= "number" or name % 1 ~= 0 or name < 1 or name > 65535 then
-			return nil, "snapshot name index must be a whole number in 1..65535"
-		end
-		local param2 = entry.p or 0
-		if type(param2) ~= "number" or param2 % 1 ~= 0 or param2 < 0 or param2 > 255 then
-			return nil, "snapshot param2 must be a whole number in 0..255"
-		end
 		parts[#parts + 1] = string.char(name % 256, math.floor(name / 256) % 256, param2)
+		return true
 	end
-	return table.concat(parts)
+
+	---@return string
+	function encoder:finish()
+		return table.concat(parts)
+	end
+
+	return encoder
+end
+
+---@param entries SnapshotEntry[]
+---@return string|nil, string?
+function snapshot.encode(entries)
+	local encoder = snapshot.encoder()
+	for k = 1, #entries do
+		local entry = entries[k]
+		local ok, err = encoder:add(entry.i, entry.n, entry.p)
+		if not ok then return nil, err end
+	end
+	return encoder:finish()
 end
 
 ---@param body string

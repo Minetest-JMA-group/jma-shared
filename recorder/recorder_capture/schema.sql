@@ -183,6 +183,5 @@ CREATE INDEX idx_movement_player ON Movement(player_id, tick);
 CREATE INDEX idx_events_tick ON Events(tick);
 CREATE INDEX idx_events_type ON Events(type);
 CREATE INDEX idx_events_subject ON Events(subject_player);
-CREATE INDEX idx_events_object ON Events(object_player);
 CREATE INDEX idx_node_metadata_tick ON NodeMetadata(tick);
 CREATE INDEX idx_light_changes_tick ON LightChanges(tick);

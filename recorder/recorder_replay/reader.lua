@@ -65,6 +65,7 @@ function reader.open(path, sqlite)
 			elseif row.key == "recorder.started_at" then rec.started_at = row.value
 			elseif row.key == "recorder.game" then rec.game = row.value
 			elseif row.key == "recorder.end_reason" then rec.end_reason = row.value
+			elseif row.key == "recorder.timeofday" then rec.timeofday = tonumber(row.value)
 			end
 		end
 		for row in db:nrows("SELECT id, name FROM Players") do

@@ -93,9 +93,13 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
 - In live mode the shell still lets sunlight through (it is invisible, not a
   lid), and the arena is relit in full when it is built, cleared and whenever
   the clock jumps. The recorded mode does not recalculate anything.
-- Daylight is rendered using the replay server's current time of day, so the
-  recorded *distribution* of light is exact while the overall brightness
-  follows the arena's sky. Artificial light is exact.
+- The recording also carries the time of day it was made at. Each participant
+  is given that day's sunlight for themselves with
+  `override_day_night_ratio`, so a recording made in daylight does not turn
+  dark because the replay server happens to be at night; whatever override the
+  game had set is remembered and put back on leaving. The sky itself (sun,
+  moon, stars) remains the server's. Recordings made before the time of day
+  was stored play under the server's current day/night.
 - Ending the replay - or the last participant leaving - fills the whole arena
   with air, removes the ghosts and restores the participants. The arena's
   bounds are written to mod storage before its first node, so if the server
@@ -126,8 +130,8 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
   appear.
 - Node timers' state is not recorded or replayed; a node timer's `node_change`
   output is replayed because it changes a node.
-- Daylight is drawn at the replay server's time of day, not the recorded one;
-  see *The reconstruction*.
+- The sky (sun, moon, stars) is the server's, even though the arena's sunlight
+  follows the recording's time of day; see *The reconstruction*.
 - A recording made before the snapshot existed (or one missing it) cannot be
   rebuilt; replay refuses it with that reason.
 

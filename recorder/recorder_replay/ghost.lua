@@ -9,6 +9,14 @@
 
 local ghost = {}
 
+-- The client lights an entity from the light at its bounding-box centre. With
+-- a zero box that sample is the entity's feet - on a slab, a stair or a block
+-- boundary that can be a solid, unlit node, and the whole model turns black
+-- while the world around it is bright. A player-sized box samples the body
+-- instead. The ghost is physical=false, so the box never collides with
+-- anything; it only gives the renderer the right shape to light.
+local PLAYER_BOX = {-0.3, 0.0, -0.3, 0.3, 1.8, 0.3}
+
 local resolved = false
 local model_name, model_def
 
@@ -54,7 +62,7 @@ core.register_entity("recorder_replay:ghost", {
 		visual_size = {x = 1, y = 1},
 		physical = false,
 		pointable = false,
-		collisionbox = {0, 0, 0, 0, 0, 0},
+		collisionbox = PLAYER_BOX,
 		stepheight = 0,
 		nametag = "",
 	},
@@ -87,7 +95,7 @@ function ghost.spawn(name, pos, textures, observers)
 			nametag = name,
 			physical = false,
 			pointable = false,
-			collisionbox = {0, 0, 0, 0, 0, 0},
+			collisionbox = PLAYER_BOX,
 		})
 	else
 		obj:set_properties({
@@ -97,7 +105,7 @@ function ghost.spawn(name, pos, textures, observers)
 			nametag = name,
 			physical = false,
 			pointable = false,
-			collisionbox = {0, 0, 0, 0, 0, 0},
+			collisionbox = PLAYER_BOX,
 		})
 	end
 	if obj.set_observers then obj:set_observers(observers) end

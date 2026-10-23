@@ -1147,6 +1147,8 @@ mock.steps(11, 0.1)
 check(recorder.stop() == nil, "it stops")
 
 local meta_db = open_recording(meta_path)
+check(value(meta_db, "SELECT value FROM Metadata WHERE key = 'recorder.timeofday'") == "0.5",
+	"the time of day is recorded with the file")
 local chest_rows = rows(meta_db, string.format(
 	"SELECT tick, data FROM NodeMetadata WHERE pos_x = %d AND pos_y = %d AND pos_z = %d ORDER BY id",
 	chest.x, chest.y, chest.z))

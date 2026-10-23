@@ -119,6 +119,8 @@ local function new_player(name)
 			get_string = function(_, key) return self.meta[key] or "" end,
 		}
 	end
+	player.get_day_night_ratio = function(self) return self.day_night_ratio end
+	player.override_day_night_ratio = function(self, ratio) self.day_night_ratio = ratio end
 	player.get_wielded_item = function(self)
 		local who = self
 		return { to_string = function() return who.wield end }
@@ -261,6 +263,9 @@ function M.new(opts)
 	core.get_version = function() return { project = "Luanti", string = "5.14.0-mock" } end
 	core.get_game_info = function() return { id = "mockgame", title = "Mock Game" } end
 	core.get_gametime = function() return mock.gametime end
+	mock.timeofday = 0.5
+	core.get_timeofday = function() return mock.timeofday end
+	core.time_to_day_night_ratio = function(time_of_day) return tonumber(time_of_day) end
 	core.get_connected_players = function() return mock.connected end
 	core.get_player_by_name = function(name) return mock.by_name[name] end
 	core.is_player = function(obj) return type(obj) == "table" and obj.is_player_object == true end

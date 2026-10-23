@@ -1777,6 +1777,11 @@ local function step_recording(rec, dtime)
 		-- next step instead of being lost for the rest of the recording.
 		local gametime = core.get_gametime()
 		write_meta(rec, META_PREFIX .. "gametime", gametime and tostring(gametime) or nil)
+		-- The light layer stores skylight, which the client scales by the
+		-- current time of day. A replay can only show the recorded day if it
+		-- knows which day it was.
+		local timeofday = core.get_timeofday()
+		write_meta(rec, META_PREFIX .. "timeofday", timeofday and tostring(timeofday) or nil)
 		for player in core.objects_in_area(rec.region.pos1, rec.region.pos2) do
 			if core.is_player(player) then
 				local pid = player_id(rec, player)

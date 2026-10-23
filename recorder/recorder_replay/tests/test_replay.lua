@@ -71,6 +71,7 @@ local function make_fixture(path, with_light)
 	local ok, err = writer:open(path)
 	assert(ok, err)
 	writer:set_meta("recorder.name", "fixture")
+	writer:set_meta("recorder.timeofday", "0.5")
 	local alice = writer:player_id("Alice")
 	local bob = writer:player_id("Bob")
 
@@ -387,6 +388,7 @@ check(not ok and tostring(message):find("/replay pos1", 1, true) ~= nil,
 local watcher = add_player("Watcher", {pos = {x = 0, y = 0, z = 0}})
 watcher.inventory = {main = {"default:pick_stone", "", "default:torch 10", "", "", "", "", ""}}
 watcher.meta = {}
+watcher.day_night_ratio = 0.25  -- what the game had given them
 
 mark(watcher, WATCHER_ARENA)
 watcher.pos = {x = 0, y = 0, z = 0}
@@ -524,6 +526,9 @@ check(alice and alice.properties.mesh == "character.b3d", "the ghost wears the g
 check(alice and alice.properties.textures and alice.properties.textures[1] == "character.png",
 	"and the texture the recording carries")
 check(alice and alice.properties.nametag == "Alice", "the ghost is named")
+check(alice and alice.properties.collisionbox and alice.properties.collisionbox[5] > 0,
+	"the ghost is lit from a body-sized box, not its feet")
+check(watcher.day_night_ratio == 0.5, "the arena is lit at the recording's time of day")
 check(alice and alice.observers and alice.observers.Watcher == true, "the watcher sees the ghosts")
 check(alice and next(alice.observers, next(alice.observers)) == nil, "and nobody else does")
 
@@ -751,12 +756,14 @@ local joined = sessions.join(session, second)
 check(joined, "a second player joins")
 check(near(second.pos.x, 103.5) and second.pos.y == 15,
 	"and is put on the viewing platform: " .. core.pos_to_string(second.pos))
+check(second.day_night_ratio == 0.5, "and gets the recording's time of day too")
 alice = ghost_of("Alice")
 check(alice.observers.Second == true and alice.observers.Watcher == true,
 	"the ghosts are sent to both")
 sessions.leave(session, second)
 check(ghost_of("Alice").observers.Second == nil, "and not to one who left")
 check(second.pos.x == 0 and second.pos.y == 0, "the viewer is back where they were")
+check(second.day_night_ratio == nil, "with their own sky back")
 check(mock.get_node({x = 100, y = 10, z = 100}).name == "recorder_replay:barrier",
 	"one viewer leaving does not touch the arena")
 
@@ -787,6 +794,7 @@ check(watcher.inventory.main[1] == "default:pick_stone",
 check(watcher.inventory.main[3] == "default:torch 10", "all of them")
 check(watcher.meta["recorder_replay:stash"] == "", "and the stash is gone")
 check(near(watcher.pos.x, 0) and near(watcher.pos.y, 0), "the watcher is back where they started")
+check(watcher.day_night_ratio == 0.25, "and the game's day/night override is back")
 
 ----------------------------------------------------------------------------
 print("=== recordings that cannot be read ===")
@@ -844,6 +852,7 @@ mock.fire("register_on_joinplayer", watcher)
 check(watcher.meta["recorder_replay:stash"] == "", "the stash is consumed on rejoin")
 check(watcher.inventory.main[1] == "default:pick_stone", "and their things are back")
 check(watcher.pos.x == 4 and watcher.pos.y == 5, "where they were when they started watching")
+check(watcher.day_night_ratio == nil, "and no day/night override is left behind")
 
 ----------------------------------------------------------------------------
 print("=== several arenas at once ===")

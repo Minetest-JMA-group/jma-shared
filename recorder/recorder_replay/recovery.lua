@@ -50,6 +50,17 @@ function recovery.enter(player, session, already_stashed)
 	if session.arena then
 		player:set_pos(arena.viewing_position(session.arena))
 	end
+	-- The light layer stores skylight, which the client scales by the time of
+	-- day. Show the recording's own day for this player, remembering whatever
+	-- override the game had given them first.
+	if session.rec.timeofday and core.time_to_day_night_ratio then
+		local name = player:get_player_name()
+		session.day_night = session.day_night or {}
+		if not session.day_night[name] then
+			session.day_night[name] = {ratio = player:get_day_night_ratio()}
+		end
+		player:override_day_night_ratio(core.time_to_day_night_ratio(session.rec.timeofday))
+	end
 	local hook = recorder_common.game_hooks.on_enter
 	if hook then pcall(hook, player, session) end
 end
@@ -71,6 +82,11 @@ function recovery.restore(player, stash)
 			inv:set_list("main", list)
 		end
 	end
+	-- A stash that comes back without a running session has no saved override
+	-- to return to; the game's own join handling can set one again.
+	if player.override_day_night_ratio then
+		player:override_day_night_ratio(nil)
+	end
 end
 
 ---@param player ObjectRef
@@ -85,6 +101,18 @@ function recovery.leave(player, session)
 			if ok and type(stash) == "table" then
 				recovery.restore(player, stash)
 			end
+		end
+	end
+	-- Put back the day/night override the game had, if any. This runs before
+	-- the game's own hook, so the hook has the last word either way.
+	if session.rec.timeofday then
+		local name = player:get_player_name()
+		local previous = session.day_night and session.day_night[name]
+		if previous then
+			session.day_night[name] = nil
+			player:override_day_night_ratio(previous.ratio)
+		else
+			player:override_day_night_ratio(nil)
 		end
 	end
 	local hook = recorder_common.game_hooks.on_leave

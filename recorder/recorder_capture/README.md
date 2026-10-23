@@ -158,7 +158,7 @@ See `schema.sql` for the same information next to the tables.
 
 | Table | Holds |
 | --- | --- |
-| `Metadata` | `key`, `value` – what `recorder.add_meta` writes, plus the `recorder.*` keys describing the recording (name, start and stop times, engine version, game, tick count, why it ended, and any player whose row could not be written). |
+| `Metadata` | `key`, `value` – what `recorder.add_meta` writes, plus the `recorder.*` keys describing the recording (name, start and stop times, time of day, engine version, game, tick count, why it ended, and any player whose row could not be written). |
 | `Snapshot` | One row: the region's low corner and size, the node names it uses, the compressed body of non-air nodes as the world was when the recording began, and optionally the light layer. |
 | `Players` | `id`, `name` – one row per player seen during the recording. |
 | `Movement` | Player kinematics, one row per player per server step in which something about that player changed. |

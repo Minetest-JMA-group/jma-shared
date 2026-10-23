@@ -406,6 +406,7 @@ function sessions.start(arg, player)
 		reconstruct_tick = nil, -- tick of the state the arena's world holds
 		dirty_blocks = {},      -- blocks changed since the last write
 		state_blocks = {},      -- blocks changed since the last seek
+		day_night = {},         -- participant -> the override they had before
 		light = state.has_light and "recorded" or "live",
 		light_last_id = 0,
 		light_events = {rows = {}, next = 1},

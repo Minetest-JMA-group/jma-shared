@@ -432,7 +432,7 @@ local function apply_event(session, ev)
 			session.spawners[data.id] = nil
 			core.delete_particlespawner(replay_id)
 		end
-	elseif ev.type == "chat_final" then
+	elseif ev.type == "chat" then
 		-- Chat is transient like a one-off particle: it is shown when the clock
 		-- reaches it, and a seek does not replay the backlog.
 		if not session.chat then return end

@@ -129,7 +129,7 @@ local function make_fixture(path, with_light)
 		'"id":700}'})
 	-- A delivered line and a mod broadcast, both in their final form. The tick
 	-- is the step a row belongs to, so it has to follow the movement samples.
-	writer:add_event({writer:next_id(), 2, 0.2, "chat_final", alice, nil, 0, 0, 0,
+	writer:add_event({writer:next_id(), 2, 0.2, "chat", alice, nil, 0, 0, 0,
 		nil, nil, nil, '{"message":"Alice: hello","source":"block_msgs"}'})
 	writer:add_event({writer:next_id(), 2, 0.2, "particlespawner", nil, nil, nil, nil, nil,
 		nil, nil, nil,
@@ -159,7 +159,7 @@ local function make_fixture(path, with_light)
 	-- event above carries "default:stone" for the time before she switches.
 	writer:add_event({writer:next_id(), 5, 0.5, "wield", alice, nil, nil, nil, nil,
 		nil, nil, "default:pick_stone", nil})
-	writer:add_event({writer:next_id(), 6, 0.55, "chat_final", nil, nil, nil, nil, nil,
+	writer:add_event({writer:next_id(), 6, 0.55, "chat", nil, nil, nil, nil, nil,
 		nil, nil, nil, '{"message":"Server restarting","source":"server_restart"}'})
 	-- The smoke spawner is cancelled at 0.6 s.
 	writer:add_event({writer:next_id(), 6, 0.6, "particlespawner_delete", nil, nil, nil, nil,

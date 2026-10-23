@@ -129,11 +129,11 @@ Settings are read when a recording starts, so a change applies to the next one.
 | `recorder.max_buffered` | `20000` | Rows buffered before a commit is forced early. `0` leaves the timing to `flush_interval` alone. |
 | `recorder.max_duration` | `0` | Stop the recording after this many seconds. `0` is no limit. |
 | `recorder.max_size_mb` | `0` | Stop the recording once the file reaches this size. `0` is no limit. |
-| `recorder.disabled_events` | empty | Comma-separated event types not to record, e.g. `chat, chatcommand, punch_node`. The recording's own markers (`recording_start`, `recording_stop`, `write_error`) and `node_change` cannot be disabled. |
+| `recorder.disabled_events` | empty | Comma-separated event types not to record, e.g. `dig, particle`. The recording's own markers (`recording_start`, `recording_stop`, `write_error`) and `node_change` cannot be disabled. |
 | `recorder.metadata` | `true` | Record node metadata and inventories (chest contents, sign text, ...). With `false` the recording holds no metadata rows; replay handles both kinds of file the same way. |
 | `recorder.light` | `true` | Record the region's lighting (a byte per node, air included). With `false` the snapshot holds no light layer and replay recalculates the light instead. The time of day is recorded either way. |
 | `recorder.particles` | `true` | Record particle and particle-spawner calls. With `false` none of the three particle event types is written; `recorder.disabled_events` turns them off one at a time. |
-| `recorder.chat` | `true` | Record chat: both the raw player message (`chat`) and the final client-visible line (`chat_final`). With `false` neither is written; `recorder.disabled_events` turns either type off on its own. |
+| `recorder.chat` | `true` | Record the final client-visible global chat line (`chat`). With `false` no chat rows are written; `recorder.disabled_events = chat` does the same per type. |
 
 ## The recording file
 
@@ -315,9 +315,7 @@ SQLite's JSON functions can dig into it, e.g.
 | `item_eat` | player | – | `item` | `hp_change`, `replace_with`, `actor` |
 | `item_pickup` | picker | – | `item` | `actor` |
 | `inventory_move`, `inventory_put`, `inventory_take` | player | – | `item` | `from_list`, `to_list`, `from_index`, `to_index`, `listname`, `index`, `count` |
-| `chat` | player | – | `pos` | `message` (what the player sent, as the engine handler saw it) |
-| `chat_final` | player or – | – | `pos` (when the sender is online) | `message` (the line as clients received it), `source` (the funnel or relay tag) |
-| `chatcommand` | player | – | `pos` | `command`, `params` |
+| `chat` | player or – | – | `pos` (when the sender is online) | `message` (the line as clients received it), `source` (the funnel or relay tag) |
 | `protection_violation` | player | – | `pos` | – |
 | `cheat` | player | – | `pos` | `cheat` |
 | `node_change` | – | – | `pos`, `node` (what it became), `param2` | `old_node`, `old_param2` |
@@ -360,11 +358,10 @@ types off; `recorder.disabled_events` names them one at a time.
 
 ### Chat
 
-The `chat` event is what a player sent, seen by the engine's chat handler.
-The `chat_final` event is what the clients actually received, after every
-filter, cap-lowering, prefix and colour: that is the line replay shows. The
-two are separate rows by design – one is the input, the other the delivered
-output – and either can be turned off through `recorder.disabled_events`.
+The `chat` event is the line clients actually received, after every filter,
+cap-lowering, prefix and colour: that is the line replay shows. It is not the
+player's raw input, and commands are not a separate event; `chat` exists only
+when something was delivered globally.
 
 There is no single engine callback that sees all delivered global chat, so
 capture installs its witnesses after all mods have loaded, on the two funnels
@@ -383,21 +380,22 @@ takes its place. The module that decides this is `chathooks.lua`; it reads
 `chat_lib`/`block_msgs` only when they exist and never changes their return
 values or cancellation behaviour.
 
-A `chat_final` row's `data.source` says where the line came from:
-`block_msgs` for normal player chat, `format_chat_message` for the fallback,
-the chat library's own tag for a relayed broadcast (`discordmt`,
-`xmpp_relay`, ...), or `chat_send_all` when the caller gave none. Player
-lines carry their sender; broadcasts have none. Chat is global, so it is not
-filtered by the recording's region – a recording keeps the conversation
-around it even when the speaker is elsewhere.
+A `chat` row's `data.source` says where the line came from: `block_msgs` for
+normal player chat, `format_chat_message` for the fallback, the chat
+library's own tag for a relayed broadcast (`discordmt`, `xmpp_relay`, ...),
+or `chat_send_all` when the caller gave none. Player lines carry their
+sender; broadcasts have none. Chat is global, so it is not filtered by the
+recording's region – a recording keeps the conversation around it even when
+the speaker is elsewhere.
 
-What is not in `chat_final`: private messages, team chat and command feedback
-(they go to individual players, not to everyone; the raw command is still the
-`chatcommand` event), and the messages the engine itself sends – chat
-throttling and length errors, shutdown notices – which never pass through
-Lua. A mod that calls the chat library's saved original function directly
-also bypasses every witness. The raw player message remains available as the
-`chat` event even when a filter blocks its delivery.
+What is not recorded: the player's raw input before formatting, slash
+commands as commands (`/g` and `/me` appear only as their broadcast line),
+private messages, team chat and command feedback (per-player, not global),
+and the messages the engine itself sends – chat throttling and length
+errors, shutdown notices – which never pass through Lua. A mod that calls
+the chat library's saved original function directly also bypasses every
+witness. `recorder.chat = false` (default true) keeps the event out;
+`recorder.disabled_events = chat` does the same per type.
 
 ### How a recording opens and closes
 

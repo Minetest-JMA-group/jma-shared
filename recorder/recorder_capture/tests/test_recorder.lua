@@ -298,8 +298,6 @@ local mob = { get_luaentity = function() return { name = "mobs:zombie" } end }
 mock.fire("register_on_dignode", { x = 8, y = 9, z = 9 }, { name = "default:dirt", param2 = 0 }, mob)
 -- An actor that will not even say what it is must not cost the event
 mock.fire("register_on_dignode", { x = 7, y = 9, z = 9 }, { name = "default:dirt", param2 = 0 }, {})
-mock.fire("register_on_chat_message", "Bob", "hello there")
-mock.fire("register_on_chatcommand", "Carol", "recorder", "status")
 mock.fire("register_on_dieplayer", bob, { type = "punch", object = alice, from = "engine" })
 mock.fire("register_on_respawnplayer", bob)
 mock.fire("register_on_player_hpchange", bob, -4, { type = "punch", object = alice })
@@ -432,9 +430,6 @@ check(punches[1].data:find('"damage":4') ~= nil and punches[1].data:find('"dir"'
 check(punches[1].data:find('"tool":"default:pick_stone"') ~= nil,
 	"a punch carries what the puncher was holding")
 
-check(#events_of("chat") == 1 and #events_of("chatcommand") == 1, "talking is recorded")
-check(events_of("chat")[1].subject_player == 2, "who talked is the subject")
-check(events_of("chat")[1].data:find("hello there") ~= nil, "what was said is in the data")
 local leaves = events_of("leave")
 check(#leaves == 2, "leaving is recorded")
 check(leaves[1].data == nil, "an ordinary quit carries no data: " .. tostring(leaves[1].data))
@@ -811,15 +806,16 @@ db:close()
 mock.settings["recorder.max_duration"] = nil
 
 -- Events an operator does not want
-mock.settings["recorder.disabled_events"] = "chat, chatcommand"
+mock.settings["recorder.disabled_events"] = "dig"
 check(start_recording("quiet") == nil, "a recording with noisy events turned off starts")
 local quiet_path = recorder.get_recording_path()
-mock.fire("register_on_chat_message", "Alice", "not recorded")
 mock.fire("register_on_dignode", { x = 0, y = 0, z = 0 }, { name = "default:stone", param2 = 0 }, alice)
+mock.fire("register_on_placenode", { x = 0, y = 1, z = 0 }, { name = "default:torch", param2 = 0 }, alice,
+	{ name = "air", param2 = 0 }, { to_string = function() return "default:torch 1" end }, nil)
 check(recorder.stop() == nil, "it stops")
 db = open_recording(quiet_path)
-check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'chat'") == 0, "the turned-off event is not there")
-check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'dig'") == 1, "the others still are")
+check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'dig'") == 0, "the turned-off event is not there")
+check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'place'") == 1, "the others still are")
 db:close()
 mock.settings["recorder.disabled_events"] = nil
 
@@ -1222,7 +1218,7 @@ do
 	check(recorder.stop() == nil, "it stops")
 
 	local chat_db = open_recording(chat_path)
-	local chat_rows = rows(chat_db, "SELECT * FROM Events WHERE type = 'chat_final' ORDER BY id")
+	local chat_rows = rows(chat_db, "SELECT * FROM Events WHERE type = 'chat' ORDER BY id")
 	check(#chat_rows == 3, "only delivered lines are recorded (got " .. #chat_rows .. ")")
 	local first_chat = core.parse_json(chat_rows[1].data)
 	check(first_chat and first_chat.message == "Alice: hello there"
@@ -1238,30 +1234,26 @@ do
 	check(chat_rows[3].subject_player == nil, "and has no sender")
 	chat_db:close()
 
-	-- The setting, and the per-type switch, each turn the capture off.
+	-- The setting and the per-type switch each turn the capture off.
 	mock.settings["recorder.chat"] = "false"
 	check(start_recording("nochat", TEST_REGION) == nil, "a recording with chat off starts")
 	local nochat_path = recorder.get_recording_path()
-	mock.fire("register_on_chat_message", "Alice", "raw not recorded")
 	block_msgs.chat_send_all("Alice", "not recorded")
 	check(recorder.stop() == nil, "it stops")
 	local nochat_db = open_recording(nochat_path)
-	check(value(nochat_db, "SELECT COUNT(*) FROM Events WHERE type IN ('chat', 'chat_final')") == 0,
-		"recorder.chat = false keeps chat out of the file entirely")
+	check(value(nochat_db, "SELECT COUNT(*) FROM Events WHERE type = 'chat'") == 0,
+		"recorder.chat = false keeps chat out of the file")
 	nochat_db:close()
 	mock.settings["recorder.chat"] = nil
 
-	mock.settings["recorder.disabled_events"] = "chat_final"
+	mock.settings["recorder.disabled_events"] = "chat"
 	check(start_recording("nochattype", TEST_REGION) == nil, "a recording with the type off starts")
 	local nochattype_path = recorder.get_recording_path()
-	mock.fire("register_on_chat_message", "Alice", "raw still recorded")
-	block_msgs.chat_send_all("Alice", "final not recorded")
+	block_msgs.chat_send_all("Alice", "not recorded either")
 	check(recorder.stop() == nil, "it stops")
 	local nochattype_db = open_recording(nochattype_path)
-	check(value(nochattype_db, "SELECT COUNT(*) FROM Events WHERE type = 'chat_final'") == 0,
-		"disabled_events can name chat_final on its own")
-	check(value(nochattype_db, "SELECT COUNT(*) FROM Events WHERE type = 'chat'") == 1,
-		"and the raw message is still recorded")
+	check(value(nochattype_db, "SELECT COUNT(*) FROM Events WHERE type = 'chat'") == 0,
+		"disabled_events can name chat on its own")
 	nochattype_db:close()
 	mock.settings["recorder.disabled_events"] = nil
 end

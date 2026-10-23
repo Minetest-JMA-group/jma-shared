@@ -41,7 +41,7 @@ local REGION_EXEMPT = {
 	write_error = true,
 	join = true,
 	leave = true,
-	chat_final = true,
+	chat = true,
 }
 
 recorder = {}
@@ -1151,12 +1151,10 @@ recorder.start = function(record_name, region_arg)
 		rec.disabled.particlespawner = true
 		rec.disabled.particlespawner_delete = true
 	end
-	-- Chat in the recording: both the raw player message and the final line
-	-- clients saw. One switch keeps chat out of a file entirely;
-	-- disabled_events can still turn off either type on its own.
+	-- Chat in the recording: the final line clients saw. One switch keeps it
+	-- out of a file; disabled_events can also name it.
 	if not enabled_setting("recorder.chat", true) then
 		rec.disabled.chat = true
-		rec.disabled.chat_final = true
 	end
 
 	-- The recording proper starts when the snapshot is done; until then
@@ -1608,26 +1606,6 @@ hook("inventory action", core.register_on_player_inventory_action, function(play
 	broadcast_event(ev)
 end)
 
-hook("chat", core.register_on_chat_message, function(name, message)
-	local player = core.get_player_by_name(name)
-	broadcast_event({
-		type = "chat",
-		subject = name,
-		pos = player and player:get_pos() or nil,
-		data = { message = message },
-	})
-end)
-
-hook("chatcommand", core.register_on_chatcommand, function(name, command, params)
-	local player = core.get_player_by_name(name)
-	broadcast_event({
-		type = "chatcommand",
-		subject = name,
-		pos = player and player:get_pos() or nil,
-		data = { command = command, params = params },
-	})
-end)
-
 hook("protection_violation", core.register_on_protection_violation, function(pos, name)
 	broadcast_event({ type = "protection_violation", subject = name, pos = pos })
 end)
@@ -1876,7 +1854,7 @@ end
 -- REGION_EXEMPT). The sender's position is recorded when it can be read, for
 -- analysis; the line is kept either way.
 local function observe_chat(sender, message, source)
-	recorder.log_event("chat_final", {
+	recorder.log_event("chat", {
 		subject = sender,
 		pos = position_of_object(sender),
 		data = { message = message, source = source },

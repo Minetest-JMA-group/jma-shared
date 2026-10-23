@@ -190,7 +190,7 @@ including the one being written.
 | `replay.allow_unfinished` | `false` | Offer recordings that capture is still making, and let sessions start on them. Off by default: the chooser hides them and a session refuses one. |
 | `replay.max_sessions` | `4` | How many replays may run at once; `0` is no limit. |
 | `replay.model` | empty | The model name for ghost bodies, overriding the one picked from the game's registry. |
-| `replay.chat` | `true` | Show the recording's `chat_final` lines to the participants as chat. Read when a session starts. |
+| `replay.chat` | `true` | Show the recording's `chat` lines to the participants as chat. Read when a session starts. |
 | `recorder.directory` | empty | Where recordings are read from, shared with capture. A relative path is taken from the world directory. |
 
 ## For a game

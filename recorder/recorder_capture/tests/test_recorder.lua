@@ -1394,6 +1394,90 @@ do
 end
 
 ----------------------------------------------------------------------------
+print("=== reconciling the opening state before recording ===")
+----------------------------------------------------------------------------
+
+-- The snapshot reads the world once; changes after that read are the opening
+-- state at tick 0. They are diffed while the recording is still inactive, so
+-- no sampled tick can inherit them.
+do
+	local old_snapshot_budget = mock.settings["recorder.snapshot_budget"]
+	mock.settings["recorder.snapshot_budget"] = "30"
+	mock.settings["recorder.diff_budget"] = "1"
+	local region = {pos1 = {x = 620, y = 0, z = 0}, pos2 = {x = 627, y = 2, z = 3}}
+	local first = {x = 620, y = 1, z = 1}
+	local second = {x = 625, y = 1, z = 1}
+	local id, start_err = recorder.start("predrain", region)
+	check(id ~= nil, "a recording with a small snapshot budget starts: " .. tostring(start_err))
+	mock.step(0.1)  -- the snapshot reads the region, then walks its first slice
+	mock.set_node(first, {name = "default:stone"})
+	mock.set_node(second, {name = "default:dirt"})
+	mock.fire("register_on_mapblocks_changed", {[block_hash(first)] = true}, 1)
+	mock.fire("register_on_mapblocks_changed", {[block_hash(second)] = true}, 1)
+	while recorder.list()[1] and recorder.list()[1].snapshotting do
+		mock.step(0.1)
+	end
+	local entry = recorder.list()[1]
+	check(entry and entry.catching_up and not entry.recording,
+		"the recording waits while the opening state is reconciled")
+	mock.chatcommands.recorder.func("someone", "status")
+	check(mock.chats[#mock.chats].message:find("reconciling", 1, true) ~= nil,
+		"the status says what it is doing: " .. tostring(mock.chats[#mock.chats].message))
+	-- An ordinary event during the catch-up is dropped like any pre-start
+	-- event; only the opening-state diffs are written.
+	mock.fire("register_on_dignode", {x = 621, y = 1, z = 1},
+		{name = "default:stone", param2 = 0}, nil)
+	local path = recorder.get_recording_path(id)
+	mock.step(0.1)  -- the second queued entry, then the recording starts
+	check(recorder.is_recording(), "the recording starts when the queue is empty")
+	check(recorder.stop() == nil, "it stops")
+	local db = open_recording(path)
+	local changes = rows(db, "SELECT pos_x, tick FROM Events WHERE type = 'node_change' ORDER BY id")
+	check(#changes == 2 and changes[1].pos_x == 620 and changes[2].pos_x == 625,
+		"both opening-state changes are in the file (got " .. #changes .. ")")
+	check(changes[1].tick == 0 and changes[2].tick == 0, "at tick 0, before any sample")
+	local marker = value(db, "SELECT MIN(id) FROM Events WHERE type = 'recording_start'")
+	local first_change = value(db, "SELECT MIN(id) FROM Events WHERE type = 'node_change'")
+	check(marker ~= nil and first_change ~= nil and marker < first_change,
+		"the opening marker is the first event")
+	check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'dig'") == 0,
+		"an ordinary event during the catch-up is not recorded")
+	check(value(db, "SELECT COUNT(*) FROM Movement") == 0, "no sample was taken before the start")
+	db:close()
+	mock.settings["recorder.snapshot_budget"] = old_snapshot_budget
+	mock.settings["recorder.diff_budget"] = nil
+end
+
+-- Stopping while the opening state is being reconciled abandons the file, the
+-- same as stopping during the snapshot.
+do
+	local old_snapshot_budget = mock.settings["recorder.snapshot_budget"]
+	mock.settings["recorder.snapshot_budget"] = "30"
+	mock.settings["recorder.diff_budget"] = "1"
+	local region = {pos1 = {x = 636, y = 0, z = 0}, pos2 = {x = 645, y = 2, z = 3}}
+	local id, start_err = recorder.start("predrain_stop", region)
+	check(id ~= nil, "a recording for the catch-up stop starts: " .. tostring(start_err))
+	mock.step(0.1)
+	mock.set_node({x = 636, y = 1, z = 1}, {name = "default:stone"})
+	mock.set_node({x = 640, y = 1, z = 1}, {name = "default:dirt"})
+	mock.fire("register_on_mapblocks_changed",
+		{[block_hash({x = 636, y = 1, z = 1})] = true}, 1)
+	mock.fire("register_on_mapblocks_changed",
+		{[block_hash({x = 640, y = 1, z = 1})] = true}, 1)
+	while recorder.list()[1] and recorder.list()[1].snapshotting do
+		mock.step(0.1)
+	end
+	local entry = recorder.list()[1]
+	check(entry and entry.catching_up, "the recording is reconciling")
+	local path = recorder.get_recording_path(id)
+	check(recorder.stop(id) == nil, "stopping during the catch-up succeeds")
+	check(#recorder.list() == 0, "the recording is gone")
+	check(not file_exists_anywhere(path), "and its file is removed")
+	mock.settings["recorder.snapshot_budget"] = old_snapshot_budget
+	mock.settings["recorder.diff_budget"] = nil
+end
+
+----------------------------------------------------------------------------
 print("=== two recordings over two regions ===")
 ----------------------------------------------------------------------------
 

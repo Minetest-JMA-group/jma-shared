@@ -126,7 +126,7 @@ Settings are read when a recording starts, so a change applies to the next one.
 | `recorder.max_recordings` | `4` | How many recordings may run at once; `0` is no limit. |
 | `recorder.snapshot_budget` | `20000` | Region nodes examined per server step while the snapshot is taken. Lower it on a server that must stay responsive while snapshotting a large region. |
 | `recorder.compression_level` | `6` | Deflate level for the snapshot body and the light layer: `1` is fastest, `9` smallest. The final compression runs in one step, so lower it if a large snapshot causes a pause. |
-| `recorder.diff_budget` | `8` | Mapblock entries diffed per server step while catching up after a snapshot. `0` processes them all at once. Lower it if the first recording steps still pause. |
+| `recorder.diff_budget` | `8` | Mapblock entries diffed per server step while reconciling the opening state before the recording starts, and while catching up during it. `0` processes them all at once. Lower it if those steps pause; raising it shortens the wait before the recording starts. |
 | `recorder.flush_interval` | `2.0` | Seconds of server time between commits. |
 | `recorder.max_buffered` | `20000` | Rows buffered before a commit is forced early. `0` leaves the timing to `flush_interval` alone. |
 | `recorder.max_duration` | `0` | Stop the recording after this many seconds. `0` is no limit. |
@@ -204,6 +204,15 @@ level is `recorder.compression_level`. Until the phase finishes the recording
 is not active - events and samples are dropped exactly as they are when nothing
 is being recorded - and `/recorder status` reports the phase. Stopping during
 the phase abandons the recording and removes the file.
+
+When the walk finishes the recorder is still not active. The mapblocks that
+changed during the snapshot are queued, and they are the opening state: they are
+diffed a few per step (`recorder.diff_budget`) before the recording starts, so
+every one of them is tick 0 and no sampled tick can inherit a change that
+happened before it. The `recording_start` marker is written first; the joins
+and the first sample follow once that queue is empty. The wait is reported by
+`/recorder status`, and stopping while it lasts removes the file, just as
+stopping during the snapshot does.
 
 ### World changes
 
@@ -409,16 +418,19 @@ witness. `recorder.chat = false` (default true) keeps the event out;
 ### How a recording opens and closes
 
 Before any of that, `start()` takes the region's snapshot (see *The snapshot*
-above). The recording proper begins when it is done, so the file holds the world
-as it was before the first recorded action.
+above). When the snapshot is done the file holds the world as it was, the
+recorder writes its opening marker, and it then reconciles the changes queued
+during the snapshot before it samples anything. The recording's first sampled
+tick is the first one after that.
 
-A recording opens with a `recording_start` event, followed by a `join` event for
-everyone in the region at that moment (with `data.at_start`), and closes with a
-`recording_stop` event carrying `data.reason`. The `at_start` joins are written
-at the first server step after the recording begins, because a mod may start a
-recording while it is still loading and the engine answers no questions about
-the world before the server is running; a player who joins in that same moment
-is joined once, not twice.
+A recording opens with a `recording_start` event; any node changes that are part
+of the opening state follow at tick 0, and then a `join` event for everyone in
+the region at the moment the recorder becomes active (with `data.at_start`). It
+closes with a `recording_stop` event carrying `data.reason`. The `at_start`
+joins are written at the first server step after the recording becomes active,
+because a mod may start a recording while it is still loading and the engine
+answers no questions about the world before the server is running; a player who
+joins in that same moment is joined once, not twice.
 
 ### Order and time
 

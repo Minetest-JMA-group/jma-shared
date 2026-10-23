@@ -125,6 +125,8 @@ local function new_state()
 		wield = {},          -- player id -> last wielded itemstring
 		anim = {},           -- player id -> last animation the player was wearing
 		joined = {},         -- player ids that are in the recording as present
+		catching_up = false, -- the snapshot is written; its queued changes are being diffed
+		reconciling = false, -- those diffs may write events while the recording is not active
 	}
 end
 
@@ -599,7 +601,12 @@ end
 -- not just this event but every row buffered beside it.
 ---@param ev table
 record_event = function(rec, ev)
-	if not rec.recording then return end
+	-- `reconciling` is the narrow window in which the snapshot's opening-state
+	-- changes are written before the recording is active. It is only set
+	-- around process_block_changes(), not for the whole catch-up phase, so an
+	-- engine callback during that phase is still dropped like any pre-start
+	-- event.
+	if not rec.recording and not rec.reconciling then return end
 	if type(ev.type) ~= "string" or ev.type == "" then
 		complain(rec, "event without a type", "cannot record an event whose type is not a name")
 		return
@@ -955,6 +962,8 @@ local function abort_start(rec, reason)
 	recordings[rec.id] = nil
 	rec.recording = false
 	rec.snapshot = nil
+	rec.catching_up = false
+	rec.reconciling = false
 	rec.region = nil
 	rec.known_ids, rec.known_param2 = nil, nil
 	rec.light_enabled = false
@@ -966,10 +975,12 @@ local function abort_start(rec, reason)
 	rec.name, rec.path = nil, nil
 end
 
--- The snapshot is done: the file can say what the world looked like, and the
--- recording proper begins.
+-- The snapshot is written: the file can say what the world looked like. The
+-- recording proper waits until the changes queued during the snapshot have
+-- been diffed, because those are the opening state and must all be tick 0
+-- before the first sampled tick is recorded.
 ---@param result table
-local function finish_start(rec, result)
+local function finish_snapshot(rec, result)
 	local light_body, light_encoding
 	if result.light_body then
 		-- The walk already encoded the layer; only the compression is left.
@@ -1009,12 +1020,31 @@ local function finish_start(rec, result)
 	write_meta(rec, META_PREFIX .. "server_version", version and version.string or nil)
 	local game = core.get_game_info()
 	write_meta(rec, META_PREFIX .. "game", game and game.id or nil)
+
+	-- The opening marker goes in first, before the catch-up rows, so the file
+	-- still opens with it. The recorder is not active yet; the rows that follow
+	-- are the opening state at tick 0.
+	rec.db:add_event({ rec.db:next_id(), 0, 0, "recording_start",
+		nil, nil, nil, nil, nil, nil, nil, nil, nil })
+	rec.catching_up = true
+	local flushed, flush_err = rec.db:flush()
+	if not flushed then
+		abort_start(rec, flush_err)
+		return
+	end
+	core.log("action", string.format(
+		"[recorder] recording %s (%s) snapshot done; reconciling the opening state",
+		rec.name, rec.id))
+end
+
+-- The pre-recording changes are reconciled and the recording becomes active.
+local function begin_recording(rec)
+	rec.catching_up = false
 	rec.recording = true
-	rec.snapshot = nil
-	-- The baseline rows go in with the opening marker, so a reader has the
-	-- state of every container from the first moment of the recording.
+	-- The baseline rows go in now, so a reader has the state of every container
+	-- as it is at the first sampled tick, including any change made during the
+	-- catch-up.
 	record_metadata_baseline(rec)
-	record_event(rec, { type = "recording_start" })
 	-- Who is online and what the world time is has to wait for the first server
 	-- step: a mod is allowed to start a recording while it loads, and the
 	-- engine refuses those questions before the server is running.
@@ -1044,7 +1074,7 @@ local function advance_snapshot(rec)
 	end
 	rec.snapshot = nil
 	snapshot_module.free(snap)
-	finish_start(rec, result)
+	finish_snapshot(rec, result)
 end
 
 -- Find a recording by id, by name, or by a unique id prefix. Without an
@@ -1208,12 +1238,15 @@ end
 ---@param reason string?
 ---@return nil|string  -- nil on success, an error message on failure
 local function stop(rec, reason)
-	if rec.snapshot then
-		-- The recording never became one: there is nothing to mark in the file,
-		-- and a file that was never a recording should not be left behind.
+	if rec.snapshot or rec.catching_up then
+		-- The recording never began: there is nothing to mark in the file, and
+		-- a file that was never a recording should not be left behind.
 		local path = rec.path
-		snapshot_module.free(rec.snapshot)
-		rec.snapshot = nil
+		local snapshotting = rec.snapshot ~= nil
+		if rec.snapshot then
+			snapshot_module.free(rec.snapshot)
+			rec.snapshot = nil
+		end
 		rec.db:close()
 		if path then
 			os.remove(path)
@@ -1222,6 +1255,8 @@ local function stop(rec, reason)
 		end
 		recordings[rec.id] = nil
 		rec.recording = false
+		rec.catching_up = false
+		rec.reconciling = false
 		rec.region = nil
 		rec.known_ids, rec.known_param2 = nil, nil
 		rec.light_enabled = false
@@ -1233,7 +1268,8 @@ local function stop(rec, reason)
 		rec.anim = {}
 		rec.name, rec.path = nil, nil
 		core.log("action", "[recorder] recording " .. tostring(rec.id) ..
-			" abandoned while snapshotting; the file is gone")
+			(snapshotting and " abandoned while snapshotting; the file is gone"
+				or " abandoned while reconciling its opening state; the file is gone"))
 		return nil
 	end
 	if not rec.recording then
@@ -1404,6 +1440,7 @@ recorder.list = function()
 			path = rec.path,
 			recording = rec.recording,
 			snapshotting = rec.snapshot ~= nil,
+			catching_up = rec.catching_up or false,
 			elapsed = rec.elapsed,
 			region = rec.region,
 		}
@@ -1902,7 +1939,7 @@ end)
 core.register_on_mapblocks_changed(function(modified_blocks, count)
 	if not modified_blocks or not count or count == 0 then return end
 	for _, rec in pairs(recordings) do
-		if rec.recording or rec.snapshot then
+		if rec.recording or rec.snapshot or rec.catching_up then
 			rec.pending_blocks[#rec.pending_blocks + 1] = {
 				tick = rec.tick,     -- the step the change belongs to, which may
 				t = rec.elapsed,     -- be one before the step that diffs it
@@ -2119,7 +2156,21 @@ core.register_globalstep(function(dtime)
 		end
 	end
 	for id, rec in pairs(recordings) do
-		if rec.recording and not snapshotting[id] then
+		if rec.catching_up then
+			-- The opening-state changes are diffed while the recording is still
+			-- inactive. Every one of them is tick 0, and no later change can be
+			-- folded into one of their ticks. `reconciling` also lets a failed
+			-- flush during the catch-up write its own gap marker.
+			rec.reconciling = true
+			process_block_changes(rec)
+			if #rec.pending_blocks == 0 then
+				rec.reconciling = false
+				begin_recording(rec)
+			else
+				maybe_flush(rec)
+				rec.reconciling = false
+			end
+		elseif rec.recording and not snapshotting[id] then
 			step_recording(rec, dtime)
 		end
 	end
@@ -2153,6 +2204,11 @@ local function status_line(rec)
 	if rec.snapshot then
 		return string.format("%s  '%s'  snapshotting %d%% (%s)", rec.id, rec.name,
 			math.floor(snapshot_module.progress(rec.snapshot) * 100), rec.path)
+	end
+	if rec.catching_up then
+		local queued = #rec.pending_blocks
+		return string.format("%s  '%s'  reconciling the opening state (%d queued change%s) (%s)",
+			rec.id, rec.name, queued, queued == 1 and "" or "s", rec.path)
 	end
 	local stats = rec.db:stats()
 	-- Commits that are failing right now are the difference between a recording

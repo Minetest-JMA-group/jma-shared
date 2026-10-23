@@ -24,5 +24,6 @@ run() {
 
 run "test_snapshot (emerge, read, walk, encode)" test_snapshot.lua
 run "test_dbmanager (schema, ordering, dropped batches, closing)" test_dbmanager.lua
+run "test_chathooks (where global chat is observed)" test_chathooks.lua
 run "test_recorder (API, recorded events, settings, failure)" test_recorder.lua
 echo "ALL TESTS PASSED"

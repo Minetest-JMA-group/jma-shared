@@ -133,6 +133,7 @@ Settings are read when a recording starts, so a change applies to the next one.
 | `recorder.metadata` | `true` | Record node metadata and inventories (chest contents, sign text, ...). With `false` the recording holds no metadata rows; replay handles both kinds of file the same way. |
 | `recorder.light` | `true` | Record the region's lighting (a byte per node, air included). With `false` the snapshot holds no light layer and replay recalculates the light instead. The time of day is recorded either way. |
 | `recorder.particles` | `true` | Record particle and particle-spawner calls. With `false` none of the three particle event types is written; `recorder.disabled_events` turns them off one at a time. |
+| `recorder.chat` | `true` | Record chat: both the raw player message (`chat`) and the final client-visible line (`chat_final`). With `false` neither is written; `recorder.disabled_events` turns either type off on its own. |
 
 ## The recording file
 
@@ -314,7 +315,8 @@ SQLite's JSON functions can dig into it, e.g.
 | `item_eat` | player | – | `item` | `hp_change`, `replace_with`, `actor` |
 | `item_pickup` | picker | – | `item` | `actor` |
 | `inventory_move`, `inventory_put`, `inventory_take` | player | – | `item` | `from_list`, `to_list`, `from_index`, `to_index`, `listname`, `index`, `count` |
-| `chat` | player | – | `pos` | `message` |
+| `chat` | player | – | `pos` | `message` (what the player sent, as the engine handler saw it) |
+| `chat_final` | player or – | – | `pos` (when the sender is online) | `message` (the line as clients received it), `source` (the funnel or relay tag) |
 | `chatcommand` | player | – | `pos` | `command`, `params` |
 | `protection_violation` | player | – | `pos` | – |
 | `cheat` | player | – | `pos` | `cheat` |
@@ -355,6 +357,47 @@ watcher.
 A per-step emitter – a rocket's smoke trail, say – writes one `particle` row
 per step for as long as it runs. `recorder.particles = false` turns all three
 types off; `recorder.disabled_events` names them one at a time.
+
+### Chat
+
+The `chat` event is what a player sent, seen by the engine's chat handler.
+The `chat_final` event is what the clients actually received, after every
+filter, cap-lowering, prefix and colour: that is the line replay shows. The
+two are separate rows by design – one is the input, the other the delivered
+output – and either can be turned off through `recorder.disabled_events`.
+
+There is no single engine callback that sees all delivered global chat, so
+capture installs its witnesses after all mods have loaded, on the two funnels
+the server's chat plumbing exposes:
+
+- normal player chat, at the call that delivers the formatted line to the
+  players who did not block the sender (`block_msgs.chat_send_all`);
+- mod broadcasts – spectator chat, `/g`, `/me`, announcements, messages
+  relayed in from Discord or XMPP – through the chat library's send-all
+  callback list.
+
+When that plumbing is absent (or `block_msgs`' backend failed, in which case
+it registers no chat callback), the engine formats player chat itself and
+calls the Lua formatter last, so a wrapper around `core.format_chat_message`
+takes its place. The module that decides this is `chathooks.lua`; it reads
+`chat_lib`/`block_msgs` only when they exist and never changes their return
+values or cancellation behaviour.
+
+A `chat_final` row's `data.source` says where the line came from:
+`block_msgs` for normal player chat, `format_chat_message` for the fallback,
+the chat library's own tag for a relayed broadcast (`discordmt`,
+`xmpp_relay`, ...), or `chat_send_all` when the caller gave none. Player
+lines carry their sender; broadcasts have none. Chat is global, so it is not
+filtered by the recording's region – a recording keeps the conversation
+around it even when the speaker is elsewhere.
+
+What is not in `chat_final`: private messages, team chat and command feedback
+(they go to individual players, not to everyone; the raw command is still the
+`chatcommand` event), and the messages the engine itself sends – chat
+throttling and length errors, shutdown notices – which never pass through
+Lua. A mod that calls the chat library's saved original function directly
+also bypasses every witness. The raw player message remains available as the
+`chat` event even when a filter blocks its delivery.
 
 ### How a recording opens and closes
 

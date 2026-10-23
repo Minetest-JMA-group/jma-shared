@@ -13,6 +13,18 @@ local by_id = {}
 local by_player = {}
 local counter = 0
 
+-- A recorded chat line is shown with this in front, so a watcher can tell it
+-- from the replay server's own chat.
+local CHAT_PREFIX = "[replay] "
+
+-- A boolean setting whose default is on; get_bool() alone reads an unset
+-- setting as off, which is the wrong default for these switches.
+local function setting_on(name, default)
+	local raw = core.settings:get(name)
+	if raw == nil or raw == "" then return default end
+	return core.settings:get_bool(name)
+end
+
 ---@param dependencies table
 function sessions.init(dependencies)
 	deps = dependencies
@@ -420,6 +432,16 @@ local function apply_event(session, ev)
 			session.spawners[data.id] = nil
 			core.delete_particlespawner(replay_id)
 		end
+	elseif ev.type == "chat_final" then
+		-- Chat is transient like a one-off particle: it is shown when the clock
+		-- reaches it, and a seek does not replay the backlog.
+		if not session.chat then return end
+		local data = event_data(ev.data)
+		if data and type(data.message) == "string" then
+			for name in pairs(session.participants) do
+				core.chat_send_player(name, CHAT_PREFIX .. data.message)
+			end
+		end
 	elseif ev.type == "node_change" then
 		-- The arrays are written to the map once per step, however many nodes
 		-- changed in it; a step with no node changes touches nothing. Only the
@@ -630,6 +652,7 @@ function sessions.start(arg, player)
 		T = 0,
 		speed = 1,
 		paused = true,
+		chat = setting_on("replay.chat", true),  -- show recorded chat lines
 		arena = box,
 		offset = deps.arena.offset(box, state.region),
 		reconstruct = state,

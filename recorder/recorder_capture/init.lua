@@ -34,13 +34,14 @@ local MANDATORY_EVENTS = {
 
 -- Events that describe the recording rather than the region, and that must not
 -- be judged by a position: a leave has no position left to judge when the
--- player has already gone.
+-- player has already gone, and global chat is not about a place at all.
 local REGION_EXEMPT = {
 	recording_start = true,
 	recording_stop = true,
 	write_error = true,
 	join = true,
 	leave = true,
+	chat_final = true,
 }
 
 recorder = {}
@@ -1150,6 +1151,13 @@ recorder.start = function(record_name, region_arg)
 		rec.disabled.particlespawner = true
 		rec.disabled.particlespawner_delete = true
 	end
+	-- Chat in the recording: both the raw player message and the final line
+	-- clients saw. One switch keeps chat out of a file entirely;
+	-- disabled_events can still turn off either type on its own.
+	if not enabled_setting("recorder.chat", true) then
+		rec.disabled.chat = true
+		rec.disabled.chat_final = true
+	end
 
 	-- The recording proper starts when the snapshot is done; until then
 	-- rec.recording stays false and the existing gate drops events.
@@ -1844,6 +1852,50 @@ core.delete_particlespawner = function(...)
 	})
 	return unpack_all(result)
 end
+
+----------------------------------------------------------------------------
+-- Chat
+----------------------------------------------------------------------------
+
+-- Global chat reaches clients through two funnels that do not call each other:
+-- normal player chat is delivered line by line by block_msgs, and mod
+-- broadcasts go through chat_lib's send-all callbacks. Both are watched into
+-- one event, so a replay can show the line clients actually saw - prefixes,
+-- colors and caps handling already applied. A server without that plumbing
+-- gets the engine's formatter instead; see chathooks.lua.
+local chathooks = dofile(modpath .. "/chathooks.lua")
+
+local chat_complaints = {}
+local function report_chat_failure(message)
+	if chat_complaints[message] then return end
+	chat_complaints[message] = true
+	log_error("cannot record chat: " .. message)
+end
+
+-- A chat line is global, so it is not judged by the recording's region (see
+-- REGION_EXEMPT). The sender's position is recorded when it can be read, for
+-- analysis; the line is kept either way.
+local function observe_chat(sender, message, source)
+	recorder.log_event("chat_final", {
+		subject = sender,
+		pos = position_of_object(sender),
+		data = { message = message, source = source },
+	})
+end
+
+-- Later mods replace the chat functions while they load (chat_lib, block_msgs,
+-- the game's formatter), so the witnesses go on only once loading is over.
+core.register_on_mods_loaded(function()
+	local installed = chathooks.install({
+		core = core,
+		chat_lib = chat_lib,
+		block_msgs = block_msgs,
+		observe = observe_chat,
+		report = report_chat_failure,
+	})
+	core.log("action", string.format("[recorder] chat capture: %s, %s",
+		tostring(installed.normal_chat or "none"), tostring(installed.broadcast or "none")))
+end)
 
 ----------------------------------------------------------------------------
 -- Changes to the region's nodes

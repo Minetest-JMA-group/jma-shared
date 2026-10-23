@@ -9,6 +9,7 @@
 ---@field T number             -- recording seconds shown
 ---@field speed number
 ---@field paused boolean
+---@field chat boolean            -- show recorded chat lines
 ---@field participants table<string, boolean>
 ---@field rec table            -- the reader's recording handle
 ---@field arena table          -- {pos1 = {x,y,z}, pos2 = {x,y,z}} the box the replay is built in

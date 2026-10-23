@@ -127,6 +127,10 @@ local function make_fixture(path, with_light)
 		'{"definition":{"amount":20,"time":0.5,"minpos":{"x":0,"y":0,"z":0},' ..
 		'"maxpos":{"x":1,"y":0,"z":0},"texture":"recorder_smoke.png"},' ..
 		'"id":700}'})
+	-- A delivered line and a mod broadcast, both in their final form. The tick
+	-- is the step a row belongs to, so it has to follow the movement samples.
+	writer:add_event({writer:next_id(), 2, 0.2, "chat_final", alice, nil, 0, 0, 0,
+		nil, nil, nil, '{"message":"Alice: hello","source":"block_msgs"}'})
 	writer:add_event({writer:next_id(), 2, 0.2, "particlespawner", nil, nil, nil, nil, nil,
 		nil, nil, nil,
 		'{"definition":{"amount":2,"time":0,"minpos":{"x":4,"y":0,"z":4},' ..
@@ -155,6 +159,8 @@ local function make_fixture(path, with_light)
 	-- event above carries "default:stone" for the time before she switches.
 	writer:add_event({writer:next_id(), 5, 0.5, "wield", alice, nil, nil, nil, nil,
 		nil, nil, "default:pick_stone", nil})
+	writer:add_event({writer:next_id(), 6, 0.55, "chat_final", nil, nil, nil, nil, nil,
+		nil, nil, nil, '{"message":"Server restarting","source":"server_restart"}'})
 	-- The smoke spawner is cancelled at 0.6 s.
 	writer:add_event({writer:next_id(), 6, 0.6, "particlespawner_delete", nil, nil, nil, nil,
 		nil, nil, nil, nil, '{"id":700,"playername":"Alice"}'})
@@ -794,6 +800,54 @@ check(puff and puff.texture == "recorder_puff.png" and puff.playername == nil,
 mock.step(0.3)
 check(#live_by_texture("recorder_smoke.png") == 0, "the delete event cancels the replay spawner")
 check(#live_by_texture("recorder_ember.png") == 1, "and leaves the others alone")
+
+----------------------------------------------------------------------------
+print("=== recorded chat ===")
+----------------------------------------------------------------------------
+
+-- Chat is transient: it is shown when the clock reaches it and is not rebuilt
+-- by a seek.
+sessions.seek(session, 0.1)
+local chats_before = #mock.chats
+mock.step(0.1)  -- T = 0.2, across the line at 0.2
+check(#mock.chats == chats_before + 1, "a recorded line is shown when the clock reaches it")
+check(mock.chats[#mock.chats].name == "Watcher", "to the replay's participant")
+check(mock.chats[#mock.chats].message == "[replay] Alice: hello",
+	"verbatim, with a marker: " .. tostring(mock.chats[#mock.chats].message))
+
+sessions.seek(session, 0.5)
+chats_before = #mock.chats
+mock.step(0.1)  -- T = 0.6, across the broadcast at 0.55
+check(#mock.chats == chats_before + 1
+	and mock.chats[#mock.chats].message == "[replay] Server restarting",
+	"a broadcast is shown too: " .. tostring(mock.chats[#mock.chats].message))
+
+chats_before = #mock.chats
+sessions.seek(session, 0.1)
+sessions.seek(session, 0.6)
+check(#mock.chats == chats_before, "a seek does not replay chat from the past")
+
+-- The switch is read when a session starts.
+mock.settings["replay.chat"] = "false"
+local quiet = add_player("Quiet", {pos = {x = 0, y = 0, z = 0}})
+quiet.inventory = {main = {}}
+mark(quiet, box(1100, 110, 1100, 1107, 114, 1107))
+quiet.pos = {x = 0, y = 0, z = 0}
+local was_paused = session.paused
+session.paused = true
+local quiet_session = sessions.start(fixture_path, quiet)
+check(quiet_session ~= nil, "a session with replay.chat off starts")
+local quiet_before = #mock.chats
+sessions.seek(quiet_session, 0.1)
+mock.step(0.1)  -- T = 0.2, across the line at 0.2
+local quiet_chats = 0
+for i = quiet_before + 1, #mock.chats do
+	if mock.chats[i].name == "Quiet" then quiet_chats = quiet_chats + 1 end
+end
+check(quiet_chats == 0, "replay.chat = false keeps recorded chat out")
+recorder_replay.end_session(quiet_session.id, "test")
+session.paused = was_paused
+mock.settings["replay.chat"] = nil
 
 ----------------------------------------------------------------------------
 print("=== the remote control ===")

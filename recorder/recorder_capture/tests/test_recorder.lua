@@ -1182,6 +1182,91 @@ mock.settings["recorder.particles"] = nil
 end
 
 ----------------------------------------------------------------------------
+print("=== global chat ===")
+----------------------------------------------------------------------------
+
+-- Stand-ins with the shapes the real chat mods have: block_msgs delivers
+-- normal chat, chat_lib carries broadcasts. The recorder installs its
+-- witnesses when mods finish loading, which is when the real ones are done
+-- replacing these functions.
+do
+	local send_all_callbacks = {}
+	chat_lib = {
+		registered_on_chat_message = {[100] = function() end},
+		register_on_chat_send_all = function(func)
+			send_all_callbacks[#send_all_callbacks + 1] = func
+		end,
+	}
+	block_msgs = {
+		delivered = {},
+		chat_send_all = function(sender, message)
+			block_msgs.delivered[#block_msgs.delivered + 1] = {sender = sender, message = message}
+			return "delivered"
+		end,
+	}
+	mock.fire("register_on_mods_loaded")
+
+	check(start_recording("chat", TEST_REGION) == nil, "a recording with chat capture starts")
+	local chat_path = recorder.get_recording_path()
+	check(block_msgs.chat_send_all("Alice", "Alice: hello there") == "delivered",
+		"the chat witness returns exactly what delivery returned")
+	check(#block_msgs.delivered == 1, "and delivery still happened")
+	check(block_msgs.chat_send_all("Outsider", "Outsider: from outside") == "delivered",
+		"a line from outside the region is still chat")
+	for _, func in ipairs(send_all_callbacks) do
+		func("Server restarting", "server_restart")
+	end
+	-- Normal chat already goes through block_msgs; watching the formatter as
+	-- well would store every line twice.
+	core.format_chat_message("Alice", "not a delivery")
+	check(recorder.stop() == nil, "it stops")
+
+	local chat_db = open_recording(chat_path)
+	local chat_rows = rows(chat_db, "SELECT * FROM Events WHERE type = 'chat_final' ORDER BY id")
+	check(#chat_rows == 3, "only delivered lines are recorded (got " .. #chat_rows .. ")")
+	local first_chat = core.parse_json(chat_rows[1].data)
+	check(first_chat and first_chat.message == "Alice: hello there"
+		and first_chat.source == "block_msgs", "the final line and its funnel are stored")
+	check(chat_rows[1].subject_player == value(chat_db,
+		"SELECT id FROM Players WHERE name = 'Alice'"), "with its sender")
+	local outside_chat = core.parse_json(chat_rows[2].data)
+	check(outside_chat and outside_chat.message == "Outsider: from outside",
+		"the outside sender's line is kept: chat is not region-bound")
+	local broadcast_chat = core.parse_json(chat_rows[3].data)
+	check(broadcast_chat and broadcast_chat.message == "Server restarting"
+		and broadcast_chat.source == "server_restart", "a broadcast keeps its origin tag")
+	check(chat_rows[3].subject_player == nil, "and has no sender")
+	chat_db:close()
+
+	-- The setting, and the per-type switch, each turn the capture off.
+	mock.settings["recorder.chat"] = "false"
+	check(start_recording("nochat", TEST_REGION) == nil, "a recording with chat off starts")
+	local nochat_path = recorder.get_recording_path()
+	mock.fire("register_on_chat_message", "Alice", "raw not recorded")
+	block_msgs.chat_send_all("Alice", "not recorded")
+	check(recorder.stop() == nil, "it stops")
+	local nochat_db = open_recording(nochat_path)
+	check(value(nochat_db, "SELECT COUNT(*) FROM Events WHERE type IN ('chat', 'chat_final')") == 0,
+		"recorder.chat = false keeps chat out of the file entirely")
+	nochat_db:close()
+	mock.settings["recorder.chat"] = nil
+
+	mock.settings["recorder.disabled_events"] = "chat_final"
+	check(start_recording("nochattype", TEST_REGION) == nil, "a recording with the type off starts")
+	local nochattype_path = recorder.get_recording_path()
+	mock.fire("register_on_chat_message", "Alice", "raw still recorded")
+	block_msgs.chat_send_all("Alice", "final not recorded")
+	check(recorder.stop() == nil, "it stops")
+	local nochattype_db = open_recording(nochattype_path)
+	check(value(nochattype_db, "SELECT COUNT(*) FROM Events WHERE type = 'chat_final'") == 0,
+		"disabled_events can name chat_final on its own")
+	check(value(nochattype_db, "SELECT COUNT(*) FROM Events WHERE type = 'chat'") == 1,
+		"and the raw message is still recorded")
+	nochattype_db:close()
+	mock.settings["recorder.disabled_events"] = nil
+end
+
+----------------------------------------------------------------------------
 print("=== changes to the nodes ===")
 ----------------------------------------------------------------------------
 

@@ -192,7 +192,7 @@ local CALLBACKS = {
 	"register_on_protection_violation", "register_on_cheat",
 	"register_on_mapblocks_changed",
 	"register_on_player_receive_fields",
-	"register_globalstep", "register_on_shutdown",
+	"register_globalstep", "register_on_shutdown", "register_on_mods_loaded",
 }
 
 local function add_player(self, name, fields)
@@ -923,6 +923,14 @@ function M.new(opts)
 		local ok, value = pcall(parse_json, text)
 		if ok then return value end
 		return nil
+	end
+
+	-- The engine's default chat formatter: "name: message", with the caller
+	-- visible so a test can tell a formatting call from a delivery.
+	mock.formatted = {}
+	core.format_chat_message = function(name, message)
+		mock.formatted[#mock.formatted + 1] = {name = name, message = message}
+		return tostring(name) .. ": " .. tostring(message)
 	end
 
 	local function serialize_value(value)

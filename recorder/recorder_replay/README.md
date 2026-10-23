@@ -144,10 +144,17 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
   moment, minus those whose own lifetime had ended; their timers restart,
   which is all a seek can do to an engine spawner. A one-off particle from
   before the seek is not replayed - it was over long before.
+- Recorded global chat is shown to the participants as chat lines when the
+  clock reaches each message, prefixed with `[replay]` so it is not mistaken
+  for the replay server's own chat. The line is the final one the recording
+  server delivered, prefixes and colours included. Like a one-off particle it
+  is transient: a seek does not replay the backlog (`replay.chat` turns it
+  off).
 
 ## Limits
 
-- Chat, items and inventories are not drawn.
+- Chat, items and inventories are not drawn in the world. Recorded chat
+  appears as chat lines to the participants, not as anything in the 3D scene.
 - Particle effects attached to an object (a smoke trail following a projectile,
   an aura around a player) are not recorded, so they do not replay. A
   spawner's emission box is translated whole rather than clamped to the
@@ -183,6 +190,7 @@ including the one being written.
 | `replay.allow_unfinished` | `false` | Offer recordings that capture is still making, and let sessions start on them. Off by default: the chooser hides them and a session refuses one. |
 | `replay.max_sessions` | `4` | How many replays may run at once; `0` is no limit. |
 | `replay.model` | empty | The model name for ghost bodies, overriding the one picked from the game's registry. |
+| `replay.chat` | `true` | Show the recording's `chat_final` lines to the participants as chat. Read when a session starts. |
 | `recorder.directory` | empty | Where recordings are read from, shared with capture. A relative path is taken from the world directory. |
 
 ## For a game

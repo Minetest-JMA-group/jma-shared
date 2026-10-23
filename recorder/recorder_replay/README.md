@@ -73,9 +73,12 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
   recorded action. Replay reads it and resolves the node names against the
   running game; a node the game does not have becomes `CONTENT_UNKNOWN`.
 - Node changes from the recording are applied on top of the snapshot as the
-  clock passes them. Seeking rebuilds the region from the snapshot and every
-  change up to that moment and writes it once, so seeking backwards undoes
-  changes.
+  clock passes them. Seeking rebuilds the region's state from the snapshot and
+  every change up to that moment, and writes only the mapblocks whose contents
+  actually differ - so seeking backwards undoes changes without touching the
+  rest of the arena. Forward playback likewise writes only the mapblocks its
+  crossed node and light changes touch, which is what keeps a replay of a large
+  region from rewriting it on every step.
 - The region is written through a VoxelManip without `update_liquids()`. That
   is what keeps liquids inert: a paused replay holds still, and a seek shows
   the recorded moment rather than a newly started flow.

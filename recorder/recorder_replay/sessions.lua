@@ -296,7 +296,7 @@ function sessions.seek(session, T)
 	local present = {}
 	for _, ev in ipairs(deps.reader.join_leave_until(session.rec, tick)) do
 		if ev.type == "join" and ev.subject_player then
-			present[ev.subject_player] = {pos = ev.pos, data = ev.data, item = ev.item}
+			present[ev.subject_player] = {pos = ev.pos, data = ev.data, item = ev.item, id = ev.id}
 		elseif ev.type == "leave" then
 			present[ev.subject_player] = nil
 		end
@@ -326,10 +326,12 @@ function sessions.seek(session, T)
 				end
 				-- What the player held at T: the last wield event since they
 				-- joined, or the join's own item before they switched. A fresh
-				-- ghost holds nothing, so an empty hand needs no call.
+				-- ghost holds nothing, so an empty hand needs no call. The id
+				-- decides when there is a wield from before a leave: the join
+				-- that brought the player back already says what they hold.
 				local wielded = deps.reader.last_wield(session.rec, pid, tick)
 				local item
-				if wielded then
+				if wielded and wielded.id > (presence.id or 0) then
 					item = wielded.item
 				else
 					item = presence.item

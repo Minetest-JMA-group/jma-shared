@@ -234,19 +234,21 @@ function reader.join_leave_until(rec, tick)
 	return rows
 end
 
--- The last wield event of a player at or before a tick, as {item = itemstring
--- or nil}. The row is returned even when its item is NULL (the player put
--- everything away), so an empty hand can be told apart from no event yet.
+-- The last wield event of a player at or before a tick, as {id =, item =
+-- itemstring or nil}. The id lets a caller tell a wield from before a leave
+-- apart from the item on the later join that brought the player back. The row
+-- is returned even when its item is NULL (the player put everything away), so
+-- an empty hand can be told apart from no event yet.
 ---@param rec table
 ---@param player_id integer
 ---@param tick integer
 ---@return table|nil
 function reader.last_wield(rec, player_id, tick)
 	local sql = string.format(
-		"SELECT item FROM Events WHERE type = 'wield' AND subject_player = %d AND tick <= %d " ..
+		"SELECT id, item FROM Events WHERE type = 'wield' AND subject_player = %d AND tick <= %d " ..
 		"ORDER BY id DESC LIMIT 1", player_id, tick)
 	for row in rec.db:nrows(sql) do
-		return {item = row.item}
+		return {id = row.id, item = row.item}
 	end
 	return nil
 end

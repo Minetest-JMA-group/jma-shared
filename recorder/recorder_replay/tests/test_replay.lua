@@ -616,6 +616,59 @@ emptied = ghost_of("Alice").wielded
 check(emptied == nil or emptied == "", "and reaches the empty hand")
 
 ----------------------------------------------------------------------------
+print("=== the item a returning player holds ===")
+----------------------------------------------------------------------------
+
+-- A player who walks out of the region and back in has a leave and a join.
+-- The join carries what they hold now; a wield from before the leave must not
+-- win over it.
+do
+	local rejoin_path = world .. "/recordings/aa_rejoin-20250101T000000Z.sqlite"
+	local rejoin_writer = dbmanager.new(sqlite)
+	assert(rejoin_writer:open(rejoin_path))
+	rejoin_writer:set_meta("recorder.name", "rejoin")
+	assert(rejoin_writer:set_snapshot({
+		tick = 0,
+		t = 0,
+		pos1 = {x = 0, y = 0, z = 0},
+		size = {x = 4, y = 2, z = 4},
+		names = "air",
+		encoding = "raw",
+		data = common.snapshot.encode({}),
+	}))
+	local carol = rejoin_writer:player_id("Carol")
+	rejoin_writer:add_event({rejoin_writer:next_id(), 0, 0, "recording_start", nil, nil,
+		nil, nil, nil, nil, nil, nil, nil})
+	rejoin_writer:add_event({rejoin_writer:next_id(), 0, 0, "join", carol, nil, 0, 0, 0,
+		nil, nil, "default:stone", nil})
+	rejoin_writer:add_event({rejoin_writer:next_id(), 2, 0.2, "wield", carol, nil,
+		nil, nil, nil, nil, nil, "default:pick_stone", nil})
+	rejoin_writer:add_event({rejoin_writer:next_id(), 3, 0.3, "leave", carol, nil, 0, 0, 0,
+		nil, nil, nil, nil})
+	rejoin_writer:add_event({rejoin_writer:next_id(), 5, 0.5, "join", carol, nil, 0, 0, 0,
+		nil, nil, "default:torch", nil})
+	rejoin_writer:flush()
+	rejoin_writer:close()
+
+	local returner = add_player("Returner", {pos = {x = 0, y = 0, z = 0}})
+	returner.inventory = {main = {}}
+	mark(returner, box(1000, 100, 1000, 1007, 104, 1007))
+	returner.pos = {x = 0, y = 0, z = 0}
+	local rejoin_session = sessions.start(rejoin_path, returner)
+	check(rejoin_session ~= nil, "a recording with a leave and a return starts")
+
+	sessions.seek(rejoin_session, 0.25)
+	check(ghost_of("Carol") ~= nil and ghost_of("Carol").wielded == "default:pick_stone",
+		"before the leave the ghost holds what the last wield says")
+	sessions.seek(rejoin_session, 0.6)
+	check(ghost_of("Carol") ~= nil and ghost_of("Carol").wielded == "default:torch",
+		"after the return the join's item wins over the earlier wield")
+
+	recorder_replay.end_session(rejoin_session.id, "test")
+	check(sessions.for_player("Returner") == nil, "and the test session ends")
+end
+
+----------------------------------------------------------------------------
 print("=== recorded poses ===")
 ----------------------------------------------------------------------------
 

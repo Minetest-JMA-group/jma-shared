@@ -122,6 +122,12 @@ local function make_fixture(path, with_light)
 	-- Bob leaves at half a second.
 	writer:add_event({writer:next_id(), 5, 0.5, "leave", bob, nil, 5, 0, 5,
 		nil, nil, nil, nil})
+	-- Alice draws a pick at half a second and puts it away at 0.7 s; the join
+	-- event above carries "default:stone" for the time before she switches.
+	writer:add_event({writer:next_id(), 5, 0.5, "wield", alice, nil, nil, nil, nil,
+		nil, nil, "default:pick_stone", nil})
+	writer:add_event({writer:next_id(), 7, 0.7, "wield", alice, nil, nil, nil, nil,
+		nil, nil, nil, nil})
 	-- At 0.8 s Alice digs the floor out from under herself, and at 0.9 s the
 	-- glass is replaced by dirt with a different param2.
 	writer:add_event({writer:next_id(), 8, 0.8, "node_change", alice, nil, 0, 0, 0,
@@ -553,6 +559,29 @@ check(alice and near(alice.pos.x, 101.5), "Alice's ghost is at her tick-5 positi
 	.. tostring(alice and alice.pos.x))
 check(alice and alice.animation ~= nil, "she is posed from the sample")
 check(ghost_of("Bob") == nil, "Bob's leave at that moment removed his ghost")
+
+----------------------------------------------------------------------------
+print("=== held items ===")
+----------------------------------------------------------------------------
+
+check(alice and alice.wielded == "default:pick_stone",
+	"the clock crossing a wield event changes what the ghost holds")
+sessions.seek(session, 0)
+check(ghost_of("Alice").wielded == "default:stone",
+	"a seek falls back to the item the join event carries")
+sessions.seek(session, 0.6)
+check(ghost_of("Alice").wielded == "default:pick_stone",
+	"a later wield event is applied on a seek")
+sessions.seek(session, 0.8)
+local emptied = ghost_of("Alice").wielded
+check(emptied == nil or emptied == "", "an empty wield event puts the hands down")
+sessions.seek(session, 0.45)
+check(ghost_of("Alice").wielded == "default:stone", "before the change the join item is back")
+mock.step(0.1)
+check(ghost_of("Alice").wielded == "default:pick_stone", "forward playback crosses the change")
+mock.step(0.15)
+emptied = ghost_of("Alice").wielded
+check(emptied == nil or emptied == "", "and reaches the empty hand")
 
 ----------------------------------------------------------------------------
 print("=== the remote control ===")

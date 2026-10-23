@@ -701,6 +701,11 @@ function M.new(opts)
 		end
 		function obj:set_yaw(value) check(self) self.yaw = value end
 		function obj:set_velocity(value) check(self) self.velocity = value end
+		function obj:set_wielded_item(item)
+			check(self)
+			self.wielded = item and item:to_string() or ""
+			return true
+		end
 		function obj:set_animation(frames, speed)
 			check(self)
 			self.animation = frames

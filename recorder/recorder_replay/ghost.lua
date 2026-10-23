@@ -127,6 +127,21 @@ function ghost.set_observers(obj, observers)
 	return ok
 end
 
+-- Show what a recorded player was holding. An empty itemstring puts the hands
+-- down. The change animation is skipped: the ghost is not a player using the
+-- item, it is only wearing it. Returns false when the object is no longer
+-- usable.
+---@param obj ObjectRef
+---@param itemstring string?
+---@return boolean
+function ghost.wield(obj, itemstring)
+	if not obj then return false end
+	local ok, applied = pcall(obj.set_wielded_item, obj, ItemStack(itemstring or ""), true)
+	-- The engine answers true or false; an engine that answers nothing at all
+	-- still did not raise, which is what this return is about.
+	return ok and applied ~= false
+end
+
 -- Put a ghost where a movement sample says its player was, and pick the pose
 -- the sample describes. `offset` moves the recorded position into the arena
 -- the session was given. Returns false when the object is no longer usable.

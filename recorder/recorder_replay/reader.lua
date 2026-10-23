@@ -209,14 +209,16 @@ function reader.tick_at(rec, t)
 end
 
 -- The join and leave events up to a tick, in the order they happened. Applying
--- them in order leaves exactly the players who are present at that moment.
+-- them in order leaves exactly the players who are present at that moment. A
+-- join carries the item its player was holding, the fallback for a player who
+-- has not yet switched tools in the recording.
 ---@param rec table
 ---@param tick integer
 ---@return table[]
 function reader.join_leave_until(rec, tick)
 	local rows = {}
 	local sql = string.format(
-		"SELECT id, tick, type, subject_player, pos_x, pos_y, pos_z, data FROM Events " ..
+		"SELECT id, tick, type, subject_player, pos_x, pos_y, pos_z, item, data FROM Events " ..
 		"WHERE type IN ('join', 'leave') AND tick <= %d ORDER BY id", tick)
 	for row in rec.db:nrows(sql) do
 		rows[#rows + 1] = {
@@ -225,10 +227,28 @@ function reader.join_leave_until(rec, tick)
 			type = row.type,
 			subject_player = row.subject_player,
 			pos = (row.pos_x ~= nil) and {x = row.pos_x, y = row.pos_y, z = row.pos_z} or nil,
+			item = row.item,
 			data = row.data,
 		}
 	end
 	return rows
+end
+
+-- The last wield event of a player at or before a tick, as {item = itemstring
+-- or nil}. The row is returned even when its item is NULL (the player put
+-- everything away), so an empty hand can be told apart from no event yet.
+---@param rec table
+---@param player_id integer
+---@param tick integer
+---@return table|nil
+function reader.last_wield(rec, player_id, tick)
+	local sql = string.format(
+		"SELECT item FROM Events WHERE type = 'wield' AND subject_player = %d AND tick <= %d " ..
+		"ORDER BY id DESC LIMIT 1", player_id, tick)
+	for row in rec.db:nrows(sql) do
+		return {item = row.item}
+	end
+	return nil
 end
 
 ---@param rec table

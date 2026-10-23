@@ -178,7 +178,7 @@ function sessions.seek(session, T)
 	local present = {}
 	for _, ev in ipairs(deps.reader.join_leave_until(session.rec, tick)) do
 		if ev.type == "join" and ev.subject_player then
-			present[ev.subject_player] = {pos = ev.pos, data = ev.data}
+			present[ev.subject_player] = {pos = ev.pos, data = ev.data, item = ev.item}
 		elseif ev.type == "leave" then
 			present[ev.subject_player] = nil
 		end
@@ -196,6 +196,17 @@ function sessions.seek(session, T)
 				session.joined[pid] = true
 				session.cursors[pid] = {last_tick = tick, rows = {}, next = 1, done = false}
 				if row then deps.ghost.update(obj, row, offset) end
+				-- What the player held at T: the last wield event since they
+				-- joined, or the join's own item before they switched. A fresh
+				-- ghost holds nothing, so an empty hand needs no call.
+				local wielded = deps.reader.last_wield(session.rec, pid, tick)
+				local item
+				if wielded then
+					item = wielded.item
+				else
+					item = presence.item
+				end
+				if item then deps.ghost.wield(obj, item) end
 			end
 		end
 	end
@@ -213,11 +224,16 @@ local function apply_event(session, ev)
 				session.cursors[ev.subject_player] = {
 					last_tick = ev.tick, rows = {}, next = 1, done = false,
 				}
+				if ev.item then deps.ghost.wield(obj, ev.item) end
 			end
 		end
 	elseif ev.type == "leave" and ev.subject_player then
 		remove_ghost(session, ev.subject_player)
 		session.joined[ev.subject_player] = nil
+	elseif ev.type == "wield" and ev.subject_player then
+		-- An empty item (NULL in the file) puts the ghost's hands down.
+		local obj = session.ghosts[ev.subject_player]
+		if obj then deps.ghost.wield(obj, ev.item) end
 	elseif ev.type == "node_change" then
 		-- The arrays are written to the map once per step, however many nodes
 		-- changed in it; a step with no node changes touches nothing. Only the

@@ -57,7 +57,7 @@ hotbar:
 | speed | cycle 1x, 2x, 4x, 0.5x |
 | back / forward | move 10 seconds |
 | seek | a window with a slider over the whole recording |
-| lighting | switch between the recording's light and time of day, and live light under the server's current time |
+| lighting | switch between recorded conditions (recorded light and/or recorded day) and live ones |
 | leave | stop watching |
 
 A participant's position and main inventory are saved in their own metadata
@@ -90,19 +90,22 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
   the layer for that moment. The lighting item switches to live lighting
   instead - the light the arena's own world would give those nodes,
   recalculated with `core.fix_light`, under the server's current time of day -
-  and back to the recorded light and the recorded day. Recordings without a
-  light layer always use live lighting, and no switch is shown.
+  and back to the recorded light and the recorded day. The switch is offered
+  whenever the file has something recorded to switch: a light layer, a
+  recorded time of day, or both. With only the time of day it changes just the
+  day and leaves the light to the arena; with neither, no switch is shown.
 - In live mode the shell still lets sunlight through (it is invisible, not a
   lid), and the arena is relit in full when it is built, cleared and whenever
   the clock jumps. The recorded mode does not recalculate anything.
-- The recording also carries the time of day it was made at. In recorded mode
-  each participant is given that day's sunlight for themselves with
-  `override_day_night_ratio`, so a recording made in daylight does not turn
-  dark because the replay server happens to be at night; in live mode the
-  override is removed again and the server's own time applies. Whatever
-  override the game had set is remembered and put back on leaving. The sky
-  itself (sun, moon, stars) remains the server's. Recordings made before the
-  time of day was stored play under the server's current day/night.
+- The recording also carries the time of day it was made at; capture writes it
+  regardless of the light setting. In recorded mode each participant is given
+  that day's sunlight for themselves with `override_day_night_ratio`, so a
+  recording made in daylight does not turn dark because the replay server
+  happens to be at night; in live mode the override is removed again and the
+  server's own time applies. Whatever override the game had set is remembered
+  and put back on leaving. The sky itself (sun, moon, stars) remains the
+  server's. Recordings made before the time of day was stored play under the
+  server's current day/night.
 - Ending the replay - or the last participant leaving - fills the whole arena
   with air, removes the ghosts and restores the participants. The arena's
   bounds are written to mod storage before its first node, so if the server

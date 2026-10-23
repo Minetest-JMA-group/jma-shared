@@ -1231,10 +1231,13 @@ light_db:close()
 mock.settings["recorder.light"] = "false"
 check(start_recording("nolight", LIGHT_REGION) == nil, "a recording without light starts")
 local nolight_light_path = recorder.get_recording_path()
+mock.step(0.1)  -- the opening metadata is taken at the first recording step
 check(recorder.stop() == nil, "it stops")
 local nolight_light_db = open_recording(nolight_light_path)
 check(value(nolight_light_db, "SELECT COUNT(*) FROM Snapshot WHERE light IS NOT NULL") == 0,
 	"with recorder.light = false the snapshot has no light layer")
+check(value(nolight_light_db, "SELECT value FROM Metadata WHERE key = 'recorder.timeofday'") == "0.5",
+	"but the time of day is still recorded")
 check(value(nolight_light_db, "SELECT COUNT(*) FROM LightChanges") == 0, "and no light changes")
 nolight_light_db:close()
 mock.settings["recorder.light"] = nil

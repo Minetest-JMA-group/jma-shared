@@ -92,6 +92,18 @@ local function textures_of(json)
 	return nil
 end
 
+-- The light values are recorded only when the file carries a light layer. The
+-- session's mode also covers the time of day, which can be recorded on its
+-- own; this is the mode a node/light write should use.
+---@param session table
+---@return string
+local function light_write_mode(session)
+	if session.reconstruct.has_light and session.light == "recorded" then
+		return "recorded"
+	end
+	return "live"
+end
+
 -- Put every ghost back to where it was at a moment, rebuild the reconstructed
 -- region for that moment, and every cursor to the rows that follow it.
 ---@param session table
@@ -125,22 +137,23 @@ function sessions.seek(session, T)
 		deps.reconstruct.seek(session.reconstruct, session.rec, tick)
 	end
 
+	local mode = light_write_mode(session)
 	local rebuilt, rebuild_err
 	if touched and next(touched) == nil then
 		rebuilt = true
 	elseif touched then
 		rebuilt, rebuild_err = deps.reconstruct.write_blocks(
-			session.reconstruct, session.offset, touched, session.light)
+			session.reconstruct, session.offset, touched, mode)
 	else
 		rebuilt, rebuild_err = deps.reconstruct.write(
-			session.reconstruct, session.offset, session.light)
+			session.reconstruct, session.offset, mode)
 	end
 	session.reconstruct_tick = tick
 	session.dirty_blocks = {}
 	session.state_blocks = {}
 	if not rebuilt then
 		core.log("warning", "[replay] cannot rebuild the region: " .. tostring(rebuild_err))
-	elseif previous_tick == nil and session.light ~= "recorded" then
+	elseif previous_tick == nil and mode ~= "recorded" then
 		-- The first write covers the whole region; live lighting needs the same
 		-- full pass as the arena itself. Recorded lighting was just written and
 		-- must not be recalculated.
@@ -293,7 +306,7 @@ local function advance_light(session)
 				applied = true
 				-- Recorded light is written like node changes are; live light is
 				-- recalculated by the engine from the nodes that changed.
-				if session.light == "recorded" then
+				if light_write_mode(session) == "recorded" then
 					deps.reconstruct.add_light_blocks(session.dirty_blocks,
 						session.reconstruct, entries, session.offset)
 				end
@@ -313,22 +326,29 @@ end
 ---@param session table
 ---@return string|nil
 function sessions.toggle_light(session)
-	if not session.reconstruct.has_light then return nil end
-	session.light = session.light == "recorded" and "live" or "recorded"
-	local written, err = deps.reconstruct.write(
-		session.reconstruct, session.offset, session.light)
-	if not written then
-		core.log("warning", "[replay] cannot rewrite the region's light: " .. tostring(err))
-	else
-		if session.light == "live" then
-			deps.arena.relight(session.arena)
-		end
-		session.reconstruct_tick = deps.reader.tick_at(session.rec, session.T)
-		session.dirty_blocks = {}
-		session.state_blocks = {}
+	-- The switch is about whichever of the two the file has: recorded light
+	-- values, a recorded time of day, or both.
+	if not session.reconstruct.has_light and not session.rec.timeofday then
+		return nil
 	end
-	-- The mode is the whole lighting: the light values were just rewritten,
-	-- and recorded mode also means the recording's time of day.
+	session.light = session.light == "recorded" and "live" or "recorded"
+	if session.reconstruct.has_light then
+		local mode = light_write_mode(session)
+		local written, err = deps.reconstruct.write(
+			session.reconstruct, session.offset, mode)
+		if not written then
+			core.log("warning", "[replay] cannot rewrite the region's light: " .. tostring(err))
+		else
+			if mode == "live" then
+				deps.arena.relight(session.arena)
+			end
+			session.reconstruct_tick = deps.reader.tick_at(session.rec, session.T)
+			session.dirty_blocks = {}
+			session.state_blocks = {}
+		end
+	end
+	-- A file without a light layer needs no map write for a time-only switch;
+	-- the day/night override below is the whole change.
 	for name in pairs(session.participants) do
 		local player = core.get_player_by_name(name)
 		if player then deps.recovery.apply_day_night(player, session) end
@@ -413,7 +433,7 @@ function sessions.start(arg, player)
 		dirty_blocks = {},      -- blocks changed since the last write
 		state_blocks = {},      -- blocks changed since the last seek
 		day_night = {},         -- participant -> the override they had before
-		light = state.has_light and "recorded" or "live",
+		light = (state.has_light or rec.timeofday ~= nil) and "recorded" or "live",
 		light_last_id = 0,
 		light_events = {rows = {}, next = 1},
 		participants = {},
@@ -526,7 +546,8 @@ function sessions.step_all(dtime)
 				local written, err
 				if next(session.dirty_blocks) then
 					written, err = deps.reconstruct.write_blocks(
-						session.reconstruct, session.offset, session.dirty_blocks, session.light)
+						session.reconstruct, session.offset, session.dirty_blocks,
+						light_write_mode(session))
 					-- Remember them until the next seek even if the write failed:
 					-- the seek rewrites the union and can repair it.
 					for key, block in pairs(session.dirty_blocks) do

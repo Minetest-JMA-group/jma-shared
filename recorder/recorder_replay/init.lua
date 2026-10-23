@@ -305,7 +305,7 @@ controls.register(function(kind, player, extra)
 	elseif kind == "light_toggle" then
 		local mode = sessions.toggle_light(session)
 		if not mode then
-			core.chat_send_player(name, "This recording has no recorded lighting.")
+			core.chat_send_player(name, "This recording has no recorded lighting or time of day.")
 		else
 			for participant in pairs(session.participants) do
 				local other = core.get_player_by_name(participant)

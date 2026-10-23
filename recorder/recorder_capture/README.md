@@ -131,7 +131,7 @@ Settings are read when a recording starts, so a change applies to the next one.
 | `recorder.max_size_mb` | `0` | Stop the recording once the file reaches this size. `0` is no limit. |
 | `recorder.disabled_events` | empty | Comma-separated event types not to record, e.g. `chat, chatcommand, punch_node`. The recording's own markers (`recording_start`, `recording_stop`, `write_error`) and `node_change` cannot be disabled. |
 | `recorder.metadata` | `true` | Record node metadata and inventories (chest contents, sign text, ...). With `false` the recording holds no metadata rows; replay handles both kinds of file the same way. |
-| `recorder.light` | `true` | Record the region's lighting (a byte per node, air included). With `false` the snapshot holds no light layer and replay recalculates the light instead. |
+| `recorder.light` | `true` | Record the region's lighting (a byte per node, air included). With `false` the snapshot holds no light layer and replay recalculates the light instead. The time of day is recorded either way. |
 
 ## The recording file
 

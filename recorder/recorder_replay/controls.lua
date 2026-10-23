@@ -31,24 +31,26 @@ controls.LIGHT_ITEMS = {
 	recorded = {
 		item = "recorder_replay:light_recorded",
 		image = "recorder_replay_light_recorded.png",
-		description = "Replay lighting: recorded light and time of day (use for live)",
+		description = "Replay lighting: recorded conditions (use for live)",
 	},
 	live = {
 		item = "recorder_replay:light_live",
 		image = "recorder_replay_light_live.png",
-		description = "Replay lighting: recalculated light, server's time of day (use for recorded)",
+		description = "Replay lighting: live conditions (use for recorded)",
 	},
 }
 
 -- The controls replace the main list, so they sit in the hotbar. The lighting
--- switch is only offered when the recording actually holds light.
+-- switch is offered when the file has something recorded to switch - the light
+-- layer, the time of day, or both.
 ---@param player ObjectRef
 ---@param session table?
 function controls.fill(player, session)
 	local inv = player:get_inventory()
 	if not inv then return end
 	local size = inv:get_size("main")
-	local light = session and controls.LIGHT_ITEMS[session.light]
+	local selectable = session and (session.reconstruct.has_light or session.rec.timeofday)
+	local light = selectable and controls.LIGHT_ITEMS[session.light]
 	local light_slot = #controls.ITEMS + 1
 	local list = {}
 	for i = 1, size do

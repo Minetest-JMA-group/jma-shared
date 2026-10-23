@@ -968,14 +968,29 @@ print("=== a recording without light ===")
 local NOLIGHT_ARENA = box(400, 40, 400, 407, 44, 407)
 mark(planner, NOLIGHT_ARENA)
 planner.pos = {x = 0, y = 0, z = 0}
+planner.inventory = {main = {"", "", "", "", "", "", "", ""}}
 local dark_session, dark_err = sessions.start(nolight_path, planner)
 check(dark_session ~= nil, "a recording without light still starts: " .. tostring(dark_err))
-check(dark_session and dark_session.light == "live", "with live lighting")
-check(dark_session and not dark_session.reconstruct.has_light, "and no recorded layer")
-check(planner.inventory.main == nil or planner.inventory.main[7] == nil
-	or planner.inventory.main[7] == "", "so no lighting switch is offered")
+check(dark_session and dark_session.light == "recorded", "with the recorded time of day by default")
+check(dark_session and not dark_session.reconstruct.has_light, "even though it has no light layer")
+check(planner.day_night_ratio == 0.5, "so the arena gets the recorded day")
+check(planner.inventory.main[7] == "recorder_replay:light_recorded",
+	"and the switch is offered for the time of day")
+
+local vms_before_switch = #mock.vms
+local switched = use("light_recorded", planner)
+check(switched and switched:to_string() == "recorder_replay:light_live",
+	"the switch changes just the time of day")
+check(dark_session.light == "live", "the session is on the server's time")
+check(planner.day_night_ratio == nil, "and so is the arena")
+check(#mock.vms == vms_before_switch, "without touching the map")
+check(planner.inventory.main[7] == "recorder_replay:light_live", "the hotbar follows")
+use("light_live", planner)
+check(planner.day_night_ratio == 0.5, "and switching back restores the recorded day")
+
 recorder_replay.end_session(dark_session.id, "test")
 check(sessions.for_player("Planner") == nil, "and it ends cleanly")
+check(planner.day_night_ratio == nil, "with the day/night override gone")
 
 ----------------------------------------------------------------------------
 print("=== deleting a recording ===")

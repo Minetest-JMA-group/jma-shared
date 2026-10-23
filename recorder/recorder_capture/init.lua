@@ -1892,6 +1892,7 @@ core.register_on_mods_loaded(function()
 		block_msgs = block_msgs,
 		observe = observe_chat,
 		report = report_chat_failure,
+		now = core.get_gametime,
 	})
 	core.log("action", string.format("[recorder] chat capture: %s, %s",
 		tostring(installed.normal_chat or "none"), tostring(installed.broadcast or "none")))

@@ -53,6 +53,22 @@ function chathooks.install(env)
 	local core, chat_lib, block_msgs = env.core, env.chat_lib, env.block_msgs
 	local installed = {}
 
+	-- In the formatter fallback a mod may format a line and then broadcast it
+	-- (CTF's /g does). Both funnels are installed in that configuration, so the
+	-- broadcast must not store the same line a second time. The pending entry
+	-- is only consumed by a broadcast carrying that exact string; `now` keeps a
+	-- same-text broadcast from a later step from being mistaken for it.
+	local pending_format
+	local function now()
+		return env.now and env.now() or nil
+	end
+	local function take_pending(message)
+		if pending_format == nil or pending_format.message ~= message then return false end
+		local same_step = pending_format.at == nil or now() == nil or pending_format.at == now()
+		pending_format = nil
+		return same_step
+	end
+
 	-- Normal player chat. The priority-100 callback in chat_lib is the proof
 	-- that block_msgs' backend initialized; the table alone also exists when
 	-- it failed, and then only forwards other mods' broadcasts.
@@ -75,6 +91,9 @@ function chathooks.install(env)
 			local args = pack(...)
 			local result = pack(original(...))
 			observed(env, args[1], result[1], "format_chat_message")
+			if type(result[1]) == "string" then
+				pending_format = {message = result[1], at = now()}
+			end
 			return unpack_all(result)
 		end
 		installed.normal_chat = "core.format_chat_message"
@@ -85,6 +104,7 @@ function chathooks.install(env)
 	if type(chat_lib) == "table"
 		and type(chat_lib.register_on_chat_send_all) == "function" then
 		chat_lib.register_on_chat_send_all(function(message, source)
+			if take_pending(message) then return end
 			observed(env, nil, message, source or "chat_send_all")
 		end)
 		installed.broadcast = "chat_lib.register_on_chat_send_all"
@@ -93,7 +113,9 @@ function chathooks.install(env)
 		core.chat_send_all = function(...)
 			local args = pack(...)
 			local result = pack(original(...))
-			observed(env, nil, args[1], args[2] or "chat_send_all")
+			if not take_pending(args[1]) then
+				observed(env, nil, args[1], args[2] or "chat_send_all")
+			end
 			return unpack_all(result)
 		end
 		installed.broadcast = "core.chat_send_all"

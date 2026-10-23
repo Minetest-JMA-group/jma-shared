@@ -137,8 +137,18 @@ do
 		"chat_send_all is not wrapped when chat_lib is there")
 	check(#env.seen == 1, "so a direct engine call adds nothing")
 
+	-- A mod may format a line and then broadcast it (CTF's /g does); the same
+	-- line must not be stored twice.
+	local formatted = env.core.format_chat_message("Bob", "go")
+	env.send_all(formatted, "ctf_chat")
+	check(#env.seen == 2 and env.seen[2].source == "format_chat_message",
+		"a formatted line that is then broadcast is recorded once")
+	env.send_all("another announcement", nil)
+	check(#env.seen == 3 and env.seen[3].message == "another announcement",
+		"an unrelated broadcast after it is still recorded")
+
 	env.send_all("announcement", nil)
-	check(#env.seen == 2 and env.seen[2].source == "chat_send_all",
+	check(#env.seen == 4 and env.seen[4].source == "chat_send_all",
 		"a broadcast with no source gets the generic tag")
 end
 

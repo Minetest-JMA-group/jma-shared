@@ -31,12 +31,12 @@ controls.LIGHT_ITEMS = {
 	recorded = {
 		item = "recorder_replay:light_recorded",
 		image = "recorder_replay_light_recorded.png",
-		description = "Replay lighting: as recorded (use for live lighting)",
+		description = "Replay lighting: recorded light and time of day (use for live)",
 	},
 	live = {
 		item = "recorder_replay:light_live",
 		image = "recorder_replay_light_live.png",
-		description = "Replay lighting: recalculated live (use for recorded lighting)",
+		description = "Replay lighting: recalculated light, server's time of day (use for recorded)",
 	},
 }
 
@@ -59,6 +59,23 @@ function controls.fill(player, session)
 			list[i] = ItemStack(def and def.item or "")
 		end
 	end
+	inv:set_list("main", list)
+end
+
+-- Put the item for the current mode in the fixed lighting slot. The mode
+-- belongs to the session, so every participant's hotbar should show it, not
+-- only the one who last used the item.
+---@param player ObjectRef
+---@param mode string
+function controls.set_light_item(player, mode)
+	local def = controls.LIGHT_ITEMS[mode]
+	if not def then return end
+	local inv = player:get_inventory()
+	if not inv then return end
+	local slot = #controls.ITEMS + 1
+	if inv:get_size("main") < slot then return end
+	local list = inv:get_list("main")
+	list[slot] = ItemStack(def.item)
 	inv:set_list("main", list)
 end
 

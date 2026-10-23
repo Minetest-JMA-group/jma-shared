@@ -306,6 +306,11 @@ controls.register(function(kind, player, extra)
 		local mode = sessions.toggle_light(session)
 		if not mode then
 			core.chat_send_player(name, "This recording has no recorded lighting.")
+		else
+			for participant in pairs(session.participants) do
+				local other = core.get_player_by_name(participant)
+				if other then controls.set_light_item(other, mode) end
+			end
 		end
 		return mode
 	elseif kind == "leave" then

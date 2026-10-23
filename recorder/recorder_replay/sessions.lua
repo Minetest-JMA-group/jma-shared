@@ -327,6 +327,12 @@ function sessions.toggle_light(session)
 		session.dirty_blocks = {}
 		session.state_blocks = {}
 	end
+	-- The mode is the whole lighting: the light values were just rewritten,
+	-- and recorded mode also means the recording's time of day.
+	for name in pairs(session.participants) do
+		local player = core.get_player_by_name(name)
+		if player then deps.recovery.apply_day_night(player, session) end
+	end
 	return session.light
 end
 

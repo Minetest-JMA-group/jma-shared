@@ -57,7 +57,7 @@ hotbar:
 | speed | cycle 1x, 2x, 4x, 0.5x |
 | back / forward | move 10 seconds |
 | seek | a window with a slider over the whole recording |
-| lighting | switch between the light the recording holds and the light the arena's world would give the same nodes |
+| lighting | switch between the recording's light and time of day, and live light under the server's current time |
 | leave | stop watching |
 
 A participant's position and main inventory are saved in their own metadata
@@ -82,24 +82,27 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
 - The region is written through a VoxelManip without `update_liquids()`. That
   is what keeps liquids inert: a paused replay holds still, and a seek shows
   the recorded moment rather than a newly started flow.
-- A recording made with `recorder.light` carries the region's lighting, air
-  included. The arena shows it by default: the light bytes are written into the
-  blocks and the engine is told not to recalculate them, so a cave stays dark
-  and a lamp-lit room keeps its glow. Changes are applied as the clock crosses
-  them, and a seek rebuilds the layer for that moment. The lighting item
-  switches to live lighting instead - the light the arena's own world would
-  give those nodes, recalculated with `core.fix_light` - and back. Recordings
-  without a light layer always use live lighting, and no switch is shown.
+- A recording made with `recorder.light` (capture's default; the setting can
+  turn it off) carries the region's lighting, air included. The arena shows it
+  by default: the light bytes are written into the blocks and the engine is
+  told not to recalculate them, so a cave stays dark and a lamp-lit room keeps
+  its glow. Changes are applied as the clock crosses them, and a seek rebuilds
+  the layer for that moment. The lighting item switches to live lighting
+  instead - the light the arena's own world would give those nodes,
+  recalculated with `core.fix_light`, under the server's current time of day -
+  and back to the recorded light and the recorded day. Recordings without a
+  light layer always use live lighting, and no switch is shown.
 - In live mode the shell still lets sunlight through (it is invisible, not a
   lid), and the arena is relit in full when it is built, cleared and whenever
   the clock jumps. The recorded mode does not recalculate anything.
-- The recording also carries the time of day it was made at. Each participant
-  is given that day's sunlight for themselves with
+- The recording also carries the time of day it was made at. In recorded mode
+  each participant is given that day's sunlight for themselves with
   `override_day_night_ratio`, so a recording made in daylight does not turn
-  dark because the replay server happens to be at night; whatever override the
-  game had set is remembered and put back on leaving. The sky itself (sun,
-  moon, stars) remains the server's. Recordings made before the time of day
-  was stored play under the server's current day/night.
+  dark because the replay server happens to be at night; in live mode the
+  override is removed again and the server's own time applies. Whatever
+  override the game had set is remembered and put back on leaving. The sky
+  itself (sun, moon, stars) remains the server's. Recordings made before the
+  time of day was stored play under the server's current day/night.
 - Ending the replay - or the last participant leaving - fills the whole arena
   with air, removes the ghosts and restores the participants. The arena's
   bounds are written to mod storage before its first node, so if the server

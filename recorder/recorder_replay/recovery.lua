@@ -30,6 +30,28 @@ local function itemstrings(list)
 	return items
 end
 
+-- Give one participant the daylight of the mode the session is showing: the
+-- recording's time of day when the light is recorded, and whatever override
+-- the game had (or the server's own cycle) when it is live. The override the
+-- participant arrived with is remembered the first time, for leaving.
+---@param player ObjectRef
+---@param session table
+function recovery.apply_day_night(player, session)
+	if not session.rec.timeofday or not core.time_to_day_night_ratio then return end
+	local name = player:get_player_name()
+	session.day_night = session.day_night or {}
+	local previous = session.day_night[name]
+	if not previous then
+		previous = {ratio = player:get_day_night_ratio()}
+		session.day_night[name] = previous
+	end
+	if session.light == "recorded" then
+		player:override_day_night_ratio(core.time_to_day_night_ratio(session.rec.timeofday))
+	else
+		player:override_day_night_ratio(previous.ratio)
+	end
+end
+
 ---@param player ObjectRef
 ---@param session table
 ---@param already_stashed boolean?  -- the player is coming back to a session
@@ -50,17 +72,7 @@ function recovery.enter(player, session, already_stashed)
 	if session.arena then
 		player:set_pos(arena.viewing_position(session.arena))
 	end
-	-- The light layer stores skylight, which the client scales by the time of
-	-- day. Show the recording's own day for this player, remembering whatever
-	-- override the game had given them first.
-	if session.rec.timeofday and core.time_to_day_night_ratio then
-		local name = player:get_player_name()
-		session.day_night = session.day_night or {}
-		if not session.day_night[name] then
-			session.day_night[name] = {ratio = player:get_day_night_ratio()}
-		end
-		player:override_day_night_ratio(core.time_to_day_night_ratio(session.rec.timeofday))
-	end
+	recovery.apply_day_night(player, session)
 	local hook = recorder_common.game_hooks.on_enter
 	if hook then pcall(hook, player, session) end
 end

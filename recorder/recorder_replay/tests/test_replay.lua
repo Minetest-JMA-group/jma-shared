@@ -682,12 +682,18 @@ check(swapped and swapped:to_string() == "recorder_replay:light_live",
 	"using it swaps the item for the other mode")
 check(session.light == "live", "the session is on live lighting now")
 check(mock.get_node(glass_cell).light == 15, "and the light is recalculated")
+check(watcher.day_night_ratio == 0.25, "and the server's own time of day is back")
+check(watcher.inventory.main[7] == "recorder_replay:light_live",
+	"the hotbar shows the live mode")
 
 local back = use("light_live", watcher)
 check(back and back:to_string() == "recorder_replay:light_recorded",
 	"using that one swaps back")
 check(session.light == "recorded", "recorded lighting again")
 check(mock.get_node(glass_cell).light == 7, "and the recorded value is back")
+check(watcher.day_night_ratio == 0.5, "and so is the recording's time of day")
+check(watcher.inventory.main[7] == "recorder_replay:light_recorded",
+	"and the hotbar shows the recorded mode")
 
 sessions.seek(session, 0.9)
 check(session.light == "recorded", "seeking keeps the chosen mode")

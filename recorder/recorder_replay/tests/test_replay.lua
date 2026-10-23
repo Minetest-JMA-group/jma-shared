@@ -696,7 +696,19 @@ local relit_before = #mock.relit
 mock.step(0.35)
 check(mock.get_node(glass_cell).light == 3,
 	"forward playback applies the light change in recorded mode")
+check(mock.get_node({x = 101, y = 11, z = 101}).name == "air",
+	"the node change crossed too")
 check(#mock.relit == relit_before, "without recalculating it live")
+
+sessions.seek(session, 0.5)
+local vms_before_same = #mock.vms
+sessions.seek(session, 0.5)
+check(#mock.vms == vms_before_same, "seeking to the same moment writes nothing")
+
+sessions.seek(session, 0.3)
+check(mock.get_node({x = 101, y = 11, z = 101}).name == "default:stone",
+	"seeking back after playback restores the node as well")
+check(mock.get_node(glass_cell).light == 7, "and the light from before the changes")
 
 ----------------------------------------------------------------------------
 print("=== a ghost that disappears ===")

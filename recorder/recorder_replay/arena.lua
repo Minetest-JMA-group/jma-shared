@@ -283,7 +283,9 @@ local function write_box(box, fill)
 	fill(emerged1, emerged_size, ids, param2)
 	vm:set_data(ids)
 	vm:set_param2_data(param2)
-	vm:write_to_map()
+	-- Light is recalculated in one pass by arena.relight() right after this;
+	-- letting write_to_map recalculate it as well would do the same work twice.
+	vm:write_to_map(false)
 	vm:close()
 	return true
 end

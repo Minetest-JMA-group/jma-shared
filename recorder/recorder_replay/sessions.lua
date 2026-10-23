@@ -106,15 +106,44 @@ function sessions.seek(session, T)
 	session.events = {rows = {}, next = 1}
 	session.reconstruct_dirty = false
 
-	deps.reconstruct.seek(session.reconstruct, session.rec, tick)
-	local rebuilt, rebuild_err = deps.reconstruct.write(
-		session.reconstruct, session.offset, session.light)
+	-- Only the blocks whose content differs between the state last written and
+	-- this one are written: the rows between the two ticks, plus the blocks
+	-- forward playback has already moved on since the last seek.
+	local previous_tick = session.reconstruct_tick
+	local touched
+	if previous_tick ~= nil then
+		touched = deps.reconstruct.seek(
+			session.reconstruct, session.rec, tick, session.offset, previous_tick)
+		for key, block in pairs(session.state_blocks) do
+			touched[key] = block
+		end
+		for key, block in pairs(session.dirty_blocks) do
+			touched[key] = block
+		end
+	end
+	if previous_tick == nil then
+		deps.reconstruct.seek(session.reconstruct, session.rec, tick)
+	end
+
+	local rebuilt, rebuild_err
+	if touched and next(touched) == nil then
+		rebuilt = true
+	elseif touched then
+		rebuilt, rebuild_err = deps.reconstruct.write_blocks(
+			session.reconstruct, session.offset, touched, session.light)
+	else
+		rebuilt, rebuild_err = deps.reconstruct.write(
+			session.reconstruct, session.offset, session.light)
+	end
+	session.reconstruct_tick = tick
+	session.dirty_blocks = {}
+	session.state_blocks = {}
 	if not rebuilt then
 		core.log("warning", "[replay] cannot rebuild the region: " .. tostring(rebuild_err))
-	elseif session.light ~= "recorded" then
-		-- A seek rewrites the whole region at once; live lighting needs the
-		-- same full pass as the arena itself. Recorded lighting was just
-		-- written and must not be recalculated.
+	elseif previous_tick == nil and session.light ~= "recorded" then
+		-- The first write covers the whole region; live lighting needs the same
+		-- full pass as the arena itself. Recorded lighting was just written and
+		-- must not be recalculated.
 		deps.arena.relight(session.arena)
 	end
 	session.light_last_id = deps.reader.last_light_id(session.rec, tick)
@@ -176,9 +205,11 @@ local function apply_event(session, ev)
 		session.joined[ev.subject_player] = nil
 	elseif ev.type == "node_change" then
 		-- The arrays are written to the map once per step, however many nodes
-		-- changed in it; a step with no node changes touches nothing.
+		-- changed in it; a step with no node changes touches nothing. Only the
+		-- block of each changed node is written, not the whole region.
 		if deps.reconstruct.change(session.reconstruct, ev.pos, ev.node, ev.param2) then
 			session.reconstruct_dirty = true
+			deps.reconstruct.add_block(session.dirty_blocks, ev.pos, session.offset)
 		end
 	end
 end
@@ -256,8 +287,16 @@ local function advance_light(session)
 			local row = buffer.rows[buffer.next]
 			if row.t > session.T then return applied end
 			buffer.next = buffer.next + 1
-			if deps.reconstruct.apply_light(session.reconstruct, row.data, row.encoding) then
+			local ok, entries = deps.reconstruct.apply_light(
+				session.reconstruct, row.data, row.encoding)
+			if ok then
 				applied = true
+				-- Recorded light is written like node changes are; live light is
+				-- recalculated by the engine from the nodes that changed.
+				if session.light == "recorded" then
+					deps.reconstruct.add_light_blocks(session.dirty_blocks,
+						session.reconstruct, entries, session.offset)
+				end
 			end
 		end
 		local more = deps.reader.light_after(session.rec, session.light_last_id, 200)
@@ -280,8 +319,13 @@ function sessions.toggle_light(session)
 		session.reconstruct, session.offset, session.light)
 	if not written then
 		core.log("warning", "[replay] cannot rewrite the region's light: " .. tostring(err))
-	elseif session.light == "live" then
-		deps.arena.relight(session.arena)
+	else
+		if session.light == "live" then
+			deps.arena.relight(session.arena)
+		end
+		session.reconstruct_tick = deps.reader.tick_at(session.rec, session.T)
+		session.dirty_blocks = {}
+		session.state_blocks = {}
 	end
 	return session.light
 end
@@ -359,6 +403,9 @@ function sessions.start(arg, player)
 		offset = deps.arena.offset(box, state.region),
 		reconstruct = state,
 		reconstruct_dirty = false,
+		reconstruct_tick = nil, -- tick of the state the arena's world holds
+		dirty_blocks = {},      -- blocks changed since the last write
+		state_blocks = {},      -- blocks changed since the last seek
 		light = state.has_light and "recorded" or "live",
 		light_last_id = 0,
 		light_events = {rows = {}, next = 1},
@@ -469,8 +516,19 @@ function sessions.step_all(dtime)
 			end
 			if session.reconstruct_dirty then
 				session.reconstruct_dirty = false
-				local written, err = deps.reconstruct.write(
-					session.reconstruct, session.offset, session.light)
+				local written, err
+				if next(session.dirty_blocks) then
+					written, err = deps.reconstruct.write_blocks(
+						session.reconstruct, session.offset, session.dirty_blocks, session.light)
+					-- Remember them until the next seek even if the write failed:
+					-- the seek rewrites the union and can repair it.
+					for key, block in pairs(session.dirty_blocks) do
+						session.state_blocks[key] = block
+					end
+					session.dirty_blocks = {}
+				else
+					written = true
+				end
 				if not written then
 					core.log("warning", "[replay] cannot apply a node change: " .. tostring(err))
 				end

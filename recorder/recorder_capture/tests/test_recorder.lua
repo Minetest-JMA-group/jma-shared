@@ -1247,6 +1247,38 @@ check(#far_changes == 1 and far_changes[1].pos_x == 404
 far_db:close()
 
 ----------------------------------------------------------------------------
+print("=== the order rows are written in ===")
+----------------------------------------------------------------------------
+
+-- A block change is queued with the tick it happened on and diffed in the next
+-- step. Its row must still come before the rows of the step that diffs it, or
+-- it would carry a lower tick with a higher id and a reader walking the ids
+-- could skip a newer event.
+do
+local ORDER_POS = {x = 7, y = 6, z = 5}
+mock.set_node(ORDER_POS, {name = "air"})
+check(start_recording("row_order") == nil, "a recording for the row order starts")
+local order_path = recorder.get_recording_path()
+mock.step(0.1)  -- tick 1: a change during this step is queued with tick 1
+mock.set_node(ORDER_POS, {name = "default:dirt"})
+mock.fire("register_on_mapblocks_changed", {[block_hash(ORDER_POS)] = true}, 1)
+alice.wield = "default:sword_steel"  -- sampled at tick 2
+mock.step(0.1)  -- tick 2: the diff (tick 1) is written before the wield (tick 2)
+check(recorder.stop() == nil, "it stops")
+
+local order_db = open_recording(order_path)
+local change_row = rows(order_db, "SELECT id, tick FROM Events WHERE type = 'node_change' ORDER BY id")[1]
+check(change_row ~= nil and change_row.tick == 1, "the block change keeps the tick it happened on")
+local wield_row = value(order_db, "SELECT id FROM Events WHERE type = 'wield' ORDER BY id DESC LIMIT 1")
+check(change_row and wield_row and change_row.id < wield_row,
+	"and is written before the events of the step that diffed it")
+local out_of_order = value(order_db, "SELECT COUNT(*) FROM (SELECT tick, " ..
+	"LAG(tick) OVER (ORDER BY id) AS previous FROM Timeline) WHERE previous > tick")
+check(out_of_order == 0, "no row comes after one with a later tick")
+order_db:close()
+end
+
+----------------------------------------------------------------------------
 print("=== two recordings over two regions ===")
 ----------------------------------------------------------------------------
 

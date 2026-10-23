@@ -2044,8 +2044,12 @@ local function step_recording(rec, dtime)
 	end
 	rec.tick = rec.tick + 1
 	rec.elapsed = rec.elapsed + dtime
-	observe_region(rec, dtime)
+	-- The mapblock diff comes first. Its rows belong to the step before this
+	-- one - that is when the change happened - and writing them after this
+	-- step's samples would give a higher id to an older tick. A reader walks
+	-- the ids and assumes they never go back in time.
 	process_block_changes(rec)
+	observe_region(rec, dtime)
 	if rec.metadata_enabled and rec.elapsed >= rec.next_metadata_poll then
 		rec.next_metadata_poll = rec.elapsed + METADATA_INTERVAL
 		guarded(rec, "scan node metadata", poll_metadata, rec)

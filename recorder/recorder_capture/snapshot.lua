@@ -158,8 +158,8 @@ local function encode_step(snap, budget)
 	end
 	local encoding = "raw"
 	if core.compress then
-		local ok, packed = pcall(core.compress, body, "deflate", 9)
-		if ok and packed then
+		local packed = core.compress(body, "deflate", 9)
+		if packed then
 			body, encoding = packed, "deflate"
 		end
 	end

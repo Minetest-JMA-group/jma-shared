@@ -328,9 +328,9 @@ function reconstruct.apply_metadata(offset, row)
 		y = row.pos.y + offset.y,
 		z = row.pos.z + offset.z,
 	}
-	local ok, err
+	local ok, err = true, nil
 	if row.data == "" then
-		ok, err = pcall(function() core.get_meta(pos):from_table(nil) end)
+		core.get_meta(pos):from_table(nil)
 	else
 		local read, data = pcall(core.deserialize, row.data)
 		if read and type(data) == "table" then

@@ -299,10 +299,8 @@ end
 ---@param box table
 function arena.relight(box)
 	if not core.fix_light then return end
-	local ok, fixed = pcall(core.fix_light, box.pos1, box.pos2)
-	if not ok then
-		core.log("warning", "[replay] cannot recalculate the arena's light: " .. tostring(fixed))
-	elseif fixed == false then
+	local fixed = core.fix_light(box.pos1, box.pos2)
+	if fixed == false then
 		core.log("warning", "[replay] the arena's light could not be recalculated")
 	end
 end
@@ -313,10 +311,10 @@ end
 -- arena owns everything inside its box, so its metadata goes with the nodes.
 ---@param box table
 function arena.clear_metadata(box)
-	local ok, positions = pcall(core.find_nodes_with_meta, box.pos1, box.pos2)
-	if not ok or not positions then return end
+	local positions = core.find_nodes_with_meta(box.pos1, box.pos2)
+	if not positions then return end
 	for _, pos in pairs(positions) do
-		pcall(function() core.get_meta(pos):from_table(nil) end)
+		core.get_meta(pos):from_table(nil)
 	end
 end
 
@@ -329,8 +327,8 @@ end
 function arena.prepare(box)
 	-- Id 0 is the first node the game registered, not a missing one, so the
 	-- registration is confirmed by resolving the name rather than by a value.
-	local called, barrier = pcall(core.get_content_id, BARRIER)
-	if not called or barrier == nil or barrier == core.CONTENT_UNKNOWN then
+	local barrier = core.get_content_id(BARRIER)
+	if barrier == nil or barrier == core.CONTENT_UNKNOWN then
 		return nil, "the replay barrier node is not registered"
 	end
 	local size = region.size(box)

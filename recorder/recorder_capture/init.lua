@@ -325,7 +325,8 @@ local function event_in_region(rec, ev)
 	return true
 end
 
--- The itemstring of a stack, for the pcall below.
+-- The itemstring of a stack. The engine hands us ItemStack copies, which do
+-- not go invalid the way an ObjectRef does.
 local function itemstring_of(stack)
 	return stack:to_string()
 end
@@ -337,8 +338,8 @@ local function stack_string(obj)
 	if type(obj) == "string" then
 		return obj ~= "" and obj or nil
 	end
-	local ok, str = pcall(itemstring_of, obj)
-	if ok and str and str ~= "" then return str end
+	local str = itemstring_of(obj)
+	if str ~= "" then return str end
 	return nil
 end
 
@@ -476,8 +477,7 @@ local function metadata_blob(table_)
 			if type(stack) == "string" then
 				items[i] = stack
 			elseif stack ~= nil and stack.to_string then
-				local ok, itemstring = pcall(stack.to_string, stack)
-				items[i] = ok and itemstring or ""
+				items[i] = stack:to_string()
 			else
 				items[i] = ""
 			end
@@ -486,19 +486,13 @@ local function metadata_blob(table_)
 		any = true
 	end
 	if not any then return nil end
-	local ok, blob = pcall(core.serialize, normalized)
-	if not ok or not blob then return nil end
-	return blob
+	return core.serialize(normalized)
 end
 
 ---@param pos table
 ---@return string|nil
 local function metadata_at(pos)
-	local ok, table_ = pcall(function()
-		return core.get_meta(pos):to_table()
-	end)
-	if not ok then return nil end
-	return metadata_blob(table_)
+	return metadata_blob(core.get_meta(pos):to_table())
 end
 
 local function record_metadata(rec, pos, blob, tick, t)
@@ -512,11 +506,7 @@ end
 -- snapshot it belongs with.
 local function record_metadata_baseline(rec)
 	if not rec.metadata_enabled then return end
-	local ok, positions = pcall(core.find_nodes_with_meta, rec.region.pos1, rec.region.pos2)
-	if not ok then
-		complain(rec, "list node metadata", "cannot list node metadata: " .. tostring(positions))
-		return
-	end
+	local positions = core.find_nodes_with_meta(rec.region.pos1, rec.region.pos2)
 	local known = {}
 	for _, pos in pairs(positions or {}) do
 		local blob = metadata_at(pos)
@@ -534,11 +524,7 @@ end
 -- alone: the scan cannot see it, and that is not the same as it being gone.
 local function poll_metadata(rec)
 	local known = rec.metadata_known
-	local ok, positions = pcall(core.find_nodes_with_meta, rec.region.pos1, rec.region.pos2)
-	if not ok then
-		complain(rec, "list node metadata", "cannot list node metadata: " .. tostring(positions))
-		return
-	end
+	local positions = core.find_nodes_with_meta(rec.region.pos1, rec.region.pos2)
 	local seen = {}
 	for _, pos in pairs(positions or {}) do
 		local key = position_key(pos)
@@ -559,8 +545,8 @@ local function poll_metadata(rec)
 			local x, y, z = key:match("^(%-?%d+),(%-?%d+),(%-?%d+)$")
 			if x then
 				local pos = {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
-				local node_ok, node = pcall(core.get_node, pos)
-				if node_ok and node and node.name ~= "ignore" then
+				local node = core.get_node(pos)
+				if node and node.name ~= "ignore" then
 					known[key] = nil
 					record_metadata(rec, pos, "")
 				end
@@ -945,8 +931,8 @@ local function finish_start(rec, result)
 		light_body = light_codec.encode(result.light, region_module.volume(rec.region))
 		light_encoding = "raw"
 		if core.compress then
-			local packed_ok, packed = pcall(core.compress, light_body, "deflate", 9)
-			if packed_ok and packed then
+			local packed = core.compress(light_body, "deflate", 9)
+			if packed then
 				light_body, light_encoding = packed, "deflate"
 			end
 		end
@@ -1537,11 +1523,8 @@ local function moved_stack(action, inventory, info)
 		return stack_string(info.stack)
 	end
 	if action ~= "move" or not inventory then return nil end
-	local ok, stack = pcall(function()
-		return inventory:get_stack(info.to_list, info.to_index)
-	end)
-	if ok then return stack_string(stack) end
-	return nil
+	local stack = inventory:get_stack(info.to_list, info.to_index)
+	return stack_string(stack)
 end
 
 hook("inventory action", core.register_on_player_inventory_action, function(player, action, inventory, inventory_info)
@@ -1746,8 +1729,8 @@ local function process_block_changes(rec)
 			if body then
 				local encoding = "raw"
 				if core.compress then
-					local packed_ok, packed = pcall(core.compress, body, "deflate", 9)
-					if packed_ok and packed then
+					local packed = core.compress(body, "deflate", 9)
+					if packed then
 						body, encoding = packed, "deflate"
 					end
 				end

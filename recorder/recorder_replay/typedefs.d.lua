@@ -20,6 +20,9 @@
 ---@field light string          -- "recorded" or "live"
 ---@field light_last_id integer -- last light-change row applied
 ---@field light_events table    -- light rows waiting for the clock
+---@field ghosts table           -- player id -> the ghost's ObjectRef
+---@field animations table       -- player id -> the recorded pose in force
+---@field spawners table         -- recorded spawner id -> the id replay was given
 
 ---@class ReplayArena
 ---@field init fun(dependencies: table)

@@ -1012,6 +1012,176 @@ mock.remove_player("AnimBroken")
 mock.remove_player("AnimDefault")
 
 ----------------------------------------------------------------------------
+print("=== particle effects ===")
+----------------------------------------------------------------------------
+
+-- The particle APIs have no callback, so the recording can only keep what the
+-- wrappers saw. Every call here is made the way a mod makes it.
+do
+local PART_REGION = {pos1 = {x = 800, y = 0, z = 0}, pos2 = {x = 805, y = 4, z = 5}}
+check(start_recording("particles", PART_REGION) == nil, "a recording with particles starts")
+local part_path = recorder.get_recording_path()
+
+local inside_particle = {
+	pos = {x = 801.5, y = 1, z = 1},
+	velocity = {x = 0, y = 2, z = 0},
+	acceleration = {x = 0, y = -9, z = 0},
+	expirationtime = 0.4,
+	size = 3,
+	texture = "recorder_smoke.png",
+}
+check(core.add_particle(inside_particle) == inside_particle,
+	"a particle call returns exactly what the engine returned")
+-- Outside the region: the engine still gets the call, the file does not.
+core.add_particle({
+	pos = {x = 900, y = 1, z = 1}, velocity = {x = 0, y = 0, z = 0},
+	acceleration = {x = 0, y = 0, z = 0}, expirationtime = 1, size = 1,
+	texture = "outside_particle.png",
+})
+-- The deprecated positional form is recorded in the table form the engine
+-- documents today, so the file does not depend on the old call shape.
+local old_pos = {x = 802, y = 1, z = 1}
+check(core.add_particle(old_pos, {x = 1, y = 0, z = 0}, {x = 0, y = 0, z = 0},
+	0.5, 2, false, "recorder_deprecated.png") == old_pos,
+	"the deprecated positional call still returns the engine's value")
+
+local inside_spawner = {
+	amount = 20,
+	time = 0.5,
+	minpos = {x = 800.5, y = 0, z = 0.5},
+	maxpos = {x = 803, y = 2, z = 2},
+	minvel = {x = 0, y = 5, z = 0},
+	maxvel = {x = 0, y = 7, z = 0},
+	minacc = {x = 0, y = 1, z = 0},
+	maxacc = {x = 0, y = 1, z = 0},
+	minexptime = 0.3,
+	maxexptime = 0.6,
+	minsize = 7,
+	maxsize = 10,
+	collisiondetection = true,
+	collision_removal = false,
+	vertical = false,
+	texture = "recorder_boom.png",
+}
+local inside_id = core.add_particlespawner(inside_spawner)
+check(type(inside_id) == "number" and inside_id == mock.next_spawner_id,
+	"a spawner call returns the engine's id")
+-- An emission box that crosses the region boundary is still the region's.
+local straddling_id = core.add_particlespawner({
+	amount = 1, time = 0.1,
+	minpos = {x = 799.5, y = 1, z = 1}, maxpos = {x = 800.5, y = 1, z = 1},
+	minsize = 1, maxsize = 1, texture = "recorder_edge.png",
+})
+-- The deprecated positional form, with its fifteen arguments.
+local old_spawner_id = core.add_particlespawner(5, 1,
+	{x = 801, y = 1, z = 1}, {x = 802, y = 1, z = 1},
+	{x = 0, y = 0, z = 0}, {x = 0, y = 1, z = 0},
+	{x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0},
+	0.1, 0.2, 1, 2, false, "recorder_old.png")
+core.add_particlespawner({
+	amount = 1, time = 1,
+	minpos = {x = 900, y = 1, z = 1}, maxpos = {x = 901, y = 1, z = 1},
+	texture = "outside_spawner.png",
+})
+check(core.delete_particlespawner(inside_id, "Alice") == inside_id,
+	"a delete call returns exactly what the engine returned")
+core.delete_particlespawner(straddling_id)
+-- An effect attached to an object follows it; a file cannot. The call still
+-- happens and its id still comes back, but nothing is written.
+local attached_id = core.add_particlespawner({
+	amount = 1, time = 1, attached = {},
+	minpos = {x = 801, y = 1, z = 1}, maxpos = {x = 801, y = 1, z = 1},
+	texture = "attached.png",
+})
+check(type(attached_id) == "number", "an attached spawner still returns the engine's id")
+
+check(recorder.stop() == nil, "it stops")
+
+local part_db = open_recording(part_path)
+local particles = rows(part_db, "SELECT * FROM Events WHERE type = 'particle' ORDER BY id")
+check(#particles == 2, "only particles inside the region are recorded (got " .. #particles .. ")")
+local first_particle = core.parse_json(particles[1].data)
+check(first_particle and first_particle.definition.texture == "recorder_smoke.png",
+	"the particle definition is recorded")
+check(particles[1].pos_x == 801.5 and particles[1].pos_y == 1 and particles[1].pos_z == 1,
+	"with the position the event is about")
+local deprecated_particle = core.parse_json(particles[2].data)
+check(deprecated_particle and deprecated_particle.definition.texture == "recorder_deprecated.png"
+	and deprecated_particle.definition.expirationtime == 0.5
+	and deprecated_particle.definition.size == 2,
+	"the deprecated call is recorded as a table definition")
+check(deprecated_particle and deprecated_particle.definition.pos.x == 802
+	and deprecated_particle.definition.velocity.x == 1,
+	"with its position and velocity")
+
+local spawner_events = rows(part_db,
+	"SELECT * FROM Events WHERE type = 'particlespawner' ORDER BY id")
+check(#spawner_events == 3, "only spawners touching the region are recorded (got "
+	.. #spawner_events .. ")")
+local first_spawner = core.parse_json(spawner_events[1].data)
+check(first_spawner and first_spawner.id == inside_id, "a spawner records the engine id")
+check(first_spawner and first_spawner.definition.texture == "recorder_boom.png",
+	"and its definition")
+check(spawner_events[1].pos_x == (800.5 + 803) / 2 and spawner_events[1].pos_y == 1,
+	"the event position is the emission box's centre")
+local straddling = core.parse_json(spawner_events[2].data)
+check(straddling and straddling.id == straddling_id,
+	"a spawner whose box crosses the boundary is recorded")
+local old_spawner = core.parse_json(spawner_events[3].data)
+check(old_spawner and old_spawner.id == old_spawner_id
+	and old_spawner.definition.texture == "recorder_old.png"
+	and old_spawner.definition.minpos.x == 801,
+	"the deprecated spawner call is recorded as a table definition")
+
+local deletes = rows(part_db,
+	"SELECT * FROM Events WHERE type = 'particlespawner_delete' ORDER BY id")
+check(#deletes == 2, "spawner deletes are recorded")
+local first_delete = core.parse_json(deletes[1].data)
+check(first_delete and first_delete.id == inside_id and first_delete.playername == "Alice",
+	"a delete carries the recorded id and its player restriction")
+
+local attached_logged = 0
+for _, log in ipairs(mock.logs) do
+	if log.message and log.message:find("attached to an object", 1, true) then
+		attached_logged = attached_logged + 1
+	end
+end
+check(attached_logged == 1, "an attached effect is reported once and not recorded")
+part_db:close()
+
+-- One event type can be turned off on its own; recorder.particles turns off
+-- all three, which is the switch for a server where a per-step effect would
+-- cost too many rows.
+mock.settings["recorder.disabled_events"] = "particle"
+check(start_recording("noparticles", PART_REGION) == nil, "a recording with one particle type off starts")
+local noparticles_path = recorder.get_recording_path()
+core.add_particle(inside_particle)
+core.add_particlespawner(inside_spawner)
+check(recorder.stop() == nil, "it stops")
+local noparticles_db = open_recording(noparticles_path)
+check(value(noparticles_db, "SELECT COUNT(*) FROM Events WHERE type = 'particle'") == 0,
+	"the turned-off particle is not recorded")
+check(value(noparticles_db, "SELECT COUNT(*) FROM Events WHERE type = 'particlespawner'") == 1,
+	"the spawner still is")
+noparticles_db:close()
+mock.settings["recorder.disabled_events"] = nil
+
+mock.settings["recorder.particles"] = "false"
+check(start_recording("particlesoff", PART_REGION) == nil, "a recording with particles off starts")
+local particlesoff_path = recorder.get_recording_path()
+core.add_particle(inside_particle)
+core.add_particlespawner(inside_spawner)
+core.delete_particlespawner(inside_id)
+check(recorder.stop() == nil, "it stops")
+local particlesoff_db = open_recording(particlesoff_path)
+check(value(particlesoff_db,
+	"SELECT COUNT(*) FROM Events WHERE type IN ('particle', 'particlespawner', 'particlespawner_delete')") == 0,
+	"recorder.particles = false turns off all three event types")
+particlesoff_db:close()
+mock.settings["recorder.particles"] = nil
+end
+
+----------------------------------------------------------------------------
 print("=== changes to the nodes ===")
 ----------------------------------------------------------------------------
 

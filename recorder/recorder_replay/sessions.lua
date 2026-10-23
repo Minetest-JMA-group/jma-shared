@@ -97,14 +97,118 @@ local function textures_of(json)
 	return nil
 end
 
+-- A recorded event's data, or nil when the row holds none or malformed JSON.
+-- Recordings are files: a damaged row is skipped, not allowed to take the
+-- replay loop down.
+local function event_data(json)
+	if not json then return nil end
+	local data = core.parse_json(json)
+	if type(data) ~= "table" then return nil end
+	return data
+end
+
+-- One report per kind of trouble per session; a file with many damaged
+-- particle rows must not turn into a log flood.
+local function complain(session, label, message)
+	session.complaints = session.complaints or {}
+	if session.complaints[label] then return end
+	session.complaints[label] = true
+	core.log("warning", "[replay] " .. message)
+end
+
 -- A recorded animation event's data, or nil when the row does not describe one
 -- (an old file with a hand-written event, or a damaged one). Nil means the
 -- speed-and-dig guess keeps the pose.
 local function animation_data(json)
-	if not json then return nil end
-	local data = core.parse_json(json)
-	if type(data) ~= "table" or type(data.frames) ~= "table" then return nil end
+	local data = event_data(json)
+	if not data or type(data.frames) ~= "table" then return nil end
 	return data
+end
+
+-- The engine accepts a position as a number (a uniform vector), a vector or a
+-- table with min/max (a range); all three are kept in their shape and moved
+-- into the arena.
+local function translate_position(value, offset)
+	if type(value) == "number" then
+		return {x = value + offset.x, y = value + offset.y, z = value + offset.z}
+	end
+	if type(value) ~= "table" then return value end
+	local x, y, z = tonumber(value.x), tonumber(value.y), tonumber(value.z)
+	if x and y and z then
+		return {x = x + offset.x, y = y + offset.y, z = z + offset.z}
+	end
+	if value.min ~= nil or value.max ~= nil then
+		return {
+			min = translate_position(value.min, offset),
+			max = translate_position(value.max, offset),
+			bias = value.bias,
+		}
+	end
+	return value
+end
+
+-- A tween table's frames are positions; its style/reps/start keys are not.
+local function translate_tween(tween, offset)
+	local out = {}
+	for key, value in pairs(tween) do out[key] = value end
+	for i = 1, #tween do
+		out[i] = translate_position(tween[i], offset)
+	end
+	return out
+end
+
+-- A recorded definition ready for this arena: positions move by the session's
+-- offset, and a recorded player restriction is dropped - the watchers are not
+-- that player, and the effect is shown to all of them.
+local function translated_definition(definition, offset)
+	local out = {}
+	for key, value in pairs(definition) do out[key] = value end
+	if out.pos ~= nil then out.pos = translate_position(out.pos, offset) end
+	if out.minpos ~= nil then out.minpos = translate_position(out.minpos, offset) end
+	if out.maxpos ~= nil then out.maxpos = translate_position(out.maxpos, offset) end
+	if type(out.pos_tween) == "table" then
+		out.pos_tween = translate_tween(out.pos_tween, offset)
+	end
+	local attract = out.attract
+	if type(attract) == "table" then
+		local moved = {}
+		for key, value in pairs(attract) do moved[key] = value end
+		if moved.origin ~= nil then
+			moved.origin = translate_position(moved.origin, offset)
+		end
+		if type(moved.origin_tween) == "table" then
+			moved.origin_tween = translate_tween(moved.origin_tween, offset)
+		end
+		out.attract = moved
+	end
+	out.playername = nil
+	out.exclude_player = nil
+	return out
+end
+
+-- Create a spawner in the arena and remember which replay id belongs to the
+-- recorded one. A definition out of a file is treated as hostile: a shape the
+-- engine refuses is a warning, not a lost step.
+local function add_replay_spawner(session, recorded_id, definition)
+	local ok, replay_id = pcall(core.add_particlespawner,
+		translated_definition(definition, session.offset))
+	if not ok then
+		complain(session, "particlespawner",
+			"cannot replay a particle spawner: " .. tostring(replay_id))
+		return
+	end
+	if type(replay_id) == "number" and replay_id >= 0 then
+		session.spawners[recorded_id] = replay_id
+	end
+end
+
+-- Stop every spawner this session created. Particles themselves expire; a
+-- spawner is the engine object that has to be cancelled explicitly.
+local function clear_spawners(session)
+	for _, replay_id in pairs(session.spawners) do
+		core.delete_particlespawner(replay_id)
+	end
+	session.spawners = {}
 end
 
 -- The light values are recorded only when the file carries a light layer. The
@@ -234,6 +338,32 @@ function sessions.seek(session, T)
 			end
 		end
 	end
+
+	-- Particle spawners are engine objects whose definitions cannot be read
+	-- back, so the recording's spawner events up to T are replayed: creates
+	-- that were not deleted, and not those whose own (finite) lifetime ended
+	-- before T. Their timers restart, which is all a seek can do to an engine
+	-- spawner; a one-off particle from before T was over long ago and is not
+	-- replayed.
+	clear_spawners(session)
+	for _, ev in ipairs(deps.reader.spawner_events_until(session.rec, tick)) do
+		local data = event_data(ev.data)
+		-- The tick is the coarse unit; a row of that tick may still be after T.
+		if ev.t <= T and ev.type == "particlespawner" then
+			if data and type(data.definition) == "table" and type(data.id) == "number" then
+				local time = tonumber(data.definition.time)
+				if not time or time <= 0 or ev.t + time > T then
+					add_replay_spawner(session, data.id, data.definition)
+				end
+			end
+		elseif ev.t <= T and data and data.id ~= nil then
+			local replay_id = session.spawners[data.id]
+			if replay_id then
+				session.spawners[data.id] = nil
+				core.delete_particlespawner(replay_id)
+			end
+		end
+	end
 end
 
 local function apply_event(session, ev)
@@ -264,6 +394,29 @@ local function apply_event(session, ev)
 			session.animations[ev.subject_player] = animation
 			local obj = session.ghosts[ev.subject_player]
 			if obj then deps.ghost.animate(obj, animation) end
+		end
+	elseif ev.type == "particle" then
+		-- A single particle is gone in a moment, so it is replayed at the
+		-- moment the clock reaches it and never rebuilt by a seek.
+		local data = event_data(ev.data)
+		if data and type(data.definition) == "table" then
+			local ok, err = pcall(core.add_particle,
+				translated_definition(data.definition, session.offset))
+			if not ok then
+				complain(session, "particle", "cannot replay a particle: " .. tostring(err))
+			end
+		end
+	elseif ev.type == "particlespawner" then
+		local data = event_data(ev.data)
+		if data and type(data.definition) == "table" and type(data.id) == "number" then
+			add_replay_spawner(session, data.id, data.definition)
+		end
+	elseif ev.type == "particlespawner_delete" then
+		local data = event_data(ev.data)
+		local replay_id = data and data.id ~= nil and session.spawners[data.id]
+		if replay_id then
+			session.spawners[data.id] = nil
+			core.delete_particlespawner(replay_id)
 		end
 	elseif ev.type == "node_change" then
 		-- The arrays are written to the map once per step, however many nodes
@@ -491,6 +644,7 @@ function sessions.start(arg, player)
 		cursors = {},
 		joined = {},
 		animations = {},       -- pid -> the recorded pose in force, if any
+		spawners = {},         -- recorded spawner id -> the id replay was given
 		events = {rows = {}, next = 1},
 		event_last_id = 0,
 		metadata_events = {rows = {}, next = 1},
@@ -552,6 +706,9 @@ function sessions.finish(session, reason)
 	if session.ended then return end
 	session.ended = true
 	for pid in pairs(session.ghosts) do remove_ghost(session, pid) end
+	-- Spawners outlive the nodes they were born over; they are engine objects
+	-- and have to be cancelled before the arena they emit into is gone.
+	clear_spawners(session)
 	-- The reconstruction shares the arena with the ghosts and the viewers, so
 	-- it goes with them; wiping the box is enough to remove every node of it.
 	deps.arena.clear(session.arena)

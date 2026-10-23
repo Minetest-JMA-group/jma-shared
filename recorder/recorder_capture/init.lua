@@ -307,6 +307,13 @@ end
 local function event_in_region(rec, ev)
 	local reg = rec.region
 	if not reg then return true end
+	-- An event that covers a box - a particle spawner's own emission range -
+	-- belongs to the recording when the box touches the region. One of its
+	-- points being inside is not enough: the effect is recorded whole, and half
+	-- of it can fall outside.
+	if ev.extent and ev.subject == nil and ev.object == nil then
+		return region_module.intersects(reg, ev.extent.pos1, ev.extent.pos2)
+	end
 	if ev.subject == nil and ev.object == nil then
 		-- Nothing in it is a player. A position, when there is one, decides; an
 		-- event with neither (a mod's own note about the match) says nothing
@@ -1135,6 +1142,14 @@ recorder.start = function(record_name, region_arg)
 			rec.disabled[type_name] = true
 		end
 	end
+	-- Particle effects can produce a row per step (a rocket's smoke, say), so
+	-- one switch turns off all three types; disabled_events can still name
+	-- them one at a time.
+	if not enabled_setting("recorder.particles", true) then
+		rec.disabled.particle = true
+		rec.disabled.particlespawner = true
+		rec.disabled.particlespawner_delete = true
+	end
 
 	-- The recording proper starts when the snapshot is done; until then
 	-- rec.recording stays false and the existing gate drops events.
@@ -1617,6 +1632,218 @@ hook("cheat", core.register_on_cheat, function(player, cheat)
 		data = { cheat = type(cheat) == "table" and cheat.type or nil },
 	})
 end)
+
+----------------------------------------------------------------------------
+-- Particles
+----------------------------------------------------------------------------
+
+-- The particle APIs have no callback, so the only way to know what a mod asked
+-- for is to stand in front of the three engine functions. Every wrapper calls
+-- the original with the caller's own arguments and returns exactly its result:
+-- the recorder is watching, not substituting. A definition is stored in the
+-- event's data as JSON, and a spawner's engine id is stored with it so that a
+-- later delete can be replayed against the id the replay engine hands back.
+
+local unpack = table.unpack or unpack
+
+local function pack(...)
+	return {n = select("#", ...), ...}
+end
+
+local function unpack_all(packed)
+	return unpack(packed, 1, packed.n)
+end
+
+-- Add every point a particle position value describes. A number is the
+-- engine's shorthand for a uniform vector, a vector is one point, and a range
+-- is its two ends. Anything else is not a position and is ignored rather than
+-- guessed at.
+local function add_point(points, value)
+	if type(value) == "number" then
+		points[#points + 1] = {x = value, y = value, z = value}
+	elseif type(value) == "table" then
+		local x, y, z = tonumber(value.x), tonumber(value.y), tonumber(value.z)
+		if x and y and z then
+			points[#points + 1] = {x = x, y = y, z = z}
+		elseif value.min ~= nil or value.max ~= nil then
+			add_point(points, value.min)
+			add_point(points, value.max)
+		end
+	end
+end
+
+-- The box a spawner can emit in, read the way the engine reads it: a tween
+-- wins over `pos`, which wins over the legacy minpos/maxpos pair.
+---@param definition table
+---@return table|nil  -- {pos1 =, pos2 =}, or nil when it names no position
+local function spawner_box(definition)
+	local points = {}
+	if type(definition.pos_tween) == "table" then
+		local last = #definition.pos_tween
+		if last > 0 then
+			add_point(points, definition.pos_tween[1])
+			add_point(points, definition.pos_tween[last])
+		end
+	elseif definition.pos ~= nil then
+		add_point(points, definition.pos)
+	else
+		add_point(points, definition.minpos)
+		add_point(points, definition.maxpos)
+	end
+	if #points == 0 then return nil end
+	local low = {x = points[1].x, y = points[1].y, z = points[1].z}
+	local high = {x = points[1].x, y = points[1].y, z = points[1].z}
+	for i = 2, #points do
+		local point = points[i]
+		if point.x < low.x then low.x = point.x end
+		if point.y < low.y then low.y = point.y end
+		if point.z < low.z then low.z = point.z end
+		if point.x > high.x then high.x = point.x end
+		if point.y > high.y then high.y = point.y end
+		if point.z > high.z then high.z = point.z end
+	end
+	return {pos1 = low, pos2 = high}
+end
+
+-- The position a single particle appears at. A definition that names no
+-- position (which the engine reads as the origin) is the origin here too, so
+-- the recording's region judges it like any other point.
+---@param definition table
+---@return table
+local function particle_position(definition)
+	local pos = definition.pos
+	if type(pos) == "number" then
+		return {x = pos, y = pos, z = pos}
+	end
+	local x, y, z = position_of(pos)
+	if x then return {x = x, y = y, z = z} end
+	return {x = 0, y = 0, z = 0}
+end
+
+-- A definition is stored as JSON, so it must hold only numbers, strings,
+-- booleans and tables of them. The one common exception is an effect attached
+-- to an object: it follows that object (position and yaw), which a recording
+-- cannot reproduce without the object, so it is left out - said once - rather
+-- than replayed at a wrong, fixed position.
+local particle_complaints = {}
+local function recordable_definition(definition)
+	if type(definition) ~= "table" then
+		return false, "its definition is not a table"
+	end
+	if definition.attached ~= nil then
+		return false, "its definition is attached to an object"
+	end
+	local attract = definition.attract
+	if type(attract) == "table"
+		and (attract.origin_attached ~= nil or attract.direction_attached ~= nil) then
+		return false, "its definition is attached to an object"
+	end
+	return true
+end
+
+local function particle_complaint(message)
+	if particle_complaints[message] then return end
+	particle_complaints[message] = true
+	log_error("cannot record a particle effect: " .. message)
+end
+
+-- Build the table form of a deprecated add_particle call, so a recording does
+-- not depend on the engine keeping its positional form alive.
+local function particle_definition_from_args(args, count)
+	if count > 1 then
+		return {
+			pos = args[1],
+			velocity = args[2],
+			acceleration = args[3],
+			expirationtime = args[4],
+			size = args[5],
+			collisiondetection = args[6],
+			texture = args[7],
+			playername = args[8],
+		}
+	end
+	return args[1]
+end
+
+-- The same for add_particlespawner's fifteen positional arguments.
+local function spawner_definition_from_args(args, count)
+	if count > 1 then
+		return {
+			amount = args[1], time = args[2],
+			minpos = args[3], maxpos = args[4],
+			minvel = args[5], maxvel = args[6],
+			minacc = args[7], maxacc = args[8],
+			minexptime = args[9], maxexptime = args[10],
+			minsize = args[11], maxsize = args[12],
+			collisiondetection = args[13], texture = args[14],
+			playername = args[15],
+		}
+	end
+	return args[1]
+end
+
+local original_add_particle = core.add_particle
+local original_add_particlespawner = core.add_particlespawner
+local original_delete_particlespawner = core.delete_particlespawner
+
+core.add_particle = function(...)
+	-- The idle path is the common one on a server nobody is recording; it does
+	-- not even allocate the result table.
+	if not any_recording() then return original_add_particle(...) end
+	local result = pack(original_add_particle(...))
+	local count = select("#", ...)
+	local definition = particle_definition_from_args(pack(...), count)
+	local recordable, why = recordable_definition(definition)
+	if not recordable then
+		particle_complaint(why)
+		return unpack_all(result)
+	end
+	broadcast_event({
+		type = "particle",
+		pos = particle_position(definition),
+		data = { definition = definition },
+	})
+	return unpack_all(result)
+end
+
+core.add_particlespawner = function(...)
+	if not any_recording() then return original_add_particlespawner(...) end
+	local result = pack(original_add_particlespawner(...))
+	local count = select("#", ...)
+	local definition = spawner_definition_from_args(pack(...), count)
+	local recordable, why = recordable_definition(definition)
+	if not recordable then
+		particle_complaint(why)
+		return unpack_all(result)
+	end
+	-- The engine answers with the spawner's id; without it a later delete
+	-- cannot be matched, and there is nothing worth recording.
+	local id = result[1]
+	if type(id) ~= "number" then return unpack_all(result) end
+	local box = spawner_box(definition) or {pos1 = {x = 0, y = 0, z = 0}, pos2 = {x = 0, y = 0, z = 0}}
+	broadcast_event({
+		type = "particlespawner",
+		pos = {
+			x = (box.pos1.x + box.pos2.x) / 2,
+			y = (box.pos1.y + box.pos2.y) / 2,
+			z = (box.pos1.z + box.pos2.z) / 2,
+		},
+		extent = box,
+		data = { definition = definition, id = id },
+	})
+	return unpack_all(result)
+end
+
+core.delete_particlespawner = function(...)
+	if not any_recording() then return original_delete_particlespawner(...) end
+	local result = pack(original_delete_particlespawner(...))
+	local args = pack(...)
+	broadcast_event({
+		type = "particlespawner_delete",
+		data = { id = args[1], playername = args[2] },
+	})
+	return unpack_all(result)
+end
 
 ----------------------------------------------------------------------------
 -- Changes to the region's nodes

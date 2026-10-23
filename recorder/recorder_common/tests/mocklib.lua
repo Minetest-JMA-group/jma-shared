@@ -735,6 +735,34 @@ function M.new(opts)
 		return obj
 	end
 
+	-- Particles. The engine's three functions have no callback; the mock keeps
+	-- every call so tests can see both what the recorder wrapped and what the
+	-- replay asked for. The return values mimic the engine's shapes: an id for
+	-- a spawner, and the argument the call handed over for the other two.
+	mock.particles = {}
+	mock.spawners = {}
+	mock.spawner_deletes = {}
+	mock.live_spawners = {}
+	mock.next_spawner_id = 0
+	core.add_particle = function(definition)
+		mock.particles[#mock.particles + 1] = definition
+		return definition
+	end
+	core.add_particlespawner = function(definition)
+		mock.next_spawner_id = mock.next_spawner_id + 1
+		mock.spawners[#mock.spawners + 1] = {
+			id = mock.next_spawner_id,
+			definition = definition,
+		}
+		mock.live_spawners[mock.next_spawner_id] = definition
+		return mock.next_spawner_id
+	end
+	core.delete_particlespawner = function(id, player)
+		mock.live_spawners[id] = nil
+		mock.spawner_deletes[#mock.spawner_deletes + 1] = {id = id, player = player}
+		return id
+	end
+
 	core.register_craftitem = function(name, def)
 		mock.items[name] = def
 	end

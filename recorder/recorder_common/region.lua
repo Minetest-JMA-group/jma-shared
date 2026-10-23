@@ -116,4 +116,26 @@ function region.overlaps(a, b)
 		and a.pos1.z <= b.pos2.z and a.pos2.z >= b.pos1.z
 end
 
+-- Whether a box of world positions touches the region. The box corners are
+-- floats (a particle spawner's range, say), so each becomes the node it falls
+-- in, the same way contains() judges a fractional position.
+---@param reg table
+---@param pos1 table  -- one corner of the box, fractional
+---@param pos2 table  -- the other corner
+---@return boolean
+function region.intersects(reg, pos1, pos2)
+	if type(pos1) ~= "table" or type(pos2) ~= "table" then return false end
+	local function node(value)
+		local number = tonumber(value)
+		if not number then return nil end
+		return math.floor(number)
+	end
+	local x1, y1, z1 = node(pos1.x), node(pos1.y), node(pos1.z)
+	local x2, y2, z2 = node(pos2.x), node(pos2.y), node(pos2.z)
+	if not (x1 and y1 and z1 and x2 and y2 and z2) then return false end
+	local low = {x = math.min(x1, x2), y = math.min(y1, y2), z = math.min(z1, z2)}
+	local high = {x = math.max(x1, x2), y = math.max(y1, y2), z = math.max(z1, z2)}
+	return region.overlaps(reg, {pos1 = low, pos2 = high})
+end
+
 return region

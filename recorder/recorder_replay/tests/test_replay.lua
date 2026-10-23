@@ -119,11 +119,35 @@ local function make_fixture(path, with_light)
 	end
 	writer:add_movement({writer:next_id(), 1, 0.1, 0.1, bob,
 		5, 0, 5, 0, 0, 0, 0, 0, nil, nil, nil, 0, 0, 0, 0})
+	-- A smoke spawner at 0.1 s that runs for half a second, an endless ember
+	-- spawner at 0.2 s, a single puff at 0.3 s, and a short-lived spawner at
+	-- 0.45 s. The smoke is deleted at 0.6 s. See the particle section below.
+	writer:add_event({writer:next_id(), 1, 0.1, "particlespawner", nil, nil, nil, nil, nil,
+		nil, nil, nil,
+		'{"definition":{"amount":20,"time":0.5,"minpos":{"x":0,"y":0,"z":0},' ..
+		'"maxpos":{"x":1,"y":0,"z":0},"texture":"recorder_smoke.png"},' ..
+		'"id":700}'})
+	writer:add_event({writer:next_id(), 2, 0.2, "particlespawner", nil, nil, nil, nil, nil,
+		nil, nil, nil,
+		'{"definition":{"amount":2,"time":0,"minpos":{"x":4,"y":0,"z":4},' ..
+		'"maxpos":{"x":5,"y":0,"z":5},"texture":"recorder_ember.png",' ..
+		'"attract":{"kind":"point","strength":1,"origin":{"x":4,"y":0,"z":4}}},' ..
+		'"id":701}'})
+	writer:add_event({writer:next_id(), 3, 0.3, "particle", nil, nil, 2, 1, 2,
+		nil, nil, nil,
+		'{"definition":{"pos":{"x":2,"y":1,"z":2},"velocity":{"x":0,"y":1,"z":0},' ..
+		'"acceleration":{"x":0,"y":0,"z":0},"expirationtime":0.5,"size":2,' ..
+		'"texture":"recorder_puff.png","playername":"Alice"}}'})
 	-- At 0.4 s Alice's game lays her down (the death pose): a frame range that
 	-- no speed-and-dig guess would ever produce.
 	writer:add_event({writer:next_id(), 4, 0.4, "animation", alice, nil, nil, nil, nil,
 		nil, nil, nil,
 		'{"frames":{"x":220,"y":240},"speed":10,"blend":0.2,"loop":false}'})
+	writer:add_event({writer:next_id(), 4, 0.45, "particlespawner", nil, nil, nil, nil, nil,
+		nil, nil, nil,
+		'{"definition":{"amount":1,"time":0.1,"minpos":{"x":3,"y":0,"z":3},' ..
+		'"maxpos":{"x":3,"y":0,"z":3},"texture":"recorder_spark.png"},' ..
+		'"id":702}'})
 	-- Bob leaves at half a second.
 	writer:add_event({writer:next_id(), 5, 0.5, "leave", bob, nil, 5, 0, 5,
 		nil, nil, nil, nil})
@@ -131,6 +155,9 @@ local function make_fixture(path, with_light)
 	-- event above carries "default:stone" for the time before she switches.
 	writer:add_event({writer:next_id(), 5, 0.5, "wield", alice, nil, nil, nil, nil,
 		nil, nil, "default:pick_stone", nil})
+	-- The smoke spawner is cancelled at 0.6 s.
+	writer:add_event({writer:next_id(), 6, 0.6, "particlespawner_delete", nil, nil, nil, nil,
+		nil, nil, nil, nil, '{"id":700,"playername":"Alice"}'})
 	writer:add_event({writer:next_id(), 7, 0.7, "wield", alice, nil, nil, nil, nil,
 		nil, nil, nil, nil})
 	-- At 0.8 s Alice digs the floor out from under herself, and at 0.9 s the
@@ -629,6 +656,64 @@ posed = ghost_of("Alice")
 check(posed and posed.animation.x == 220, "and it stays while she moves")
 
 ----------------------------------------------------------------------------
+print("=== particle effects ===")
+----------------------------------------------------------------------------
+
+local function live_by_texture(texture)
+	local found = {}
+	for _, definition in pairs(mock.live_spawners) do
+		if definition.texture == texture then found[#found + 1] = definition end
+	end
+	return found
+end
+
+sessions.seek(session, 0.05)
+check(next(mock.live_spawners) == nil, "before any spawner event there is nothing alive")
+
+sessions.seek(session, 0.3)
+check(#live_by_texture("recorder_smoke.png") == 1, "a seek recreates the spawner alive at T")
+check(#live_by_texture("recorder_ember.png") == 1, "and the endless one")
+check(#live_by_texture("recorder_spark.png") == 0, "but not one created after T")
+local smoke = live_by_texture("recorder_smoke.png")[1]
+check(smoke and smoke.minpos.x == 101 and smoke.minpos.y == 11 and smoke.minpos.z == 101,
+	"translated into the arena: " .. tostring(smoke and smoke.minpos.x))
+check(smoke and smoke.maxpos.x == 102, "both corners move together")
+check(smoke and smoke.playername == nil, "a per-player effect is sent to every watcher")
+local ember = live_by_texture("recorder_ember.png")[1]
+check(ember and ember.attract and ember.attract.origin.x == 105
+	and ember.attract.origin.y == 11 and ember.attract.origin.z == 105,
+	"an attractor's origin moves with the spawner")
+
+sessions.seek(session, 0.7)
+check(#live_by_texture("recorder_smoke.png") == 0, "a deleted spawner is not recreated at a later moment")
+check(#live_by_texture("recorder_ember.png") == 1, "the endless one still is")
+check(#live_by_texture("recorder_spark.png") == 0, "an expired spawner is not recreated either")
+
+sessions.seek(session, 0.3)
+check(#live_by_texture("recorder_smoke.png") == 1, "seeking back recreates the deleted spawner")
+check(next(mock.live_spawners) ~= nil, "and leaves a live spawner behind")
+
+-- Forward playback creates and deletes as the clock reaches the events, and a
+-- single particle is spawned when its moment comes.
+sessions.seek(session, 0)
+check(next(mock.live_spawners) == nil, "at the start no spawner is running")
+local particles_before = #mock.particles
+mock.step(0.25)
+check(#live_by_texture("recorder_smoke.png") == 1 and #live_by_texture("recorder_ember.png") == 1,
+	"forward playback creates spawners when the clock reaches them")
+check(#mock.particles == particles_before, "and the puff at 0.3 s is not there yet")
+mock.step(0.1)
+check(#mock.particles == particles_before + 1, "the clock reaching the particle spawns one")
+local puff = mock.particles[#mock.particles]
+check(puff and puff.pos.x == 103 and puff.pos.y == 12 and puff.pos.z == 103,
+	"translated into the arena: " .. tostring(puff and puff.pos.x))
+check(puff and puff.texture == "recorder_puff.png" and puff.playername == nil,
+	"with its definition and no player restriction")
+mock.step(0.3)
+check(#live_by_texture("recorder_smoke.png") == 0, "the delete event cancels the replay spawner")
+check(#live_by_texture("recorder_ember.png") == 1, "and leaves the others alone")
+
+----------------------------------------------------------------------------
 print("=== the remote control ===")
 ----------------------------------------------------------------------------
 
@@ -863,6 +948,7 @@ watcher.inventory.main[1] = "recorder_replay:leave"
 mock.step(0.1)
 check(sessions.for_player("Watcher") == nil, "the next step leaves the replay")
 check(next(mock.entities) == nil, "no ghosts are left")
+check(next(mock.live_spawners) == nil, "no particle spawners are left either")
 local empty, offender = box_is_air(WATCHER_ARENA)
 check(empty, "the whole arena is air again: " .. tostring(offender))
 check(#mock.relit > 0 and mock.relit[#mock.relit].pos1.x == 100,

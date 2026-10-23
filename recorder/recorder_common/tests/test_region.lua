@@ -85,4 +85,19 @@ check(region.overlaps(a, region.normalize(pos(15, 15, 15), pos(30, 30, 30))), "s
 check(region.overlaps(a, region.normalize(pos(1, 1, 1), pos(2, 2, 2))), "a nested region overlaps")
 check(region.overlaps(a, a), "a region overlaps itself")
 
+print("=== boxes touching a region ===")
+local box_region = region.normalize(pos(0, 0, 0), pos(10, 10, 10))
+check(region.intersects(box_region, pos(5, 5, 5), pos(5, 5, 5)),
+	"a point inside touches the region")
+check(region.intersects(box_region, pos(-1.5, 5, 5), pos(0.5, 5, 5)),
+	"a fractional box across a face touches it")
+check(not region.intersects(box_region, pos(-2, 5, 5), pos(-0.1, 5, 5)),
+	"a box in the node just outside does not")
+check(not region.intersects(box_region, pos(11.2, 11.2, 11.2), pos(20, 20, 20)),
+	"a box starting one node past the corner does not")
+check(region.intersects(box_region, pos(20, 20, 20), pos(-20, -20, -20)),
+	"a box around the region touches it")
+check(not region.intersects(box_region, nil, pos(0, 0, 0)),
+	"a missing corner is not a box")
+
 print(("\n%d checks passed"):format(checks))

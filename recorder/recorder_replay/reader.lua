@@ -269,6 +269,30 @@ function reader.last_animation(rec, player_id, tick)
 	return nil
 end
 
+-- The particle-spawner events up to a tick, in the order they happened.
+-- Replaying the creates and deletes in order leaves exactly the spawners that
+-- were running at that moment; a seek has no other way to know them, because
+-- an engine spawner's definition cannot be read back.
+---@param rec table
+---@param tick integer
+---@return table[]
+function reader.spawner_events_until(rec, tick)
+	local rows = {}
+	local sql = string.format(
+		"SELECT id, tick, t, type, data FROM Events " ..
+		"WHERE type IN ('particlespawner', 'particlespawner_delete') AND tick <= %d ORDER BY id", tick)
+	for row in rec.db:nrows(sql) do
+		rows[#rows + 1] = {
+			id = row.id,
+			tick = row.tick,
+			t = row.t,
+			type = row.type,
+			data = row.data,
+		}
+	end
+	return rows
+end
+
 ---@param rec table
 ---@param tick integer
 ---@return integer

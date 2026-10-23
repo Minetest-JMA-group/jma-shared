@@ -135,10 +135,24 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
   standing, with the head following the recorded pitch either way.
 - A ghost wears the game's player model and, when the recording carries them,
   the recorded textures.
+- Particle effects are replayed inside the arena: a single particle at the
+  moment the clock reaches it, and a spawner as an engine spawner moved by the
+  session's offset. A recorded player restriction is dropped, so every watcher
+  sees an effect that was private on the recording server. A recorded delete
+  cancels the spawner the session created. Seeking cancels every spawner the
+  session made and re-creates the ones the recording had running at that
+  moment, minus those whose own lifetime had ended; their timers restart,
+  which is all a seek can do to an engine spawner. A one-off particle from
+  before the seek is not replayed - it was over long before.
 
 ## Limits
 
 - Chat, items and inventories are not drawn.
+- Particle effects attached to an object (a smoke trail following a projectile,
+  an aura around a player) are not recorded, so they do not replay. A
+  spawner's emission box is translated whole rather than clamped to the
+  arena's walls; a box that reaches outside the arena may put particles
+  outside it, where the shell hides them or the live world shows through.
 - Lua entities are not recorded, so mobs, dropped items and the like do not
   appear.
 - Node timers' state is not recorded or replayed; a node timer's `node_change`

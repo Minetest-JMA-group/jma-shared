@@ -132,6 +132,7 @@ Settings are read when a recording starts, so a change applies to the next one.
 | `recorder.disabled_events` | empty | Comma-separated event types not to record, e.g. `chat, chatcommand, punch_node`. The recording's own markers (`recording_start`, `recording_stop`, `write_error`) and `node_change` cannot be disabled. |
 | `recorder.metadata` | `true` | Record node metadata and inventories (chest contents, sign text, ...). With `false` the recording holds no metadata rows; replay handles both kinds of file the same way. |
 | `recorder.light` | `true` | Record the region's lighting (a byte per node, air included). With `false` the snapshot holds no light layer and replay recalculates the light instead. The time of day is recorded either way. |
+| `recorder.particles` | `true` | Record particle and particle-spawner calls. With `false` none of the three particle event types is written; `recorder.disabled_events` turns them off one at a time. |
 
 ## The recording file
 
@@ -318,6 +319,9 @@ SQLite's JSON functions can dig into it, e.g.
 | `protection_violation` | player | – | `pos` | – |
 | `cheat` | player | – | `pos` | `cheat` |
 | `node_change` | – | – | `pos`, `node` (what it became), `param2` | `old_node`, `old_param2` |
+| `particle` | – | – | `pos` | `definition` (the engine's particle table) |
+| `particlespawner` | – | – | `pos` (centre of the emission box) | `definition`, `id` (the engine's spawner id) |
+| `particlespawner_delete` | – | – | – | `id`, `playername` |
 
 `reason` is a `PlayerHPChangeReason` with its ObjectRef replaced by the name of the
 player it points at: `type`, `custom_type`, `from`, `object`, `node`, `node_pos`.
@@ -327,6 +331,30 @@ an empty string for an empty slot. `item` on an inventory action is the stack th
 action moved – for a `move` within one inventory, which does not say what it
 moved, it is what the move left in the destination slot, with `count` telling how
 much of it moved.
+
+### Particles
+
+`core.add_particle`, `core.add_particlespawner` and
+`core.delete_particlespawner` have no callback, so capture wraps them at load.
+The original is always called with the caller's arguments, and its return
+values are returned unchanged – the recorder is watching, not substituting.
+Definitions are written as the JSON table the engine documents today (the
+deprecated positional calls are normalized to it) and are filtered by the
+recording's region: a single particle by its position, a spawner by the box it
+can emit in, which has to intersect the region at all. A spawner's row also
+carries the id the engine returned, so a later `particlespawner_delete` can
+name it.
+
+A definition attached to an object (`attached`, or an attractor's
+`*_attached` field) is not recorded: it follows that object's position and
+yaw, which a file cannot reproduce, so it is reported once in the log rather
+than replayed at a wrong, fixed position. A per-player definition
+(`playername`/`exclude_player`) is recorded as it is; replay shows it to every
+watcher.
+
+A per-step emitter – a rocket's smoke trail, say – writes one `particle` row
+per step for as long as it runs. `recorder.particles = false` turns all three
+types off; `recorder.disabled_events` names them one at a time.
 
 ### How a recording opens and closes
 
@@ -443,6 +471,12 @@ per player per step, which is small next to what the engine does with those
 players anyway – but it is why the sampling is not free for a player who is
 standing still. An animation the engine reports as its own default (frames
 1..1 at 15 fps) is not a pose the game chose and is not recorded.
+
+Particle calls are the one source that can add rows quickly: an effect emitted
+every step writes one `particle` row per step (twenty a second at the default
+step rate) for as long as it runs. A spawner is one row however many particles
+it emits, and its delete is one more. `recorder.particles = false`, or
+`recorder.disabled_events = particle`, keeps a busy server's recordings small.
 
 ## Tests
 

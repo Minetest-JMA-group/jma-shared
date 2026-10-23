@@ -121,6 +121,7 @@ local function new_state()
 		prev = {},           -- player id -> last sample, for deriving acceleration
 		written = {},        -- player id -> last sample written, to spot no-ops
 		wield = {},          -- player id -> last wielded itemstring
+		anim = {},           -- player id -> last animation the player was wearing
 		joined = {},         -- player ids that are in the recording as present
 	}
 end
@@ -351,6 +352,37 @@ local function wielded(obj)
 	local ok, str = pcall(held_stack, obj)
 	if ok and type(str) == "string" then return str end
 	return ""
+end
+
+-- The animation a player is wearing, in the four values the engine's old
+-- animation interface owns. A pose like "lying down while dead" is not
+-- derivable from speed and controls, so the recording keeps the engine's own
+-- numbers instead of guessing at replay time. Some engine versions answer
+-- nothing (or raise) for a player; that only means the recording has no pose
+-- for them and replay falls back to its guess.
+--
+-- An animation the engine has never been given is reported as frames 1..1 at
+-- 15 fps, no blend, looping. That is not a pose a game chose: recording it
+-- would freeze the replay's own guess for the whole file, so it means "no
+-- pose" here too.
+---@param player ObjectRef
+---@return table|nil  -- {frames = {x =, y =}, speed =, blend =, loop =}
+local function animation_of(player)
+	local ok, frames, speed, blend, loop = pcall(player.get_animation, player)
+	if not ok or type(frames) ~= "table" then return nil end
+	if frames.x == 1 and frames.y == 1 and speed == 15 and blend == 0 and loop == true then
+		return nil
+	end
+	return {frames = {x = frames.x, y = frames.y}, speed = speed, blend = blend, loop = loop}
+end
+
+---@param a table?
+---@param b table?
+---@return boolean
+local function same_animation(a, b)
+	if not a or not b then return a == b end
+	return a.frames.x == b.frames.x and a.frames.y == b.frames.y
+		and a.speed == b.speed and a.blend == b.blend and a.loop == b.loop
 end
 
 -- param2 is an INTEGER column, and SQLite refuses to put a fractional real in
@@ -642,6 +674,12 @@ local function record_player(rec, player, dtime)
 		record_event(rec, { type = "wield", subject = name, item = stack_string(wield) })
 	end
 
+	local animation = animation_of(player)
+	if animation and not same_animation(rec.anim[pid], animation) then
+		rec.anim[pid] = animation
+		record_event(rec, { type = "animation", subject = name, data = animation })
+	end
+
 	local last = rec.written[pid]
 	if last and same_state(sample, last) then return end
 	rec.written[pid] = sample
@@ -742,6 +780,7 @@ local function on_leave(rec, player, timed_out)
 	rec.prev[pid] = nil
 	rec.written[pid] = nil
 	rec.wield[pid] = nil
+	rec.anim[pid] = nil
 	rec.joined[pid] = nil
 end
 
@@ -788,6 +827,7 @@ local function observe_region(rec, dtime)
 			rec.prev[pid] = nil
 			rec.written[pid] = nil
 			rec.wield[pid] = nil
+			rec.anim[pid] = nil
 		end
 	end
 	rec.sampled = seen
@@ -856,9 +896,9 @@ local function maybe_flush(rec)
 	log_error(string.format("cannot write %d rows to %s: %s", lost or 0, tostring(rec.path), tostring(err)))
 	-- The rows are gone, so what was last written is no longer what a reader
 	-- would carry forward: every player's next sample is written again rather
-	-- than looking like a quiet tick, and a held item that changed in the lost
-	-- rows is announced again instead of going unmentioned.
-	rec.written, rec.wield = {}, {}
+	-- than looking like a quiet tick, and a held item or a pose that changed in
+	-- the lost rows is announced again instead of going unmentioned.
+	rec.written, rec.wield, rec.anim = {}, {}, {}
 	record_event(rec, {
 		type = "write_error",
 		data = { dropped_rows = lost, message = err },
@@ -913,6 +953,7 @@ local function abort_start(rec, reason)
 	rec.metadata_enabled = false
 	rec.metadata_known = {}
 	rec.pending_blocks = {}
+	rec.anim = {}
 	rec.name, rec.path = nil, nil
 end
 
@@ -1108,6 +1149,7 @@ recorder.start = function(record_name, region_arg)
 	rec.complaints, rec.player_errors = {}, {}
 	rec.troubles, rec.troubles_dirty = {}, false
 	rec.prev, rec.written, rec.wield, rec.joined = {}, {}, {}, {}
+	rec.anim = {}
 	rec.sampled = {}
 	rec.known_ids, rec.known_param2 = nil, nil
 	rec.pending_blocks = {}
@@ -1154,6 +1196,7 @@ local function stop(rec, reason)
 		rec.metadata_known = {}
 		rec.pending_blocks = {}
 		rec.sampled = {}
+		rec.anim = {}
 		rec.name, rec.path = nil, nil
 		core.log("action", "[recorder] recording " .. tostring(rec.id) ..
 			" abandoned while snapshotting; the file is gone")
@@ -1188,6 +1231,7 @@ local function stop(rec, reason)
 	recordings[rec.id] = nil
 	rec.name, rec.path = nil, nil
 	rec.prev, rec.written, rec.wield, rec.joined = {}, {}, {}, {}
+	rec.anim = {}
 	rec.sampled = {}
 	rec.region = nil
 	rec.known_ids, rec.known_param2 = nil, nil

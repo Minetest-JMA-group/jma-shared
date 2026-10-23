@@ -106,6 +106,14 @@ local function new_player(name)
 	player.get_player_control = function(self) return self.controls end
 	player.get_hp = function(self) return self.hp end
 	player.get_breath = function(self) return self.breath end
+	-- The old animation interface: four values, or nothing when the mock player
+	-- has never been given a pose (an engine may answer its defaults instead;
+	-- the recorder treats both as "no pose to record" and "the pose it says").
+	player.get_animation = function(self)
+		if not self.animation then return nil end
+		return self.animation.frames, self.animation.speed, self.animation.blend,
+			self.animation.loop
+	end
 	player.get_properties = function(self)
 		return {
 			visual = "mesh",
@@ -706,10 +714,12 @@ function M.new(opts)
 			self.wielded = item and item:to_string() or ""
 			return true
 		end
-		function obj:set_animation(frames, speed)
+		function obj:set_animation(frames, speed, blend, loop)
 			check(self)
 			self.animation = frames
 			self.animation_speed = speed
+			self.animation_blend = blend
+			self.animation_loop = loop
 		end
 		function obj:set_bone_override(bone, override)
 			check(self)

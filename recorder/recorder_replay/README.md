@@ -124,8 +124,15 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
   they left, including walking in and out of the recorded region.
 - Their motion is the recording's sparse samples: a sample is applied when the
   clock reaches it, and the client's entity interpolation smooths between them.
-- The pose follows the sample - walking, mining, standing - and the head follows
-  the recorded pitch.
+- A ghost holds the item its player held: the last `wield` event at or before
+  the moment shown, or the item carried by the `join` event before the player
+  first switched. An empty hand is a recorded empty item and shows as one.
+- The pose is the recording's when it has one: an `animation` event carries the
+  engine's frame range, speed, blend and loop, so a game's own pose (lying down
+  while dead, sitting) is shown exactly, and later movement samples do not
+  overwrite it. Without an animation event - an older recording, or a game that
+  never sets one - the pose follows the sample as before: walking, mining,
+  standing, with the head following the recorded pitch either way.
 - A ghost wears the game's player model and, when the recording carries them,
   the recorded textures.
 

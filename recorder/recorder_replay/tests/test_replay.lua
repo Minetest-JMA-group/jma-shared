@@ -119,6 +119,11 @@ local function make_fixture(path, with_light)
 	end
 	writer:add_movement({writer:next_id(), 1, 0.1, 0.1, bob,
 		5, 0, 5, 0, 0, 0, 0, 0, nil, nil, nil, 0, 0, 0, 0})
+	-- At 0.4 s Alice's game lays her down (the death pose): a frame range that
+	-- no speed-and-dig guess would ever produce.
+	writer:add_event({writer:next_id(), 4, 0.4, "animation", alice, nil, nil, nil, nil,
+		nil, nil, nil,
+		'{"frames":{"x":220,"y":240},"speed":10,"blend":0.2,"loop":false}'})
 	-- Bob leaves at half a second.
 	writer:add_event({writer:next_id(), 5, 0.5, "leave", bob, nil, 5, 0, 5,
 		nil, nil, nil, nil})
@@ -582,6 +587,46 @@ check(ghost_of("Alice").wielded == "default:pick_stone", "forward playback cross
 mock.step(0.15)
 emptied = ghost_of("Alice").wielded
 check(emptied == nil or emptied == "", "and reaches the empty hand")
+
+----------------------------------------------------------------------------
+print("=== recorded poses ===")
+----------------------------------------------------------------------------
+
+-- Before the pose event the recording says nothing about the pose, so the
+-- speed-and-dig guess poses the ghost: Alice walks at 0.3 s.
+sessions.seek(session, 0.3)
+local posed = ghost_of("Alice")
+check(posed and posed.animation and posed.animation.x == 168 and posed.animation.y == 187,
+	"without a recorded pose the speed-and-dig guess poses the ghost")
+check(posed and posed.animation_speed == 30, "at the model's animation speed")
+
+-- From the pose event on, the recorded frame range is what the ghost wears,
+-- even though Alice's movement samples still say she is walking and mining.
+sessions.seek(session, 0.5)
+posed = ghost_of("Alice")
+check(posed and posed.animation and posed.animation.x == 220 and posed.animation.y == 240,
+	"a seek applies the recorded pose")
+check(posed and posed.animation_speed == 10 and posed.animation_blend == 0.2
+	and posed.animation_loop == false, "with its speed, blend and loop")
+sessions.seek(session, 0.9)
+posed = ghost_of("Alice")
+check(posed and posed.animation.x == 220, "later movement samples do not overwrite the recorded pose")
+
+sessions.seek(session, 0.2)
+posed = ghost_of("Alice")
+check(posed and posed.animation and posed.animation.x ~= 220,
+	"seeking back before the pose event drops it")
+
+sessions.seek(session, 0.35)
+posed = ghost_of("Alice")
+check(posed and posed.animation.x ~= 220, "before the pose event forward playback still guesses")
+mock.step(0.1)
+posed = ghost_of("Alice")
+check(posed and posed.animation and posed.animation.x == 220,
+	"the clock crossing the pose event puts it on the ghost")
+mock.step(0.2)
+posed = ghost_of("Alice")
+check(posed and posed.animation.x == 220, "and it stays while she moves")
 
 ----------------------------------------------------------------------------
 print("=== the remote control ===")

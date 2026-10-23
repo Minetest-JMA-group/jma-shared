@@ -251,6 +251,24 @@ function reader.last_wield(rec, player_id, tick)
 	return nil
 end
 
+-- The data of a player's last animation event at or before a tick, still as the
+-- JSON string the file holds; the session parses it. There is no animation
+-- event in a recording made before poses were captured, which is what keeps
+-- those readable by the speed-and-dig fallback.
+---@param rec table
+---@param player_id integer
+---@param tick integer
+---@return string|nil
+function reader.last_animation(rec, player_id, tick)
+	local sql = string.format(
+		"SELECT data FROM Events WHERE type = 'animation' AND subject_player = %d AND tick <= %d " ..
+		"ORDER BY id DESC LIMIT 1", player_id, tick)
+	for row in rec.db:nrows(sql) do
+		return row.data
+	end
+	return nil
+end
+
 ---@param rec table
 ---@param tick integer
 ---@return integer

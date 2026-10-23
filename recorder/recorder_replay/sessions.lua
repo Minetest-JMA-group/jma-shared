@@ -68,6 +68,9 @@ local function remove_ghost(session, pid)
 	end
 	session.ghosts[pid] = nil
 	session.cursors[pid] = nil
+	-- The next ghost of this player is posed by whatever the next animation
+	-- event says, or by the movement heuristic before there is one.
+	session.animations[pid] = nil
 end
 
 -- Everyone watching sees every ghost; anyone else sees none of them. A ghost
@@ -94,6 +97,16 @@ local function textures_of(json)
 	return nil
 end
 
+-- A recorded animation event's data, or nil when the row does not describe one
+-- (an old file with a hand-written event, or a damaged one). Nil means the
+-- speed-and-dig guess keeps the pose.
+local function animation_data(json)
+	if not json then return nil end
+	local data = core.parse_json(json)
+	if type(data) ~= "table" or type(data.frames) ~= "table" then return nil end
+	return data
+end
+
 -- The light values are recorded only when the file carries a light layer. The
 -- session's mode also covers the time of day, which can be recorded on its
 -- own; this is the mode a node/light write should use.
@@ -115,6 +128,7 @@ function sessions.seek(session, T)
 	session.T = T
 	for pid in pairs(session.ghosts) do remove_ghost(session, pid) end
 	session.joined = {}
+	session.animations = {}
 	local tick = deps.reader.tick_at(session.rec, T)
 	session.event_last_id = deps.reader.last_event_id(session.rec, tick)
 	session.events = {rows = {}, next = 1}
@@ -195,7 +209,17 @@ function sessions.seek(session, T)
 				session.ghosts[pid] = obj
 				session.joined[pid] = true
 				session.cursors[pid] = {last_tick = tick, rows = {}, next = 1, done = false}
-				if row then deps.ghost.update(obj, row, offset) end
+				-- A recorded pose at T is what the player was wearing, whatever
+				-- the movement sample suggests; without one the heuristic in
+				-- ghost.update() poses the ghost as before.
+				local animation = animation_data(deps.reader.last_animation(session.rec, pid, tick))
+				if animation then
+					session.animations[pid] = animation
+					deps.ghost.animate(obj, animation)
+				end
+				if row then
+					deps.ghost.update(obj, row, offset, animation ~= nil)
+				end
 				-- What the player held at T: the last wield event since they
 				-- joined, or the join's own item before they switched. A fresh
 				-- ghost holds nothing, so an empty hand needs no call.
@@ -234,6 +258,13 @@ local function apply_event(session, ev)
 		-- An empty item (NULL in the file) puts the ghost's hands down.
 		local obj = session.ghosts[ev.subject_player]
 		if obj then deps.ghost.wield(obj, ev.item) end
+	elseif ev.type == "animation" and ev.subject_player then
+		local animation = animation_data(ev.data)
+		if animation then
+			session.animations[ev.subject_player] = animation
+			local obj = session.ghosts[ev.subject_player]
+			if obj then deps.ghost.animate(obj, animation) end
+		end
 	elseif ev.type == "node_change" then
 		-- The arrays are written to the map once per step, however many nodes
 		-- changed in it; a step with no node changes touches nothing. Only the
@@ -269,7 +300,8 @@ local function advance_player(session, pid, obj, cursor)
 			if row.t > session.T then return end
 			cursor.next = cursor.next + 1
 			cursor.last_tick = row.tick
-			if not deps.ghost.update(obj, row, session.offset) then
+			if not deps.ghost.update(obj, row, session.offset,
+				session.animations[pid] ~= nil) then
 				remove_ghost(session, pid)
 				return
 			end
@@ -458,6 +490,7 @@ function sessions.start(arg, player)
 		ghosts = {},
 		cursors = {},
 		joined = {},
+		animations = {},       -- pid -> the recorded pose in force, if any
 		events = {rows = {}, next = 1},
 		event_last_id = 0,
 		metadata_events = {rows = {}, next = 1},

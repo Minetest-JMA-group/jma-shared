@@ -303,6 +303,7 @@ SQLite's JSON functions can dig into it, e.g.
 | `respawn` | player | – | `pos` (before being moved) | – |
 | `hp_change` | player | – | `pos` | `amount`, `reason` |
 | `wield` | player | – | `item` | – |
+| `animation` | player | – | – | `frames` (`{x, y}`), `speed`, `blend`, `loop` – the engine's animation values while the player wears that pose |
 | `punch_player` | hitter | punched player | `pos` (of the punched) | `damage`, `dir`, `time_from_last_punch`, `tool`, `actor` |
 | `punch_node` | puncher | – | `pos`, `node`, `param2`, `item` | `actor` |
 | `dig` | digger | – | `pos`, `node` (dug), `param2`, `item` (tool) | `actor` |
@@ -436,10 +437,12 @@ second, a few MB per hour, and nothing at all while they stand still.
 
 Reading a player costs more than comparing them: the wielded stack has to be
 pulled out of the engine and turned into an itemstring once per player per step,
-because nothing tells a mod that the held item changed. It is one stack copy and
-one string per player per step, which is small next to what the engine does with
-those players anyway – but it is why the sampling is not free for a player who
-is standing still.
+because nothing tells a mod that the held item changed, and the animation is
+polled the same way. It is one stack copy, one string and one `get_animation()`
+per player per step, which is small next to what the engine does with those
+players anyway – but it is why the sampling is not free for a player who is
+standing still. An animation the engine reports as its own default (frames
+1..1 at 15 fps) is not a pose the game chose and is not recorded.
 
 ## Tests
 

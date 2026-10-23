@@ -947,6 +947,71 @@ rdb:close()
 mock.remove_player("Outsider")
 
 ----------------------------------------------------------------------------
+print("=== the pose a player is wearing ===")
+----------------------------------------------------------------------------
+
+-- A game sets a player's animation itself (the death pose is one); it is not
+-- derivable from the movement sample, so the recording keeps the engine's four
+-- animation values whenever they change.
+local ANIM_REGION = {pos1 = {x = 600, y = 0, z = 0}, pos2 = {x = 605, y = 4, z = 5}}
+local anim_in = mock.add_player("AnimIn", {
+	pos = {x = 602, y = 0, z = 2},
+	animation = {frames = {x = 189, y = 198}, speed = 2, blend = 0, loop = false},
+})
+local anim_out = mock.add_player("AnimOut", {
+	pos = {x = 700, y = 0, z = 2},
+	animation = {frames = {x = 0, y = 79}, speed = 30, blend = 0, loop = true},
+})
+-- An engine that cannot answer for a player must not cost their movement row.
+local anim_broken = mock.add_player("AnimBroken", {pos = {x = 604, y = 0, z = 2}})
+anim_broken.get_animation = function() error("no animation here") end
+-- The engine's "never given an animation" answer is not a pose.
+local anim_default = mock.add_player("AnimDefault", {
+	pos = {x = 601, y = 0, z = 2},
+	animation = {frames = {x = 1, y = 1}, speed = 15, blend = 0, loop = true},
+})
+
+check(start_recording("poses", ANIM_REGION) == nil, "a recording with an animated player starts")
+local anim_path = recorder.get_recording_path()
+mock.step(0.1)  -- the first sample records the pose the player is wearing
+anim_in.animation = {frames = {x = 200, y = 219}, speed = 30, blend = 0.1, loop = true}
+mock.step(0.1)
+mock.step(0.1)  -- unchanged: no row
+check(recorder.stop() == nil, "it stops")
+
+local anim_db = open_recording(anim_path)
+local anim_id = value(anim_db, "SELECT id FROM Players WHERE name = 'AnimIn'")
+local pose_events = rows(anim_db, ("SELECT * FROM Events WHERE type = 'animation' AND subject_player = %d " ..
+	"ORDER BY id"):format(anim_id))
+check(#pose_events == 2, "one animation event per pose change (got " .. #pose_events .. ")")
+local first_pose = core.parse_json(pose_events[1].data)
+check(first_pose and first_pose.frames.x == 189 and first_pose.frames.y == 198,
+	"the first event holds the frame range the player was wearing")
+check(first_pose and first_pose.speed == 2 and first_pose.blend == 0 and first_pose.loop == false,
+	"with its speed, blend and loop")
+local second_pose = core.parse_json(pose_events[2].data)
+check(second_pose and second_pose.frames.x == 200 and second_pose.frames.y == 219
+	and second_pose.speed == 30 and second_pose.blend == 0.1 and second_pose.loop == true,
+	"and the next one holds the changed pose")
+check(value(anim_db, "SELECT COUNT(*) FROM Players WHERE name = 'AnimOut'") == 0,
+	"a player outside the region is not in the recording")
+local anim_broken_id = value(anim_db, "SELECT id FROM Players WHERE name = 'AnimBroken'")
+check(anim_broken_id ~= nil, "a player whose pose cannot be read is still recorded")
+check(value(anim_db, ("SELECT COUNT(*) FROM Events WHERE type = 'animation' AND subject_player = %d")
+	:format(anim_broken_id)) == 0, "with no pose row")
+check(value(anim_db, ("SELECT COUNT(*) FROM Movement WHERE player_id = %d"):format(anim_broken_id)) >= 1,
+	"and their movement sample survives the unreadable pose")
+local anim_default_id = value(anim_db, "SELECT id FROM Players WHERE name = 'AnimDefault'")
+check(anim_default_id ~= nil and value(anim_db,
+	("SELECT COUNT(*) FROM Events WHERE type = 'animation' AND subject_player = %d")
+	:format(anim_default_id)) == 0, "an animation the engine never was given is not recorded as a pose")
+anim_db:close()
+mock.remove_player("AnimIn")
+mock.remove_player("AnimOut")
+mock.remove_player("AnimBroken")
+mock.remove_player("AnimDefault")
+
+----------------------------------------------------------------------------
 print("=== changes to the nodes ===")
 ----------------------------------------------------------------------------
 

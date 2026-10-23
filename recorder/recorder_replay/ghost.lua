@@ -142,14 +142,34 @@ function ghost.wield(obj, itemstring)
 	return ok and applied ~= false
 end
 
+-- Put a recorded animation on a ghost: the engine's four animation values,
+-- taken from the recording rather than guessed from the movement sample. A
+-- pose a game sets itself (lying down while dead) has no other description.
+-- Returns false when the object is no longer usable or the data is not an
+-- animation.
+---@param obj ObjectRef
+---@param data table  -- {frames = {x =, y =}, speed =, blend =, loop =}
+---@return boolean
+function ghost.animate(obj, data)
+	if not obj or type(data) ~= "table" or type(data.frames) ~= "table" then
+		return false
+	end
+	local ok = pcall(obj.set_animation, obj, data.frames, data.speed, data.blend, data.loop)
+	return ok
+end
+
 -- Put a ghost where a movement sample says its player was, and pick the pose
 -- the sample describes. `offset` moves the recorded position into the arena
--- the session was given. Returns false when the object is no longer usable.
+-- the session was given. `keep_pose` says the recording itself has a pose
+-- event for this player: the speed-and-dig guess must not overwrite it, and
+-- re-setting the same animation on every sample would restart it anyway.
+-- Returns false when the object is no longer usable.
 ---@param obj ObjectRef
 ---@param row table
 ---@param offset table?
+---@param keep_pose boolean?
 ---@return boolean
-function ghost.update(obj, row, offset)
+function ghost.update(obj, row, offset, keep_pose)
 	local ok = pcall(function()
 		local pos = row.pos
 		if offset then
@@ -166,6 +186,7 @@ function ghost.update(obj, row, offset)
 				rotation = {vec = {x = row.pitch, y = 0, z = 0}},
 			})
 		end
+		if keep_pose then return end
 		local digging = math.floor((row.controls or 0) / 128) % 2 == 1
 		local animation = "stand"
 		if row.speed > 0.1 then

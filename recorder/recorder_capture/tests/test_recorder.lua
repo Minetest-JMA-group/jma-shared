@@ -522,6 +522,9 @@ check(recorder.log_event("mock:rounded", { node = "default:wool", param2 = 2.5 }
 	"a param2 that is not a whole number is accepted")
 check(recorder.log_event("mock:named", { subject = "Alice", item = "default:stick" }) == nil,
 	"a player can be named instead of handed over")
+local logs_before_bad_data = #mock.logs
+check(recorder.log_event("mock:unserializable", { data = { fn = function() end } }) == nil,
+	"an event whose data cannot be serialized is still accepted")
 check(recorder.stop() == nil, "it stops")
 db = open_recording(odd_path)
 check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'mock:bad'") == 0, "nothing malformed was written")
@@ -531,6 +534,17 @@ check(value(db, "SELECT param2 FROM Events WHERE type = 'mock:rounded'") == 2,
 	"the fractional param2 was rounded down rather than costing the row")
 check(value(db, "SELECT subject_player FROM Events WHERE type = 'mock:named'") ==
 	value(db, "SELECT id FROM Players WHERE name = 'Alice'"), "the named player is the subject")
+check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'mock:unserializable'") == 1,
+	"an event with unserializable data keeps its row")
+check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'mock:unserializable' AND data IS NULL") == 1,
+	"and is written without a data column rather than dropped")
+local bad_data_logged = false
+for i = logs_before_bad_data + 1, #mock.logs do
+	if mock.logs[i].message and mock.logs[i].message:find("cannot serialize event data", 1, true) then
+		bad_data_logged = true
+	end
+end
+check(bad_data_logged, "and the reason is logged")
 db:close()
 
 ----------------------------------------------------------------------------

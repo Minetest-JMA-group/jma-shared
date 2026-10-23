@@ -328,17 +328,19 @@ function reconstruct.apply_metadata(offset, row)
 		y = row.pos.y + offset.y,
 		z = row.pos.z + offset.z,
 	}
-	local ok, err = true, nil
 	if row.data == "" then
 		core.get_meta(pos):from_table(nil)
-	else
-		local read, data = pcall(core.deserialize, row.data)
-		if read and type(data) == "table" then
-			ok, err = pcall(function() core.get_meta(pos):from_table(data) end)
-		else
-			ok, err = false, "the metadata row cannot be deserialized"
-		end
+		return
 	end
+	-- deserialize() reports a malformed string in its return value.
+	local data = core.deserialize(row.data)
+	if type(data) ~= "table" then
+		core.log("warning", "[replay] cannot apply node metadata: the metadata row cannot be deserialized")
+		return
+	end
+	-- from_table() takes data that came out of a file, which is treated as
+	-- hostile until it is known not to be.
+	local ok, err = pcall(function() core.get_meta(pos):from_table(data) end)
 	if not ok then
 		core.log("warning", "[replay] cannot apply node metadata: " .. tostring(err))
 	end

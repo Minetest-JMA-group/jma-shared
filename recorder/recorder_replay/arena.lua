@@ -422,8 +422,10 @@ local function read_flag()
 	if not deps or not deps.storage then return {} end
 	local raw = deps.storage:get_string(FLAG_KEY)
 	if not raw or raw == "" then return {} end
-	local ok, value = pcall(core.deserialize, raw)
-	if not ok or type(value) ~= "table" then return {} end
+	-- deserialize() reports a malformed string in its return value; a flag that
+	-- cannot be read names no arena to clean up.
+	local value = core.deserialize(raw)
+	if type(value) ~= "table" then return {} end
 	return value
 end
 

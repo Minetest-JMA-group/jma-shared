@@ -85,8 +85,10 @@ end
 
 local function textures_of(json)
 	if not json then return nil end
-	local ok, data = pcall(core.parse_json, json)
-	if ok and type(data) == "table" and type(data.textures) == "table" then
+	-- parse_json() reports malformed JSON in its return value, and logs the
+	-- error itself; the join event simply has no textures to give.
+	local data = core.parse_json(json)
+	if type(data) == "table" and type(data.textures) == "table" then
 		return data.textures
 	end
 	return nil

@@ -109,8 +109,10 @@ function recovery.leave(player, session)
 		local raw = meta:get_string(STASH)
 		if raw ~= "" then
 			meta:set_string(STASH, "")
-			local ok, stash = pcall(core.deserialize, raw)
-			if ok and type(stash) == "table" then
+			-- deserialize() reports a malformed stash in its return value; the
+			-- player keeps their things and simply is not moved.
+			local stash = core.deserialize(raw)
+			if type(stash) == "table" then
 				recovery.restore(player, stash)
 			end
 		end
@@ -137,8 +139,10 @@ end
 function recovery.pending(player)
 	local raw = player:get_meta():get_string(STASH)
 	if raw == "" then return nil end
-	local ok, stash = pcall(core.deserialize, raw)
-	if not ok or type(stash) ~= "table" then
+	-- A stash that cannot be read is dropped rather than kept for every join to
+	-- trip over.
+	local stash = core.deserialize(raw)
+	if type(stash) ~= "table" then
 		player:get_meta():set_string(STASH, "")
 		return nil
 	end

@@ -325,12 +325,6 @@ local function event_in_region(rec, ev)
 	return true
 end
 
--- The itemstring of a stack. The engine hands us ItemStack copies, which do
--- not go invalid the way an ObjectRef does.
-local function itemstring_of(stack)
-	return stack:to_string()
-end
-
 ---@param obj ObjectRef|ItemStack|string|nil
 ---@return string|nil
 local function stack_string(obj)
@@ -338,7 +332,9 @@ local function stack_string(obj)
 	if type(obj) == "string" then
 		return obj ~= "" and obj or nil
 	end
-	local str = itemstring_of(obj)
+	-- The engine hands us ItemStack copies, which do not go invalid the way an
+	-- ObjectRef does.
+	local str = obj:to_string()
 	if str ~= "" then return str end
 	return nil
 end
@@ -389,11 +385,9 @@ local function encode_data(data)
 		-- object the column is documented to hold; no data means NULL.
 		return nil
 	end
-	local ok, json, err = pcall(core.write_json, data)
-	if not ok then
-		log_error("cannot serialize event data: " .. tostring(json))
-		return nil
-	end
+	-- write_json() reports a value it cannot serialize in its return values
+	-- rather than by raising; one bad event must not cost the callback.
+	local json, err = core.write_json(data)
 	if not json then
 		log_error("cannot serialize event data: " .. tostring(err))
 		return nil

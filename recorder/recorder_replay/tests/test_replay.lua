@@ -961,6 +961,13 @@ arena.recover()
 check(box_is_air(one) and box_is_air(two), "every arena of a crashed run is cleared")
 check(mock.modstorage["recorder_replay:session"] == "", "and the flag is erased")
 
+-- A flag left in a shape nobody can read names no arena to clean up; the boot
+-- must not fail on it, and must still erase it.
+mock.modstorage["recorder_replay:session"] = "}{ not a serialized table"
+arena.recover()
+check(mock.modstorage["recorder_replay:session"] == "",
+	"a flag that cannot be read is erased instead of raising")
+
 ----------------------------------------------------------------------------
 print("=== a recording without light ===")
 ----------------------------------------------------------------------------

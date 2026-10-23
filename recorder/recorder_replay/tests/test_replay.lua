@@ -208,6 +208,35 @@ local function check(condition, message)
 	print("  ok - " .. message)
 end
 
+-- The cursor queries ask the tick indexes for the last row at or before a
+-- moment instead of scanning for MAX(id). On a file whose ids follow its
+-- ticks the answer is the same, which is what these compare against.
+do
+	local reader_module = dofile(modpath .. "/reader.lua")
+	local handle = assert(reader_module.open(fixture_path, sqlite))
+	local function old_max(table_name, tick)
+		local stmt = assert(handle.db:prepare(
+			("SELECT MAX(id) FROM %s WHERE tick <= %d"):format(table_name, tick)))
+		local value
+		if stmt:step() == sqlite.ROW then value = stmt:get_value(0) end
+		stmt:finalize()
+		return tonumber(value) or 0
+	end
+	for _, tick in ipairs({0, 1, 3, 4, 5, 6, 9, 10}) do
+		check(reader_module.last_event_id(handle, tick) == old_max("Events", tick),
+			"the event cursor at tick " .. tick .. " is the moment's last row")
+	end
+	for _, tick in ipairs({0, 3, 7, 9, 10}) do
+		check(reader_module.last_metadata_id(handle, tick) == old_max("NodeMetadata", tick),
+			"the metadata cursor at tick " .. tick .. " is the moment's last row")
+	end
+	for _, tick in ipairs({0, 7, 8, 10}) do
+		check(reader_module.last_light_id(handle, tick) == old_max("LightChanges", tick),
+			"the light cursor at tick " .. tick .. " is the moment's last row")
+	end
+	reader_module.close(handle)
+end
+
 local function near(a, b)
 	return type(a) == "number" and math.abs(a - b) < 1e-9
 end

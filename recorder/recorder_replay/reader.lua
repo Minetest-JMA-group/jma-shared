@@ -299,8 +299,12 @@ end
 ---@param tick integer
 ---@return integer
 function reader.last_event_id(rec, tick)
-	return tonumber(reader.scalar(rec,
-		string.format("SELECT MAX(id) FROM Events WHERE tick <= %d", tick))) or 0
+	-- Rows are written in tick order, so the id of the highest-tick row at or
+	-- before the tick is the last one that belongs to it. Asking for it this
+	-- way walks the tick index backwards and stops; MAX(id) has no such index
+	-- and would walk every later row (particles can make that a lot of rows).
+	return tonumber(reader.scalar(rec, string.format(
+		"SELECT id FROM Events WHERE tick <= %d ORDER BY tick DESC, id DESC LIMIT 1", tick))) or 0
 end
 
 local METADATA_COLUMNS = "id, tick, t, pos_x, pos_y, pos_z, data"
@@ -347,8 +351,9 @@ end
 ---@param tick integer
 ---@return integer
 function reader.last_metadata_id(rec, tick)
-	return tonumber(reader.scalar(rec,
-		string.format("SELECT MAX(id) FROM NodeMetadata WHERE tick <= %d", tick))) or 0
+	-- As with the event cursor: the tick index answers this without a scan.
+	return tonumber(reader.scalar(rec, string.format(
+		"SELECT id FROM NodeMetadata WHERE tick <= %d ORDER BY tick DESC, id DESC LIMIT 1", tick))) or 0
 end
 
 local LIGHT_COLUMNS = "id, tick, t, data, encoding"
@@ -378,8 +383,9 @@ end
 ---@param tick integer
 ---@return integer
 function reader.last_light_id(rec, tick)
-	return tonumber(reader.scalar(rec,
-		string.format("SELECT MAX(id) FROM LightChanges WHERE tick <= %d", tick))) or 0
+	-- As with the event cursor: the tick index answers this without a scan.
+	return tonumber(reader.scalar(rec, string.format(
+		"SELECT id FROM LightChanges WHERE tick <= %d ORDER BY tick DESC, id DESC LIMIT 1", tick))) or 0
 end
 
 return reader

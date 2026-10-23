@@ -87,8 +87,11 @@ local function mute_player(name)
 	antispam.players[name] = nil
 end
 
--- Chat message handler
-core.register_on_chat_message(function(name, message)
+-- Chat message handler. This runs in the chat_lib chain at priority 3, after
+-- simplemod's mute (0) and filter (2) and before ai_filter_watcher (4). A
+-- message blocked here therefore never reaches the AI watcher or delivery;
+-- a warning returns false and the message continues.
+chat_lib.register_on_chat_message(3, function(name, message)
 	local current_time = core.get_us_time()
 
 	-- Initialize player data if not exists

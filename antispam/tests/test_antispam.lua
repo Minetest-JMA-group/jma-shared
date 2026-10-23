@@ -1,8 +1,8 @@
 -- Test suite for antispam. Runs with plain Lua (luajit), no Minetest needed:
 --     luajit test_antispam.lua
 --
--- Stubs core/simplemod, loads the real init.lua, and drives the registered
--- on_chat_message callback with a controllable clock.
+-- Stubs core/simplemod/chat_lib, loads the real init.lua, and drives the
+-- registered on_chat_message callback with a controllable clock.
 
 local script_path = arg and arg[0] or debug.getinfo(1, "S").source:match("^@(.+)$")
 local script_dir = script_path:match("^(.*)/[^/]*$") or "."
@@ -13,7 +13,9 @@ local mutes = {}
 core = {}
 core.get_us_time = function() return now_us end
 core.register_on_leaveplayer = function() end
-core.register_on_chat_message = function(f) core.on_chat = f end
+core.register_on_chat_message = function()
+	error("antispam must register through chat_lib")
+end
 core.chat_send_player = function(name, msg) warns[#warns + 1] = msg end
 core.log = function() end
 core.commands = {}
@@ -29,10 +31,30 @@ simplemod = {
 	end,
 }
 
+-- The parts of chat_lib the mod and the chain test use: registration by
+-- priority, and a driver that runs them in order and stops at the first
+-- truthy return, like the real lib.
+chat_lib = {callbacks = {}}
+function chat_lib.register_on_chat_message(priority, func)
+	assert(not chat_lib.callbacks[priority], "duplicate chat_lib priority " .. tostring(priority))
+	chat_lib.callbacks[priority] = func
+end
+function chat_lib.dispatch(name, message)
+	local priorities = {}
+	for priority in pairs(chat_lib.callbacks) do priorities[#priorities + 1] = priority end
+	table.sort(priorities)
+	for _, priority in ipairs(priorities) do
+		if chat_lib.callbacks[priority](name, message) then
+			return true
+		end
+	end
+	return false
+end
+
 dofile(script_dir .. "/../../utf8_simple/init.lua")
 dofile(script_dir .. "/../init.lua")
 
-local chat = core.on_chat
+local chat = chat_lib.callbacks[3]
 local config = core.commands.antispam.func
 
 local passed, failed = 0, 0
@@ -45,6 +67,8 @@ local function check(label, cond)
 		print("FAIL: " .. label)
 	end
 end
+
+check("registers in the chat_lib chain at priority 3", chat ~= nil)
 
 local function reset()
 	warns, mutes = {}, {}
@@ -161,6 +185,20 @@ reset()
 say("laura", "hi")
 say("laura", SPAM_BLAST)
 check("T11: entropy warn inside burst", #warns == 1 and #mutes == 0)
+
+-- T12: a blocked message stops the chain before the AI watcher (priority 4)
+local seen_by_ai = 0
+chat_lib.register_on_chat_message(4, function() seen_by_ai = seen_by_ai + 1 end)
+reset()
+local delivered = {}
+for i = 1, 4 do
+	now_us = now_us + 1e6
+	delivered[i] = chat_lib.dispatch("mallory", "SPAM spam spam spam")
+end
+check("T12: first three repeats pass the chain", delivered[1] == false
+	and delivered[2] == false and delivered[3] == false)
+check("T12: the 4th repeat is blocked by antispam", delivered[4] == true)
+check("T12: the AI watcher never sees the blocked message", seen_by_ai == 3)
 
 print(string.format("%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

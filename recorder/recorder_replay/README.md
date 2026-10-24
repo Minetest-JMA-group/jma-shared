@@ -238,8 +238,9 @@ recorder_common.register_game_hooks({
 ```
 
 `can_enter` is the game's veto. It runs before anything expensive happens: at
-the top of `start()`, before the recording is opened, and again when the
-participant is joined (a start does both). It must be a pure predicate; a
+the top of `start()`, before the recording is opened, and at the top of every
+`join()`, before the participant is registered. A start checks it once; a
+direct join or a reconnect checks it once. It must be a pure predicate; a
 failing hook is logged and refuses the player. `before_enter` runs later, once
 the arena exists and just before the hotbar is replaced and the player is
 teleported.

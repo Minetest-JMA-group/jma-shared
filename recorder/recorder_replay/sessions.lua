@@ -596,9 +596,9 @@ end
 
 -- The game's veto: a dead, attached or otherwise busy player must be refused
 -- before a recording is opened or an arena built. The hook is a predicate and
--- must have no side effects; start() calls it once before opening anything and
--- join() calls it again before registering the participant. A failing hook
--- refuses rather than letting the player through.
+-- should have no side effects. start() calls it before opening anything;
+-- join() calls it before registering the participant. A failing hook refuses
+-- rather than letting the player through.
 -- `session` is nil before a start and the session itself on a join.
 ---@param player ObjectRef
 ---@param session table?
@@ -614,6 +614,20 @@ local function can_enter(player, session)
 	if allowed == false then
 		return false, reason or "the game does not allow you to watch a replay"
 	end
+	return true
+end
+
+-- Register a participant and hand them to recovery. The caller has already
+-- passed can_enter: start() before opening anything, join() before this.
+local function add_participant(session, player, already_stashed)
+	local name = player:get_player_name()
+	if by_player[name] then
+		return nil, "you are already watching a replay"
+	end
+	session.participants[name] = true
+	by_player[name] = session
+	deps.recovery.enter(player, session, already_stashed)
+	sessions.update_observers(session)
 	return true
 end
 
@@ -700,7 +714,7 @@ function sessions.start(arg, player)
 		metadata_last_id = 0,
 	}
 	by_id[session.id] = session
-	local joined, join_err = sessions.join(session, player)
+	local joined, join_err = add_participant(session, player)
 	if not joined then
 		-- The arena is already prepared; finish() takes it down again.
 		sessions.finish(session, "could not start")
@@ -723,15 +737,7 @@ end
 function sessions.join(session, player, already_stashed)
 	local allowed, refusal = can_enter(player, session)
 	if not allowed then return nil, refusal end
-	local name = player:get_player_name()
-	if by_player[name] then
-		return nil, "you are already watching a replay"
-	end
-	session.participants[name] = true
-	by_player[name] = session
-	deps.recovery.enter(player, session, already_stashed)
-	sessions.update_observers(session)
-	return true
+	return add_participant(session, player, already_stashed)
 end
 
 ---@param session table

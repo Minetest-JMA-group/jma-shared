@@ -1341,14 +1341,15 @@ gate_calls = {}
 local gate_session = sessions.start("fixture", host)
 check(gate_session ~= nil, "an allowed player starts")
 deferred_form()
-check(#gate_calls == 2, "a start checks the hook before opening and again on the join")
-check(gate_calls[1].name == "Host" and gate_calls[1].session == nil, "the first with no session")
-check(gate_calls[2].name == "Host" and gate_calls[2].session == gate_session,
-	"the second with the session")
+check(#gate_calls == 1, "a start checks the hook once, before opening")
+check(gate_calls[1].name == "Host" and gate_calls[1].session == nil,
+	"with no session at that point")
 local late = add_player("Late", {pos = {x = 0, y = 0, z = 0}})
 late.inventory = {main = {}}
 local joined, join_reason = sessions.join(gate_session, late)
 check(joined == nil and join_reason == "the match is running", "a join is refused too")
+check(#gate_calls == 2 and gate_calls[2].name == "Late"
+	and gate_calls[2].session == gate_session, "a direct join passes the session")
 check(sessions.for_player("Late") == nil and not gate_session.participants.Late,
 	"and the refused player is not a participant")
 recorder_replay.end_session(gate_session.id, "test")

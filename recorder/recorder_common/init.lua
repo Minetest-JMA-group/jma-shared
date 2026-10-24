@@ -31,8 +31,8 @@ recorder_common.NAME_MAX = 64
 --   can_enter(player, session) -> false and a reason to refuse a player before
 --                                 a replay is opened or prepared; nil or true
 --                                 allows. `session` is nil before a start and
---                                 the session itself on a join. It must have no
---                                 side effects: one start asks twice.
+--                                 the session itself on a join. It is a
+--                                 predicate and should have no side effects.
 --   before_enter(player, session) -> the player is about to be taken into a
 --                                 replay, still where the game left them and
 --                                 with their own inventory

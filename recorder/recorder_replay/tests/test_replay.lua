@@ -1308,6 +1308,63 @@ recorder_common.game_hooks.on_leave = nil
 mock.remove_player("Solo")
 
 ----------------------------------------------------------------------------
+print("=== a game that refuses a player ===")
+----------------------------------------------------------------------------
+
+-- can_enter runs before the recording is opened and before a participant is
+-- registered, so a dead or busy player costs no arena.
+local GATE_ARENA = box(850, 85, 850, 857, 89, 857)
+local host = add_player("Host", {pos = {x = 5, y = 6, z = 7}})
+host.inventory = {main = {}}
+mark(host, GATE_ARENA)
+host.pos = {x = 5, y = 6, z = 7}
+local gate_calls = {}
+recorder_common.game_hooks.can_enter = function(player, session)
+	gate_calls[#gate_calls + 1] = {
+		name = player:get_player_name(),
+		session = session,
+	}
+	local name = player:get_player_name()
+	if name == "Denied" then return false, "you are dead" end
+	if name == "Late" and session then return false, "the match is running" end
+	return true
+end
+local denied = add_player("Denied", {pos = {x = 0, y = 0, z = 0}})
+denied.inventory = {main = {}}
+local refused, refused_reason = sessions.start("fixture", denied)
+check(refused == nil and refused_reason == "you are dead", "the game can refuse before a start")
+check(sessions.for_player("Denied") == nil, "and no session was created")
+check(#gate_calls == 1 and gate_calls[1].session == nil, "with no session at that point")
+check(box_is_air(GATE_ARENA), "and no arena was prepared")
+
+gate_calls = {}
+local gate_session = sessions.start("fixture", host)
+check(gate_session ~= nil, "an allowed player starts")
+deferred_form()
+check(#gate_calls == 2, "a start checks the hook before opening and again on the join")
+check(gate_calls[1].name == "Host" and gate_calls[1].session == nil, "the first with no session")
+check(gate_calls[2].name == "Host" and gate_calls[2].session == gate_session,
+	"the second with the session")
+local late = add_player("Late", {pos = {x = 0, y = 0, z = 0}})
+late.inventory = {main = {}}
+local joined, join_reason = sessions.join(gate_session, late)
+check(joined == nil and join_reason == "the match is running", "a join is refused too")
+check(sessions.for_player("Late") == nil and not gate_session.participants.Late,
+	"and the refused player is not a participant")
+recorder_replay.end_session(gate_session.id, "test")
+check(sessions.for_player("Host") == nil, "the session ends")
+-- A failing predicate refuses rather than letting the player through.
+recorder_common.game_hooks.can_enter = function() error("boom") end
+local broken_ok, broken_reason = sessions.start("fixture", host)
+check(broken_ok == nil and tostring(broken_reason):find("could not check", 1, true) ~= nil,
+	"a failing check refuses the player")
+check(sessions.for_player("Host") == nil, "and starts nothing")
+recorder_common.game_hooks.can_enter = nil
+mock.remove_player("Denied")
+mock.remove_player("Late")
+mock.remove_player("Host")
+
+----------------------------------------------------------------------------
 print("=== several arenas at once ===")
 ----------------------------------------------------------------------------
 

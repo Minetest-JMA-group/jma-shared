@@ -222,6 +222,11 @@ recorder_common.register_game_hooks({
 		-- no room. Several replays can run at once.
 	end,
 	world_persistent = false,          -- its world is rebuilt at boot; it owns inventories
+	can_enter = function(player, session)
+		-- No side effects: return false and a reason to refuse before a
+		-- recording is opened or an arena is prepared; session is nil
+		-- before a start and the session itself on a join.
+	end,
 	before_enter = function(player, session)
 		-- Still where the game left them, with their own inventory: take the
 		-- player out of a running match here (and save what they had, on a
@@ -231,6 +236,13 @@ recorder_common.register_game_hooks({
 	on_leave = function(player, session) ... end,  -- after replay's own restore
 })
 ```
+
+`can_enter` is the game's veto. It runs before anything expensive happens: at
+the top of `start()`, before the recording is opened, and again when the
+participant is joined (a start does both). It must be a pure predicate; a
+failing hook is logged and refuses the player. `before_enter` runs later, once
+the arena exists and just before the hotbar is replaced and the player is
+teleported.
 
 `before_enter` runs on every entry, including a reconnect into a running
 session. On a first entry the player is still where the game left them, with

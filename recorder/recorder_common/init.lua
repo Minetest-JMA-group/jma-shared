@@ -28,6 +28,11 @@ recorder_common.NAME_MAX = 64
 --                                 shell), `taken` a list of boxes already in use
 --   world_persistent           -> false on a game whose world is rebuilt from
 --                                 scratch at boot (nothing to clean up or save)
+--   can_enter(player, session) -> false and a reason to refuse a player before
+--                                 a replay is opened or prepared; nil or true
+--                                 allows. `session` is nil before a start and
+--                                 the session itself on a join. It must have no
+--                                 side effects: one start asks twice.
 --   before_enter(player, session) -> the player is about to be taken into a
 --                                 replay, still where the game left them and
 --                                 with their own inventory
@@ -36,6 +41,7 @@ recorder_common.NAME_MAX = 64
 recorder_common.game_hooks = {
 	arena = nil,
 	world_persistent = true,
+	can_enter = nil,
 	before_enter = nil,
 	on_enter = nil,
 	on_leave = nil,

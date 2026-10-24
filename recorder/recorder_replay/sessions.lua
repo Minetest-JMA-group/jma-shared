@@ -594,8 +594,33 @@ local function unfinished(path)
 	return false
 end
 
+-- The game's veto: a dead, attached or otherwise busy player must be refused
+-- before a recording is opened or an arena built. The hook is a predicate and
+-- must have no side effects; start() calls it once before opening anything and
+-- join() calls it again before registering the participant. A failing hook
+-- refuses rather than letting the player through.
+-- `session` is nil before a start and the session itself on a join.
+---@param player ObjectRef
+---@param session table?
+---@return boolean allowed, string? reason
+local function can_enter(player, session)
+	local hook = recorder_common.game_hooks.can_enter
+	if not hook then return true end
+	local ok, allowed, reason = pcall(hook, player, session)
+	if not ok then
+		core.log("error", "[replay] game hook can_enter failed: " .. tostring(allowed))
+		return false, "the game could not check whether you may watch a replay"
+	end
+	if allowed == false then
+		return false, reason or "the game does not allow you to watch a replay"
+	end
+	return true
+end
+
 ---@param session table
 function sessions.start(arg, player)
+	local allowed, refusal = can_enter(player, nil)
+	if not allowed then return nil, refusal end
 	local limit = tonumber(core.settings:get("replay.max_sessions")) or 4
 	if limit > 0 then
 		local running = 0
@@ -696,6 +721,8 @@ end
 ---@param already_stashed boolean?
 ---@return boolean|nil, string?
 function sessions.join(session, player, already_stashed)
+	local allowed, refusal = can_enter(player, session)
+	if not allowed then return nil, refusal end
 	local name = player:get_player_name()
 	if by_player[name] then
 		return nil, "you are already watching a replay"

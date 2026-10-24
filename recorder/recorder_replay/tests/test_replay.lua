@@ -1246,6 +1246,68 @@ check(box_is_air(WATCHER_ARENA) and flag_count() == 0,
 mock.remove_player("Keeper")
 
 ----------------------------------------------------------------------------
+print("=== a game without a persistent world ===")
+----------------------------------------------------------------------------
+
+-- Replay stashes nothing here. before_enter is where the game saves the
+-- player, and on_leave is where it gets them back; neither replay itself nor
+-- a stash touches their position or inventory.
+local NONP_ARENA = box(900, 90, 900, 907, 94, 907)
+local solo = add_player("Solo", {pos = {x = 5, y = 6, z = 7}})
+solo.inventory = {main = {"default:pick_stone", "", "default:torch 10", "", "", "", "", ""}}
+mark(solo, NONP_ARENA)
+solo.pos = {x = 5, y = 6, z = 7}
+local saved = {}
+local entered_at, left_at, left_first, left_ratio
+recorder_common.game_hooks.world_persistent = false
+recorder_common.game_hooks.before_enter = function(player, session)
+	saved[player:get_player_name()] = {
+		pos = player:get_pos(),
+		main = player:get_inventory():get_list("main"),
+	}
+end
+recorder_common.game_hooks.on_enter = function(player, session)
+	entered_at = player:get_pos()
+end
+recorder_common.game_hooks.on_leave = function(player, session)
+	left_at = player:get_pos()
+	left_ratio = player:get_day_night_ratio()
+	local inv = player:get_inventory()
+	left_first = inv and inv:get_list("main")[1]:to_string()
+	local state = saved[player:get_player_name()]
+	player:set_pos(state.pos)
+	inv:set_list("main", state.main)
+end
+local solo_session = sessions.start("fixture", solo)
+check(solo_session ~= nil, "a replay starts on a non-persistent world")
+deferred_form()
+check(solo.meta["recorder_replay:stash"] == nil or solo.meta["recorder_replay:stash"] == "",
+	"replay stashes nothing")
+check(saved.Solo and saved.Solo.pos.x == 5 and saved.Solo.pos.y == 6 and saved.Solo.pos.z == 7,
+	"before_enter sees the player where the game left them")
+check(saved.Solo and saved.Solo.main[1] and saved.Solo.main[1]:to_string() == "default:pick_stone",
+	"with their own inventory")
+local viewing = arena.viewing_position(NONP_ARENA)
+check(entered_at and near(entered_at.x, viewing.x) and entered_at.y == viewing.y,
+	"on_enter runs after the teleport")
+sessions.leave(solo_session, solo)
+check(solo.meta["recorder_replay:stash"] == nil or solo.meta["recorder_replay:stash"] == "",
+	"still nothing stashed")
+check(left_at and near(left_at.x, viewing.x) and left_at.y == viewing.y,
+	"on_leave sees them still at the viewing platform")
+check(left_first == "recorder_replay:pause", "with the replay controls still in the hotbar")
+check(left_ratio == nil, "and the day/night override already put back")
+check(solo.pos.x == 5 and solo.pos.y == 6 and solo.pos.z == 7,
+	"the game's hook puts them back")
+check(solo.inventory.main[1] == "default:pick_stone", "with their own things")
+check(box_is_air(NONP_ARENA), "the session's arena is cleared")
+recorder_common.game_hooks.world_persistent = true
+recorder_common.game_hooks.before_enter = nil
+recorder_common.game_hooks.on_enter = nil
+recorder_common.game_hooks.on_leave = nil
+mock.remove_player("Solo")
+
+----------------------------------------------------------------------------
 print("=== several arenas at once ===")
 ----------------------------------------------------------------------------
 

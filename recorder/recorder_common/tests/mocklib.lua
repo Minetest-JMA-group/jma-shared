@@ -302,7 +302,10 @@ function M.new(opts)
 	core.settings = {}
 	function core.settings.get(self, key) return mock.settings[key] end
 	function core.settings.set(self, key, value) mock.settings[key] = value end
-	function core.settings.get_bool(self, key) return mock.settings[key] == "true" end
+	function core.settings.get_bool(self, key, default)
+		if mock.settings[key] == nil then return default end
+		return mock.settings[key] == "true"
+	end
 
 	-- Timers run at the start of the next step, which is the ordering the mod
 	-- code relies on when it defers work past an engine callback.
@@ -710,9 +713,12 @@ function M.new(opts)
 			check(self)
 			for key, value in pairs(values) do self.properties[key] = value end
 		end
+		function obj:is_valid() return not self.removed end
 		function obj:get_properties() check(self) return self.properties end
 		function obj:get_pos()
-			check(self)
+			-- A getter: the engine answers nothing for an invalid object instead
+			-- of raising.
+			if self.removed then return nil end
 			return {x = self.pos.x, y = self.pos.y, z = self.pos.z}
 		end
 		function obj:set_observers(set) check(self) self.observers = set end
@@ -732,7 +738,10 @@ function M.new(opts)
 				forced_visible = forced_visible,
 			}
 		end
-		function obj:get_luaentity() return self end
+		function obj:get_luaentity()
+			if self.removed then return nil end
+			return self
+		end
 		function obj:set_wielded_item(item)
 			check(self)
 			self.wielded = item and item:to_string() or ""

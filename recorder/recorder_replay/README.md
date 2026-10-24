@@ -155,8 +155,8 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
 
 ## Limits
 
-- Chat, items and inventories are not drawn in the world. Recorded chat
-  appears as chat lines to the participants, not as anything in the 3D scene.
+- Chat and inventories are not drawn in the world. Recorded chat appears as
+  chat lines to the participants, not as anything in the 3D scene.
 - Particle effects attached to an object (a smoke trail following a projectile,
   an aura around a player) are not recorded, so they do not replay. A
   spawner's emission box is translated whole rather than clamped to the

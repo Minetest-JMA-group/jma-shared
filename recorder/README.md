@@ -22,7 +22,8 @@ name, so replaying it needs the recording, not the game's map files.
   `secure.trusted_mods` or `secure.c_mods`.
 - `algorithms`, for loading the library.
 - A player model for the ghosts: `recorder_replay` reads the model registry of
-  `player_api` or `mcl_player`, and falls back to a sprite without either.
+  `player_api` or `mcl_player`, and falls back to a sprite without either. The
+  held item attaches to that model's hand bone; a sprite has none.
 
 ## Tests
 

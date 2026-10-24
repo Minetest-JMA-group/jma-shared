@@ -24,12 +24,6 @@ local PLAYER_BOX = {-0.3, 0.0, -0.3, 0.3, 1.8, 0.3}
 -- hand bone; it follows the pose animations with the arm. The defaults below
 -- are the default player model's (character.b3d); a game whose model has
 -- different bones can tune them.
-local function setting_on(name, default)
-	local raw = core.settings:get(name)
-	if raw == nil or raw == "" then return default end
-	return core.settings:get_bool(name)
-end
-
 local function vector_setting(name, default)
 	local raw = core.settings:get(name)
 	if not raw then return default end
@@ -38,7 +32,7 @@ local function vector_setting(name, default)
 	return {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
 end
 
-local WIELD_ENABLED = setting_on("replay.wield_item", true)
+local WIELD_ENABLED = core.settings:get_bool("replay.wield_item", true)
 local WIELD_BONE = core.settings:get("replay.wield_bone")
 if not WIELD_BONE or WIELD_BONE == "" then WIELD_BONE = "Arm_Right" end
 local WIELD_POSITION = vector_setting("replay.wield_pos", {x = 0, y = 5.5, z = 3})
@@ -100,10 +94,12 @@ core.register_entity("recorder_replay:ghost", {
 	on_deactivate = function(self)
 		-- The item is attached to this object, but it is a separate engine
 		-- object; it must not outlive its ghost if the engine removes us on its
-		-- own (an unloaded mapblock, a game clearing objects).
-		if self.wield_object then
-			pcall(function() self.wield_object:remove() end)
+		-- own (an unloaded mapblock, a game clearing objects). The engine only
+		-- detaches children.
+		local child = self.wield_object
+		if child then
 			self.wield_object = nil
+			if child:get_pos() then child:remove() end
 		end
 	end,
 	on_step = function() end,
@@ -162,7 +158,7 @@ function ghost.spawn(name, pos, textures, observers)
 			collisionbox = PLAYER_BOX,
 		})
 	end
-	if obj.set_observers then obj:set_observers(observers) end
+	obj:set_observers(observers)
 	local ent = obj:get_luaentity()
 	if ent then
 		-- The item entity is separate from the ghost and needs the same
@@ -177,24 +173,19 @@ end
 ---@param observers table
 ---@return boolean  -- false when the object has been invalidated in the meantime
 function ghost.set_observers(obj, observers)
-	if not obj then return false end
+	if not obj or not obj:is_valid() then return false end
 	-- An entity can vanish from under a session: its mapblocks may be unloaded
 	-- once the viewers leave (the arena can be far from where they go back to),
-	-- or the game may clear objects. Every call on a removed ObjectRef raises,
-	-- so the session is told instead and drops the ghost.
-	local ok = pcall(function()
-		if obj.set_observers then obj:set_observers(observers) end
-	end)
-	if not ok then return false end
-	-- The attached item is a separate object. If it has gone stale that is not
-	-- a reason to drop the ghost; its own on_deactivate handles the common case
-	-- and a later wield() sees the stale ref and makes a new one.
-	local ent_ok, ent = pcall(function() return obj:get_luaentity() end)
-	if ent_ok and ent then
+	-- or the game may clear objects. The session is told instead and drops it.
+	obj:set_observers(observers)
+	-- The attached item is a separate object. A dropped one is not a reason to
+	-- drop the ghost; the ghost's own on_deactivate handles the common case and
+	-- a later wield() sees the stale ref and makes a new one.
+	local ent = obj:get_luaentity()
+	if ent then
 		ent.observers = observers
-		if ent.wield_object then
-			pcall(function() ent.wield_object:set_observers(observers) end)
-		end
+		local child = ent.wield_object
+		if child and child:get_pos() then child:set_observers(observers) end
 	end
 	return true
 end
@@ -206,62 +197,50 @@ end
 ---@param itemstring string?
 ---@return boolean
 function ghost.wield(obj, itemstring)
-	if not obj or not WIELD_ENABLED then return false end
-	local ok, usable = pcall(function()
-		local ent = obj:get_luaentity()
-		if not ent then return false end
-		-- A sprite fallback has no hand bone to attach to.
-		if not ent.has_model then return true end
-		local item = itemstring or ""
-		local child = ent.wield_object
-		local child_alive = false
-		if child then
-			-- get_pos() is a getter: on a dropped object it answers nothing
-			-- rather than raising, so the value decides, not just the pcall.
-			local child_ok, child_pos = pcall(function() return child:get_pos() end)
-			child_alive = child_ok and child_pos ~= nil
-		end
-		if item == "" then
-			if child_alive then child:remove() end
-			ent.wield_object = nil
-			return true
-		end
-		if not child_alive then
-			child = core.add_entity(obj:get_pos(), "recorder_replay:wield_item")
-			if not child then return false end
-			child:set_attach(obj, WIELD_BONE, WIELD_POSITION, WIELD_ROTATION)
-			if ent.observers and child.set_observers then
-				child:set_observers(ent.observers)
-			end
-			ent.wield_object = child
-		end
-		child:set_properties({
-			wield_item = item,
-			-- The pre-wield_item client rendered an item from this field; it
-			-- takes a plain item name, not the stack string.
-			textures = {item:match("^(%S+)") or item},
-			visual_size = WIELD_SCALE,
-		})
+	if not obj or not WIELD_ENABLED or not obj:is_valid() then return false end
+	local ent = obj:get_luaentity()
+	if not ent then return false end
+	-- A sprite fallback has no hand bone to attach to.
+	if not ent.has_model then return true end
+	local item = itemstring or ""
+	local child = ent.wield_object
+	-- get_pos() answers nothing for an object the engine has dropped; that
+	-- child is replaced below.
+	if child and not child:get_pos() then child = nil end
+	if item == "" then
+		if child then child:remove() end
+		ent.wield_object = nil
 		return true
-	end)
-	-- A getter answers nothing for an object the engine has dropped; that is
-	-- not a success even when nothing raised.
-	return ok and usable ~= false
+	end
+	if not child then
+		child = core.add_entity(obj:get_pos(), "recorder_replay:wield_item")
+		if not child then return false end
+		child:set_attach(obj, WIELD_BONE, WIELD_POSITION, WIELD_ROTATION)
+		child:set_observers(ent.observers)
+		ent.wield_object = child
+	end
+	child:set_properties({
+		wield_item = item,
+		-- The pre-wield_item client rendered an item from this field; it
+		-- takes a plain item name, not the stack string.
+		textures = {item:match("^(%S+)") or item},
+		visual_size = WIELD_SCALE,
+	})
+	return true
 end
 
 -- Remove a ghost and the item attached to it. The engine may already have
 -- removed either of them; both removals therefore tolerate a stale ref.
 ---@param obj ObjectRef
 function ghost.remove(obj)
-	if not obj then return end
-	pcall(function()
-		local ent = obj:get_luaentity()
-		if ent and ent.wield_object then
-			pcall(function() ent.wield_object:remove() end)
-			ent.wield_object = nil
-		end
-		obj:remove()
-	end)
+	if not obj or not obj:is_valid() then return end
+	local ent = obj:get_luaentity()
+	if ent and ent.wield_object then
+		local child = ent.wield_object
+		ent.wield_object = nil
+		if child:get_pos() then child:remove() end
+	end
+	obj:remove()
 end
 
 -- Put a recorded animation on a ghost: the engine's four animation values,
@@ -273,11 +252,10 @@ end
 ---@param data table  -- {frames = {x =, y =}, speed =, blend =, loop =}
 ---@return boolean
 function ghost.animate(obj, data)
-	if not obj or type(data) ~= "table" or type(data.frames) ~= "table" then
-		return false
-	end
-	local ok = pcall(obj.set_animation, obj, data.frames, data.speed, data.blend, data.loop)
-	return ok
+	if not obj or not obj:is_valid() then return false end
+	if type(data) ~= "table" or type(data.frames) ~= "table" then return false end
+	obj:set_animation(data.frames, data.speed, data.blend, data.loop)
+	return true
 end
 
 -- Put a ghost where a movement sample says its player was, and pick the pose
@@ -292,36 +270,35 @@ end
 ---@param keep_pose boolean?
 ---@return boolean
 function ghost.update(obj, row, offset, keep_pose)
-	local ok = pcall(function()
-		local pos = row.pos
-		if offset then
-			pos = {x = pos.x + offset.x, y = pos.y + offset.y, z = pos.z + offset.z}
-		end
-		obj:move_to(pos, true)
-		obj:set_yaw(row.yaw)
-		local _, def = resolve_model()
-		if not def then return end
-		if obj.set_bone_override then
-			-- The head bone follows the recorded pitch (radians, relative to the
-			-- animated pose).
-			obj:set_bone_override("Head", {
-				rotation = {vec = {x = row.pitch, y = 0, z = 0}},
-			})
-		end
-		if keep_pose then return end
-		local digging = math.floor((row.controls or 0) / 128) % 2 == 1
-		local animation = "stand"
-		if row.speed > 0.1 then
-			animation = digging and "walk_mine" or "walk"
-		elseif digging then
-			animation = "mine"
-		end
-		local frames = def.animations and def.animations[animation]
-		if frames then
-			obj:set_animation(frames, def.animation_speed or 30, 0, true)
-		end
-	end)
-	return ok
+	if not obj or not obj:is_valid() then return false end
+	local pos = row.pos
+	if offset then
+		pos = {x = pos.x + offset.x, y = pos.y + offset.y, z = pos.z + offset.z}
+	end
+	obj:move_to(pos, true)
+	obj:set_yaw(row.yaw)
+	local _, def = resolve_model()
+	if not def then return true end
+	if obj.set_bone_override then
+		-- The head bone follows the recorded pitch (radians, relative to the
+		-- animated pose).
+		obj:set_bone_override("Head", {
+			rotation = {vec = {x = row.pitch, y = 0, z = 0}},
+		})
+	end
+	if keep_pose then return true end
+	local digging = math.floor((row.controls or 0) / 128) % 2 == 1
+	local animation = "stand"
+	if row.speed > 0.1 then
+		animation = digging and "walk_mine" or "walk"
+	elseif digging then
+		animation = "mine"
+	end
+	local frames = def.animations and def.animations[animation]
+	if frames then
+		obj:set_animation(frames, def.animation_speed or 30, 0, true)
+	end
+	return true
 end
 
 return ghost

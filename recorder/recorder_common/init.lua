@@ -28,11 +28,15 @@ recorder_common.NAME_MAX = 64
 --                                 shell), `taken` a list of boxes already in use
 --   world_persistent           -> false on a game whose world is rebuilt from
 --                                 scratch at boot (nothing to clean up or save)
+--   before_enter(player, session) -> the player is about to be taken into a
+--                                 replay, still where the game left them and
+--                                 with their own inventory
 --   on_enter(player, session)  -> a participant entered a replay
 --   on_leave(player, session)  -> a participant left one
 recorder_common.game_hooks = {
 	arena = nil,
 	world_persistent = true,
+	before_enter = nil,
 	on_enter = nil,
 	on_leave = nil,
 }

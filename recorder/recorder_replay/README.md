@@ -215,10 +215,22 @@ recorder_common.register_game_hooks({
 		-- no room. Several replays can run at once.
 	end,
 	world_persistent = false,          -- its world is rebuilt at boot; it owns inventories
-	on_enter = function(player, session) ... end,
-	on_leave = function(player, session) ... end,
+	before_enter = function(player, session)
+		-- Still where the game left them, with their own inventory: take the
+		-- player out of a running match here. Replay stashes what this leaves
+		-- behind, fills the hotbar and then teleports.
+	end,
+	on_enter = function(player, session) ... end,  -- after the move into the arena
+	on_leave = function(player, session) ... end,  -- after replay's own restore
 })
 ```
+
+`before_enter` runs on every entry, including a reconnect into a running
+session, before replay saves the participant's position and inventory. What the
+hook changes there is what replay restores when they leave, when replay keeps
+the stash. `on_enter` runs after the teleport into the arena; `on_leave` after
+replay has put the participant back, so the game's hook has the last word. A
+hook that raises is logged and does not abort the replay.
 
 A registered `arena` provider is the only arena source consulted when the
 starting player has no marks of their own; `replay.arena` is not used next to

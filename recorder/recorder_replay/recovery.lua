@@ -22,6 +22,17 @@ end
 
 local STASH = "recorder_replay:stash"
 
+-- Game hooks are other mods' code. A failure is logged rather than allowed to
+-- abort the replay; the game still gets its chance on the other hooks.
+local function call_hook(name, ...)
+	local hook = recorder_common.game_hooks[name]
+	if not hook then return end
+	local ok, err = pcall(hook, ...)
+	if not ok then
+		core.log("error", "[replay] game hook " .. name .. " failed: " .. tostring(err))
+	end
+end
+
 local function itemstrings(list)
 	local items = {}
 	for i, stack in ipairs(list or {}) do
@@ -56,6 +67,10 @@ end
 ---@param session table
 ---@param already_stashed boolean?  -- the player is coming back to a session
 function recovery.enter(player, session, already_stashed)
+	-- The game still has the player where it left them, with their own
+	-- inventory: this is where it takes them out of a running match. The
+	-- stash, the controls and the move into the arena follow immediately.
+	call_hook("before_enter", player, session)
 	if recorder_common.game_hooks.world_persistent and not already_stashed then
 		local inv = player:get_inventory()
 		if inv then
@@ -67,14 +82,13 @@ function recovery.enter(player, session, already_stashed)
 		end
 	end
 	controls.fill(player, session)
-	-- The stash above holds the position from before this teleport, which is
-	-- where the player goes back to when they leave.
+	-- The stash above holds the position the game left them in before this
+	-- teleport, which is where the player goes back to when they leave.
 	if session.arena then
 		player:set_pos(arena.viewing_position(session.arena))
 	end
 	recovery.apply_day_night(player, session)
-	local hook = recorder_common.game_hooks.on_enter
-	if hook then pcall(hook, player, session) end
+	call_hook("on_enter", player, session)
 end
 
 -- Put a player back where they were and give them their things back.
@@ -129,8 +143,7 @@ function recovery.leave(player, session)
 			player:override_day_night_ratio(nil)
 		end
 	end
-	local hook = recorder_common.game_hooks.on_leave
-	if hook then pcall(hook, player, session) end
+	call_hook("on_leave", player, session)
 end
 
 -- The stash a player carries, if any, for the join handler to act on.

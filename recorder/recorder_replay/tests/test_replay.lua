@@ -527,6 +527,17 @@ check(watcher.formspec and watcher.formspec.formspec:find("#FF5555", 1, true) ~=
 	"as red text")
 check(#mock.chats == chats_before, "and not in chat")
 
+-- The game's before_enter hook must see the player before replay moves them
+-- and before the hotbar becomes the remote control.
+local before_enter_calls = {}
+recorder_common.game_hooks.before_enter = function(player, session)
+	before_enter_calls[#before_enter_calls + 1] = {
+		name = player:get_player_name(),
+		session_id = session and session.id,
+		pos = player:get_pos(),
+		first = watcher.inventory.main[1],
+	}
+end
 mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
 	{recordings = "CHG:1"})
 mock.fire("register_on_player_receive_fields", watcher, "recorder_replay:recordings",
@@ -535,6 +546,14 @@ check(sessions.for_player("Watcher") ~= nil, "the Watch button starts the select
 
 local session = sessions.for_player("Watcher")
 check(session ~= nil, "the watcher is in the session")
+check(#before_enter_calls == 1 and before_enter_calls[1].session_id == session.id,
+	"the game's before_enter hook runs with the session")
+check(before_enter_calls[1].name == "Watcher", "for the player entering the replay")
+check(before_enter_calls[1].pos.x == 0 and before_enter_calls[1].pos.y == 0
+	and before_enter_calls[1].pos.z == 0, "while they are still where the game left them")
+check(before_enter_calls[1].first == "default:pick_stone",
+	"with their own inventory, before the replay controls")
+recorder_common.game_hooks.before_enter = nil
 check(session.rec.name == "fixture", "the recording is named: " .. tostring(session.rec.name))
 check(near(session.rec.duration, 1), "its duration is read: " .. tostring(session.rec.duration))
 check(session.T == 0 and not session.paused, "it starts at the beginning, running")

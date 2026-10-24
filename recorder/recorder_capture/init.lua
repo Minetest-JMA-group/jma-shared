@@ -214,23 +214,18 @@ end
 -- Small helpers
 ----------------------------------------------------------------------------
 
--- The name a player ObjectRef carries, for the pcall below: everything else in
--- here is allowed to raise.
-local function name_of(obj)
-	if core.is_player(obj) then
-		return obj:get_player_name()
-	end
-end
-
 -- The name of a player ObjectRef, a player name, or nil for anything else
--- (a mob, an explosion, an already removed object).
+-- (a mob, an explosion, an already removed object). An actor that cannot
+-- answer for itself is simply not a player.
 ---@param obj ObjectRef|string|nil
 ---@return string|nil
 local function player_name(obj)
 	if obj == nil then return nil end
 	if type(obj) == "string" then return obj end
-	local ok, name = pcall(name_of, obj)
-	if ok then return name end
+	local kind = type(obj)
+	if kind ~= "table" and kind ~= "userdata" then return nil end
+	if not obj.get_player_name then return nil end
+	if core.is_player(obj) then return obj:get_player_name() end
 	return nil
 end
 
@@ -250,20 +245,17 @@ local function player_id(rec, obj)
 	return id
 end
 
--- What an object that is not a player says it is, for the pcall below.
-local function description_of(obj)
+-- How to name an actor that is not a player, for data.actor. An actor that
+-- cannot say what it is becomes "unknown" rather than costing the event.
+local function describe_object(obj)
+	local kind = type(obj)
+	if kind ~= "table" and kind ~= "userdata" then return "unknown" end
+	if not obj.get_luaentity then return "unknown" end
 	local ent = obj:get_luaentity()
 	if ent and ent.name then
 		return "entity:" .. ent.name
 	end
 	return "object"
-end
-
--- How to name an actor that is not a player, for data.actor.
-local function describe_object(obj)
-	local ok, desc = pcall(description_of, obj)
-	if ok and desc then return desc end
-	return "unknown"
 end
 
 -- Subject of an event performed by an object that may or may not be a player.
@@ -293,13 +285,9 @@ end
 ---@return table|nil
 local function position_of_object(obj)
 	if obj == nil then return nil end
-	if type(obj) == "string" then
-		obj = core.get_player_by_name(obj)
-		if not obj then return nil end
-	end
-	local ok, pos = pcall(function() return obj:get_pos() end)
-	if ok then return pos end
-	return nil
+	if type(obj) == "string" then obj = core.get_player_by_name(obj) end
+	if not obj then return nil end
+	return obj:get_pos()
 end
 
 -- Does this event belong inside the region? The subject, and the object when
@@ -351,25 +339,22 @@ local function stack_string(obj)
 	return nil
 end
 
--- The itemstring of the stack an object is holding, or "" - the empty stack and
--- an object that holds nothing are the same thing here.
-local function held_stack(obj)
-	local stack = obj:get_wielded_item()
-	return stack and stack:to_string() or ""
-end
-
+-- The itemstring of the stack an object is holding, or "" - the empty stack,
+-- an object that holds nothing, and an actor that cannot answer are the same
+-- thing here.
 local function wielded(obj)
 	if obj == nil then return "" end
-	local ok, str = pcall(held_stack, obj)
-	if ok and type(str) == "string" then return str end
-	return ""
+	local kind = type(obj)
+	if kind ~= "table" and kind ~= "userdata" then return "" end
+	if not obj.get_wielded_item then return "" end
+	return obj:get_wielded_item():to_string()
 end
 
 -- The animation a player is wearing, in the four values the engine's old
 -- animation interface owns. A pose like "lying down while dead" is not
 -- derivable from speed and controls, so the recording keeps the engine's own
--- numbers instead of guessing at replay time. Some engine versions answer
--- nothing (or raise) for a player; that only means the recording has no pose
+-- numbers instead of guessing at replay time. An engine with nothing to say
+-- about a player answers nothing; that only means the recording has no pose
 -- for them and replay falls back to its guess.
 --
 -- An animation the engine has never been given is reported as frames 1..1 at
@@ -379,8 +364,8 @@ end
 ---@param player ObjectRef
 ---@return table|nil  -- {frames = {x =, y =}, speed =, blend =, loop =}
 local function animation_of(player)
-	local ok, frames, speed, blend, loop = pcall(player.get_animation, player)
-	if not ok or type(frames) ~= "table" then return nil end
+	local frames, speed, blend, loop = player:get_animation()
+	if type(frames) ~= "table" then return nil end
 	if frames.x == 1 and frames.y == 1 and speed == 15 and blend == 0 and loop == true then
 		return nil
 	end
@@ -461,23 +446,19 @@ end
 -- carry" are only replayable if an inventory is known at least at the points
 -- where the player enters the recording.
 local function inventory_snapshot(player)
-	local ok, result = pcall(function()
-		local inv = player:get_inventory()
-		if not inv then return nil end
-		local lists = inv:get_lists()
-		local out = {}
-		for listname, list in pairs(lists) do
-			local items = {}
-			for i, stack in ipairs(list) do
-				items[i] = stack_string(stack) or ""
-			end
-			out[listname] = items
+	local inv = player:get_inventory()
+	if not inv then return nil end
+	local lists = inv:get_lists()
+	local out = {}
+	for listname, list in pairs(lists) do
+		local items = {}
+		for i, stack in ipairs(list) do
+			items[i] = stack_string(stack) or ""
 		end
-		if not next(out) then return nil end
-		return out
-	end)
-	if ok then return result end
-	return nil
+		out[listname] = items
+	end
+	if not next(out) then return nil end
+	return out
 end
 
 ----------------------------------------------------------------------------
@@ -711,25 +692,21 @@ local function record_player(rec, player, dtime)
 end
 
 -- What can be read about a player at this moment. A player object that has
--- already gone away (which a join at the start of a recording can meet) is not
--- a reason to lose the join itself, let alone to fail whoever asked for the
--- recording.
+-- already gone away (which a join at the start of a recording can meet)
+-- answers nothing for what it can no longer give; that is not a reason to
+-- lose the join itself, let alone to fail whoever asked for the recording.
 local function player_snapshot(player)
-	local ok, snapshot = pcall(function()
-		local properties = player:get_properties()
-		return {
-			pos = player:get_pos(),
-			hp = player:get_hp(),
-			breath = player:get_breath(),
-			pitch = player:get_look_vertical(),
-			yaw = player:get_look_horizontal(),
-			-- What the player looks like, so a replay can wear the same skin.
-			textures = properties and properties.textures or nil,
-			inventory = inventory_snapshot(player),
-		}
-	end)
-	if ok and snapshot then return snapshot end
-	return {}
+	local properties = player:get_properties()
+	return {
+		pos = player:get_pos(),
+		hp = player:get_hp(),
+		breath = player:get_breath(),
+		pitch = player:get_look_vertical(),
+		yaw = player:get_look_horizontal(),
+		-- What the player looks like, so a replay can wear the same skin.
+		textures = properties and properties.textures or nil,
+		inventory = inventory_snapshot(player),
+	}
 end
 
 -- A player enters the recording: by joining the game inside the region, by
@@ -783,12 +760,12 @@ local function on_leave(rec, player, timed_out)
 	if not pid or not rec.joined[pid] then return end
 	-- Where they were when they left is what a reader following their trail
 	-- has to end on. The engine is free to have let go of the object by now, so
-	-- a player that cannot be read is recorded without a position.
-	local read, pos = pcall(function() return player:get_pos() end)
+	-- a player that answers nothing is recorded without a position.
+	local pos = player:get_pos()
 	record_event(rec, {
 		type = "leave",
 		subject = name,
-		pos = read and pos or nil,
+		pos = pos,
 		data = { timed_out = timed_out or nil },
 	})
 	-- Whatever the player does after rejoining has no relation to these,
@@ -1457,12 +1434,9 @@ end
 -- the engine does when they return a value (a crafted stack, a disabled
 -- respawn, an item not taken), and the recorder is a witness, not a
 -- participant.
--- Each callback is registered as one try/catch. The engine hands over objects
--- that can turn out to be unreadable, and an error escaping into the engine is
--- a complaint in the log every time the action is repeated; here it is one
--- complaint, and the actions after it still get recorded. Inside a body, the
--- individual reads keep pcalls of their own: losing a field is better than
--- losing the event that carries it.
+-- Each callback is registered as one try/catch. An error escaping into the
+-- engine is a complaint in the log every time the action is repeated; here it
+-- is one complaint, and the actions after it still get recorded.
 local hook_complaints = {}
 local function any_recording()
 	for _, rec in pairs(recordings) do

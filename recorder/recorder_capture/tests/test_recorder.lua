@@ -673,11 +673,12 @@ print("=== a player that cannot be read ===")
 
 -- An object that is gone by the time it is sampled must not take the rest of
 -- the recording with it, on this tick or on the ones after it. It joins while
--- it can still be read, and then the object goes away.
+-- it can still be read, and then the object goes away: the engine's getters
+-- answer nothing.
 local broken = mock.add_player("Broken")
 check(start_recording("broken_player") == nil, "a recording starts")
 mock.step(0.1)  -- the recording opens while Broken can still be read
-broken.get_pos = function() error("this object no longer exists") end
+broken.get_pos = function() return nil end
 local broken_path = recorder.get_recording_path()
 mock.steps(3, 0.1)
 check(recorder.is_recording(), "it does not end over one unreadable player")
@@ -697,11 +698,13 @@ check(value(db, ("SELECT COUNT(*) FROM Movement JOIN Players ON Players.id = Mov
 	"WHERE Players.name = 'Broken'")) == 1,
 	"the one sample taken before the object went away is kept")
 db:close()
+-- A player who is gone is normal, not a problem: the sample is skipped
+-- silently instead of being logged once per tick.
 local complaints = 0
 for _, log in ipairs(mock.logs) do
 	if log.message and log.message:find("cannot sample a player", 1, true) then complaints = complaints + 1 end
 end
-check(complaints == 1, "the problem is reported once, not once per tick")
+check(complaints == 0, "a gone player is skipped without a complaint")
 mock.remove_player("Broken")
 
 ----------------------------------------------------------------------------
@@ -958,9 +961,10 @@ local anim_out = mock.add_player("AnimOut", {
 	pos = {x = 700, y = 0, z = 2},
 	animation = {frames = {x = 0, y = 79}, speed = 30, blend = 0, loop = true},
 })
--- An engine that cannot answer for a player must not cost their movement row.
+-- An engine with nothing to say about a player's pose must not cost their
+-- movement row.
 local anim_broken = mock.add_player("AnimBroken", {pos = {x = 604, y = 0, z = 2}})
-anim_broken.get_animation = function() error("no animation here") end
+anim_broken.get_animation = function() return nil end
 -- The engine's "never given an animation" answer is not a pose.
 local anim_default = mock.add_player("AnimDefault", {
 	pos = {x = 601, y = 0, z = 2},

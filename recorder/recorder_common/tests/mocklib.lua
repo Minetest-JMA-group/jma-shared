@@ -747,6 +747,12 @@ function M.new(opts)
 			self.wielded = item and item:to_string() or ""
 			return true
 		end
+		function obj:get_wielded_item()
+			-- A getter: an object that holds nothing (or has gone) answers an
+			-- empty stack, which is just the empty itemstring here.
+			local who = self
+			return {to_string = function() return (not who.removed and who.wielded) or "" end}
+		end
 		function obj:set_animation(frames, speed, blend, loop)
 			check(self)
 			self.animation = frames

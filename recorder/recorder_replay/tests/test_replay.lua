@@ -645,6 +645,11 @@ check(held and held.properties.visual == "wielditem",
 check(held and held.attached and held.attached.parent == alice
 	and held.attached.bone == "Arm_Right",
 	"attached to the model's hand bone")
+check(held and held.attached.position.y == 5.5 and held.attached.position.z == 3,
+	"with the player_api arm offset")
+check(held and held.attached.rotation.x == -90 and held.attached.rotation.y == 225,
+	"and its hand rotation")
+check(held and held.properties.visual_size.x == 0.3, "at player_api hand size")
 check(held and held.observers and held.observers.Watcher == true,
 	"the item is sent to the watcher")
 check(held and next(held.observers, next(held.observers)) == nil,

@@ -681,6 +681,7 @@ function M.new(opts)
 	mock.entity_defs = {}
 	mock.entities = {}
 	mock.items = {}
+	core.registered_items = mock.items
 	mock.chats = {}
 	local entity_id = 0
 

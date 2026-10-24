@@ -21,9 +21,12 @@ local PLAYER_BOX = {-0.3, 0.0, -0.3, 0.3, 1.8, 0.3}
 -- returns false, only PlayerSAO overrides it), and an object property
 -- `wield_item` is only rendered for the `wielditem` visual, not for a mesh.
 -- The item is therefore a separate `wielditem` entity attached to the model's
--- hand bone; it follows the pose animations with the arm. The defaults below
--- are the default player model's (character.b3d); a game whose model has
--- different bones can tune them.
+-- hand bone; it follows the pose animations with the arm.
+--
+-- The two model registries carry the item differently: the player_api rig
+-- puts it on the arm, while the mcl_player rig has a Wield_Item bone that the
+-- game poses at the hand. Each family has its own defaults; a setting
+-- overrides them for either.
 local function vector_setting(name, default)
 	local raw = core.settings:get(name)
 	if not raw then return default end
@@ -34,25 +37,63 @@ end
 
 local WIELD_ENABLED = core.settings:get_bool("replay.wield_item", true)
 local WIELD_BONE = core.settings:get("replay.wield_bone")
-if not WIELD_BONE or WIELD_BONE == "" then WIELD_BONE = "Arm_Right" end
-local WIELD_POSITION = vector_setting("replay.wield_pos", {x = 0, y = 5.5, z = 3})
-local WIELD_ROTATION = vector_setting("replay.wield_rot", {x = -90, y = 225, z = 90})
-local WIELD_SCALE = vector_setting("replay.wield_scale", {x = 0.3, y = 0.3, z = 0.25})
+if not WIELD_BONE or WIELD_BONE == "" then WIELD_BONE = nil end
+local WIELD_POSITION = vector_setting("replay.wield_pos", nil)
+local WIELD_ROTATION = vector_setting("replay.wield_rot", nil)
+local WIELD_SCALE = vector_setting("replay.wield_scale", nil)
+
+local WIELD_DEFAULTS = {
+	player_api = {
+		bone = "Arm_Right",
+		position = {x = 0, y = 5.5, z = 3},
+		rotation = {x = -90, y = 225, z = 90},
+		scale = {x = 0.3, y = 0.3, z = 0.25},
+	},
+	mcl_player = {
+		bone = "Wield_Item",
+		-- The bone itself is at the hand; the attachment has no offset of its
+		-- own.
+		position = {x = 0, y = 0, z = 0},
+		rotation = {x = 0, y = 0, z = 0},
+		scale = {x = 0.21, y = 0.21, z = 0.21},
+	},
+}
+
+-- The mcl_player rig's Wield_Item bone is posed for what is held: these are
+-- the rig's own values (model units, radians). The bow poses are left out
+-- because their arm pose depends on drawing, which a held-item event does not
+-- say.
+local MCL_POSES = {
+	default = {position = {x = 0, y = 5.3, z = 2}, rotation = {x = 1.57, y = 0, z = 0}},
+	tool = {position = {x = 0, y = 4.7, z = 3.1}, rotation = {x = -1.57, y = 3.93, z = 1.57}},
+	no_image = {position = {x = 0, y = 6, z = 2}, rotation = {x = 3.1415, y = -0.785, z = 0}},
+}
+
+local function mcl_pose(item)
+	local name = item:match("^(%S+)") or item
+	local def = core.registered_items[name]
+	if def and def._mcl_toollike_wield then return "tool", MCL_POSES.tool end
+	if def and def.inventory_image == "" then return "no_image", MCL_POSES.no_image end
+	return "default", MCL_POSES.default
+end
 
 local resolved = false
-local model_name, model_def
+local model_name, model_def, model_family
 
 -- The game's player model, if it has one. Looked up lazily: a game's armour or
--- skin mods may register their model after this mod has loaded.
+-- skin mods may register their model after this mod has loaded. The registry
+-- it came from also says how that rig carries a held item.
 local function resolve_model()
-	if resolved then return model_name, model_def end
+	if resolved then return model_name, model_def, model_family end
 	resolved = true
 	local wanted = core.settings:get("replay.model")
 	local registry
 	if player_api and player_api.registered_models then
 		registry = player_api.registered_models
+		model_family = "player_api"
 	elseif mcl_player and mcl_player.registered_player_models then
 		registry = mcl_player.registered_player_models
+		model_family = "mcl_player"
 	end
 	if not registry then return nil end
 	if wanted and registry[wanted] then
@@ -70,7 +111,7 @@ local function resolve_model()
 		model_name = model_name or names[1]
 	end
 	model_def = model_name and registry[model_name]
-	return model_name, model_def
+	return model_name, model_def, model_family
 end
 
 core.register_entity("recorder_replay:ghost", {
@@ -117,7 +158,6 @@ core.register_entity("recorder_replay:wield_item", {
 		visual = "wielditem",
 		wield_item = "",
 		textures = {},
-		visual_size = WIELD_SCALE,
 		physical = false,
 		pointable = false,
 		nametag = "",
@@ -134,7 +174,7 @@ core.register_entity("recorder_replay:wield_item", {
 function ghost.spawn(name, pos, textures, observers)
 	local obj = core.add_entity(pos, "recorder_replay:ghost")
 	if not obj then return nil end
-	local model, def = resolve_model()
+	local model, def, family = resolve_model()
 	if model and def then
 		obj:set_properties({
 			visual = "mesh",
@@ -165,6 +205,7 @@ function ghost.spawn(name, pos, textures, observers)
 		-- observers; the ghost remembers them for an item it creates later.
 		ent.observers = observers
 		ent.has_model = (model and def) ~= nil
+		ent.model_family = family
 	end
 	return obj
 end
@@ -202,6 +243,11 @@ function ghost.wield(obj, itemstring)
 	if not ent then return false end
 	-- A sprite fallback has no hand bone to attach to.
 	if not ent.has_model then return true end
+	local defaults = WIELD_DEFAULTS[ent.model_family] or WIELD_DEFAULTS.player_api
+	local bone = WIELD_BONE or defaults.bone
+	local position = WIELD_POSITION or defaults.position
+	local rotation = WIELD_ROTATION or defaults.rotation
+	local scale = WIELD_SCALE or defaults.scale
 	local item = itemstring or ""
 	local child = ent.wield_object
 	-- get_pos() answers nothing for an object the engine has dropped; that
@@ -212,10 +258,22 @@ function ghost.wield(obj, itemstring)
 		ent.wield_object = nil
 		return true
 	end
+	-- The mcl_player rig expects the game to put its Wield_Item bone at the
+	-- hand; the attachment itself then has no offset.
+	if ent.model_family == "mcl_player" and bone == "Wield_Item" and obj.set_bone_override then
+		local pose_name, pose = mcl_pose(item)
+		if ent.wield_pose ~= pose_name then
+			obj:set_bone_override("Wield_Item", {
+				position = {vec = pose.position, absolute = true},
+				rotation = {vec = pose.rotation, absolute = true},
+			})
+			ent.wield_pose = pose_name
+		end
+	end
 	if not child then
 		child = core.add_entity(obj:get_pos(), "recorder_replay:wield_item")
 		if not child then return false end
-		child:set_attach(obj, WIELD_BONE, WIELD_POSITION, WIELD_ROTATION)
+		child:set_attach(obj, bone, position, rotation)
 		child:set_observers(ent.observers)
 		ent.wield_object = child
 	end
@@ -224,7 +282,7 @@ function ghost.wield(obj, itemstring)
 		-- The pre-wield_item client rendered an item from this field; it
 		-- takes a plain item name, not the stack string.
 		textures = {item:match("^(%S+)") or item},
-		visual_size = WIELD_SCALE,
+		visual_size = scale,
 	})
 	return true
 end

@@ -18,4 +18,6 @@ mkdir -p "$tmpdir"
 
 echo "=== test_replay (sessions, ghosts, controls, recovery) ==="
 "$LUA" test_replay.lua || exit 1
+echo "=== test_mcl (the held item on an mcl_player rig) ==="
+"$LUA" test_mcl.lua || exit 1
 echo "ALL TESTS PASSED"

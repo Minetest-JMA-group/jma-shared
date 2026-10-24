@@ -178,15 +178,6 @@ local function complain(rec, label, message)
 	log_error(message)
 end
 
--- Something the engine hands over can always turn out to be unreadable, and one
--- player that cannot be dealt with must not cost the rest of the recording.
-local function guarded(rec, label, func, ...)
-	local ok, err = pcall(func, ...)
-	if not ok then
-		complain(rec, label, "cannot " .. label .. ": " .. tostring(err))
-	end
-end
-
 -- Declared here because the helpers below can end up wanting to write an event
 -- of their own, while the event writer needs the players those helpers resolve.
 local record_event
@@ -606,10 +597,10 @@ record_event = function(rec, ev)
 end
 
 -- Offer an event to every recording; each keeps it if its own region says it
--- belongs there. A recording that fails on it does not cost the others.
+-- belongs there.
 local function broadcast_event(ev)
 	for _, rec in pairs(recordings) do
-		guarded(rec, "record an event", record_event, rec, ev)
+		record_event(rec, ev)
 	end
 end
 
@@ -793,13 +784,13 @@ local function observe_region(rec, dtime)
 					if not rec.joined[pid] then
 						-- They were outside when the recording started, or have
 						-- walked in since; either way they enter the recording here.
-						guarded(rec, "record a join", on_join, rec, player, nil, false, "region")
+						on_join(rec, player, nil, false, "region")
 					end
 					-- A player who could not be joined is not sampled either: a
 					-- movement trail that begins without a join would leave a
 					-- reader without the state the trail starts from.
 					if rec.joined[pid] then
-						guarded(rec, "sample a player", record_player, rec, player, dtime)
+						record_player(rec, player, dtime)
 					end
 				end
 			end
@@ -1434,25 +1425,17 @@ end
 -- the engine does when they return a value (a crafted stack, a disabled
 -- respawn, an item not taken), and the recorder is a witness, not a
 -- participant.
--- Each callback is registered as one try/catch. An error escaping into the
--- engine is a complaint in the log every time the action is repeated; here it
--- is one complaint, and the actions after it still get recorded.
-local hook_complaints = {}
 local function any_recording()
 	for _, rec in pairs(recordings) do
 		if rec.recording then return true end
 	end
 	return false
 end
-local function hook(label, register, func)
+local function hook(register, func)
 	if not register then return end
 	register(function(...)
 		if not any_recording() then return end
-		local ok, err = pcall(func, ...)
-		if not ok and not hook_complaints[label] then
-			hook_complaints[label] = true
-			log_error("cannot record a " .. label .. ": " .. tostring(err))
-		end
+		func(...)
 	end)
 end
 
@@ -1461,7 +1444,7 @@ end
 local function broadcast_join(player, last_login, at_start, reason)
 	for _, rec in pairs(recordings) do
 		if rec.recording then
-			guarded(rec, "record a join", on_join, rec, player, last_login, at_start, reason)
+			on_join(rec, player, last_login, at_start, reason)
 		end
 	end
 end
@@ -1469,29 +1452,29 @@ end
 local function broadcast_leave(player, timed_out)
 	for _, rec in pairs(recordings) do
 		if rec.recording then
-			guarded(rec, "record a leave", on_leave, rec, player, timed_out)
+			on_leave(rec, player, timed_out)
 		end
 	end
 end
 
-hook("join", core.register_on_joinplayer, function(player, last_login)
+hook(core.register_on_joinplayer, function(player, last_login)
 	broadcast_join(player, last_login, false)
 end)
 
-hook("leave", core.register_on_leaveplayer, function(player, timed_out)
+hook(core.register_on_leaveplayer, function(player, timed_out)
 	broadcast_leave(player, timed_out)
 end)
 
-hook("die", core.register_on_dieplayer, function(player, reason)
+hook(core.register_on_dieplayer, function(player, reason)
 	broadcast_event({ type = "die", subject = player, pos = player:get_pos(),
 		data = { reason = describe_reason(reason) } })
 end)
 
-hook("respawn", core.register_on_respawnplayer, function(player)
+hook(core.register_on_respawnplayer, function(player)
 	broadcast_event({ type = "respawn", subject = player, pos = player:get_pos() })
 end)
 
-hook("hp_change", core.register_on_player_hpchange, function(player, hp_change, reason)
+hook(core.register_on_player_hpchange, function(player, hp_change, reason)
 	broadcast_event({
 		type = "hp_change",
 		subject = player,
@@ -1500,7 +1483,7 @@ hook("hp_change", core.register_on_player_hpchange, function(player, hp_change, 
 	})
 end)
 
-hook("punch_player", core.register_on_punchplayer, function(player, hitter, time_from_last_punch, tool_capabilities, dir, damage)
+hook(core.register_on_punchplayer, function(player, hitter, time_from_last_punch, tool_capabilities, dir, damage)
 	local ev = {
 		type = "punch_player",
 		object = player,
@@ -1516,7 +1499,7 @@ hook("punch_player", core.register_on_punchplayer, function(player, hitter, time
 	broadcast_event(ev)
 end)
 
-hook("punch_node", core.register_on_punchnode, function(pos, node, puncher, pointed_thing)
+hook(core.register_on_punchnode, function(pos, node, puncher, pointed_thing)
 	local ev = {
 		type = "punch_node",
 		pos = pos,
@@ -1528,7 +1511,7 @@ hook("punch_node", core.register_on_punchnode, function(pos, node, puncher, poin
 	broadcast_event(ev)
 end)
 
-hook("dig", core.register_on_dignode, function(pos, oldnode, digger)
+hook(core.register_on_dignode, function(pos, oldnode, digger)
 	local ev = {
 		type = "dig",
 		pos = pos,
@@ -1540,7 +1523,7 @@ hook("dig", core.register_on_dignode, function(pos, oldnode, digger)
 	broadcast_event(ev)
 end)
 
-hook("place", core.register_on_placenode, function(pos, newnode, placer, oldnode, itemstack, pointed_thing)
+hook(core.register_on_placenode, function(pos, newnode, placer, oldnode, itemstack, pointed_thing)
 	local ev = {
 		type = "place",
 		pos = pos,
@@ -1554,7 +1537,7 @@ hook("place", core.register_on_placenode, function(pos, newnode, placer, oldnode
 	broadcast_event(ev)
 end)
 
-hook("rightclick_player", core.register_on_rightclickplayer, function(player, clicker)
+hook(core.register_on_rightclickplayer, function(player, clicker)
 	local ev = {
 		type = "rightclick_player",
 		object = player,
@@ -1565,7 +1548,7 @@ hook("rightclick_player", core.register_on_rightclickplayer, function(player, cl
 	broadcast_event(ev)
 end)
 
-hook("craft", core.register_on_craft, function(itemstack, player, old_craft_grid, craft_inv)
+hook(core.register_on_craft, function(itemstack, player, old_craft_grid, craft_inv)
 	local grid = {}
 	if type(old_craft_grid) == "table" then
 		for i, stack in ipairs(old_craft_grid) do
@@ -1580,7 +1563,7 @@ hook("craft", core.register_on_craft, function(itemstack, player, old_craft_grid
 	})
 end)
 
-hook("item_eat", core.register_on_item_eat, function(hp_change, replace_with_item, itemstack, user, pointed_thing)
+hook(core.register_on_item_eat, function(hp_change, replace_with_item, itemstack, user, pointed_thing)
 	local ev = {
 		type = "item_eat",
 		item = stack_string(itemstack),
@@ -1590,7 +1573,7 @@ hook("item_eat", core.register_on_item_eat, function(hp_change, replace_with_ite
 	broadcast_event(ev)
 end)
 
-hook("item_pickup", core.register_on_item_pickup, function(itemstack, picker, pointed_thing)
+hook(core.register_on_item_pickup, function(itemstack, picker, pointed_thing)
 	local ev = { type = "item_pickup", item = stack_string(itemstack) }
 	set_actor(ev, picker)
 	broadcast_event(ev)
@@ -1610,7 +1593,7 @@ local function moved_stack(action, inventory, info)
 	return stack_string(stack)
 end
 
-hook("inventory action", core.register_on_player_inventory_action, function(player, action, inventory, inventory_info)
+hook(core.register_on_player_inventory_action, function(player, action, inventory, inventory_info)
 	local data = {}
 	if type(inventory_info) == "table" then
 		for key, value in pairs(inventory_info) do
@@ -1630,11 +1613,11 @@ hook("inventory action", core.register_on_player_inventory_action, function(play
 	broadcast_event(ev)
 end)
 
-hook("protection_violation", core.register_on_protection_violation, function(pos, name)
+hook(core.register_on_protection_violation, function(pos, name)
 	broadcast_event({ type = "protection_violation", subject = name, pos = pos })
 end)
 
-hook("cheat", core.register_on_cheat, function(player, cheat)
+hook(core.register_on_cheat, function(player, cheat)
 	broadcast_event({
 		type = "cheat",
 		subject = player,
@@ -2098,7 +2081,7 @@ local function step_recording(rec, dtime)
 				-- Someone who joined in the moment between start() and this step
 				-- is already in the recording and does not need joining again.
 				if not (pid and rec.joined[pid]) then
-					guarded(rec, "record a join", on_join, rec, player, nil, true)
+					on_join(rec, player, nil, true)
 				end
 			end
 		end
@@ -2114,7 +2097,7 @@ local function step_recording(rec, dtime)
 	observe_region(rec, dtime)
 	if rec.metadata_enabled and rec.elapsed >= rec.next_metadata_poll then
 		rec.next_metadata_poll = rec.elapsed + METADATA_INTERVAL
-		guarded(rec, "scan node metadata", poll_metadata, rec)
+		poll_metadata(rec)
 	end
 	maybe_flush(rec)
 end

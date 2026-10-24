@@ -693,6 +693,14 @@ function M.new(opts)
 			properties = {},
 			removed = false,
 		}
+		-- The engine applies the definition's initial properties before any Lua
+		-- runs; a test can then see what an entity starts out as.
+		local def = mock.entity_defs[name]
+		if def and def.initial_properties then
+			for key, value in pairs(def.initial_properties) do
+				obj.properties[key] = value
+			end
+		end
 		-- A removed object is invalid: the engine raises on any further call,
 		-- which is what a ghost must survive when its mapblocks unload.
 		local function check(self)
@@ -702,6 +710,11 @@ function M.new(opts)
 			check(self)
 			for key, value in pairs(values) do self.properties[key] = value end
 		end
+		function obj:get_properties() check(self) return self.properties end
+		function obj:get_pos()
+			check(self)
+			return {x = self.pos.x, y = self.pos.y, z = self.pos.z}
+		end
 		function obj:set_observers(set) check(self) self.observers = set end
 		function obj:move_to(target)
 			check(self)
@@ -709,6 +722,17 @@ function M.new(opts)
 		end
 		function obj:set_yaw(value) check(self) self.yaw = value end
 		function obj:set_velocity(value) check(self) self.velocity = value end
+		function obj:set_attach(parent, bone, position, rotation, forced_visible)
+			check(self)
+			self.attached = {
+				parent = parent,
+				bone = bone,
+				position = position,
+				rotation = rotation,
+				forced_visible = forced_visible,
+			}
+		end
+		function obj:get_luaentity() return self end
 		function obj:set_wielded_item(item)
 			check(self)
 			self.wielded = item and item:to_string() or ""
@@ -729,6 +753,12 @@ function M.new(opts)
 		function obj:remove()
 			if self.removed then return end
 			self.removed = true
+			-- The engine runs on_deactivate() when it removes an object, so a
+			-- ghost's attached item goes away with it here too.
+			local def = mock.entity_defs[self.name]
+			if def and def.on_deactivate then
+				pcall(def.on_deactivate, self)
+			end
 			mock.entities[self.id] = nil
 		end
 		mock.entities[entity_id] = obj

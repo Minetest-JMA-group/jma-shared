@@ -126,7 +126,9 @@ for itself: the game's `on_enter`/`on_leave` hooks put the player back.
   clock reaches it, and the client's entity interpolation smooths between them.
 - A ghost holds the item its player held: the last `wield` event at or before
   the moment shown, or the item carried by the `join` event before the player
-  first switched. An empty hand is a recorded empty item and shows as one.
+  first switched. An empty hand is a recorded empty item and shows as one. The
+  item is a separate `wielditem` entity attached to the model's hand bone, so
+  it follows the pose animations; `set_wielded_item` is player-only.
 - The pose is the recording's when it has one: an `animation` event carries the
   engine's frame range, speed, blend and loop, so a game's own pose (lying down
   while dead, sitting) is shown exactly, and later movement samples do not
@@ -191,6 +193,11 @@ including the one being written.
 | `replay.max_sessions` | `4` | How many replays may run at once; `0` is no limit. |
 | `replay.model` | empty | The model name for ghost bodies, overriding the one picked from the game's registry. |
 | `replay.chat` | `true` | Show the recording's `chat` lines to the participants as chat. Read when a session starts. |
+| `replay.wield_item` | `true` | Draw the item a ghost holds. The `wield_*` settings below place it; they default to the default player model (`character.b3d`) and are read when the mod loads. |
+| `replay.wield_bone` | `Arm_Right` | The bone the held item attaches to, for a model whose hand bone has another name. |
+| `replay.wield_pos` | `0,5.5,3` | Where the item sits in that bone's space. |
+| `replay.wield_rot` | `-90,225,90` | The item's rotation at the bone, in degrees. |
+| `replay.wield_scale` | `0.3,0.3,0.25` | The item entity's visual size, so a node-sized item looks hand-sized. |
 | `recorder.directory` | empty | Where recordings are read from, shared with capture. A relative path is taken from the world directory. |
 
 ## For a game

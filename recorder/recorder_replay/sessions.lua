@@ -72,11 +72,10 @@ sessions.participant_count = participant_count
 local function remove_ghost(session, pid)
 	local obj = session.ghosts[pid]
 	if obj then
-		-- A second removal, or one of an object the engine has already dropped,
-		-- raises; it is not worth a server error either way.
-		pcall(function()
-			if obj.remove then obj:remove() end
-		end)
+		-- The ghost module takes the attached held-item entity down with the
+		-- ghost; a second removal, or one of an object the engine has already
+		-- dropped, is tolerated there.
+		deps.ghost.remove(obj)
 	end
 	session.ghosts[pid] = nil
 	session.cursors[pid] = nil

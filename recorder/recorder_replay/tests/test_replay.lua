@@ -254,6 +254,12 @@ local function ghost_of(name)
 	return nil
 end
 
+-- What a ghost holds is a separate `wielditem` entity attached to its hand.
+local function held_by(obj)
+	if not obj or not obj.wield_object then return nil end
+	return obj.wield_object.properties.wield_item
+end
+
 local function item(kind)
 	return mock.items["recorder_replay:" .. kind]
 end
@@ -631,24 +637,46 @@ check(ghost_of("Bob") == nil, "Bob's leave at that moment removed his ghost")
 print("=== held items ===")
 ----------------------------------------------------------------------------
 
-check(alice and alice.wielded == "default:pick_stone",
+check(held_by(alice) == "default:pick_stone",
 	"the clock crossing a wield event changes what the ghost holds")
+local held = alice and alice.wield_object
+check(held and held.properties.visual == "wielditem",
+	"the item is a wielditem entity, the only visual that draws one")
+check(held and held.attached and held.attached.parent == alice
+	and held.attached.bone == "Arm_Right",
+	"attached to the model's hand bone")
+check(held and held.observers and held.observers.Watcher == true,
+	"the item is sent to the watcher")
+check(held and next(held.observers, next(held.observers)) == nil,
+	"and to nobody else")
 sessions.seek(session, 0)
-check(ghost_of("Alice").wielded == "default:stone",
+check(held_by(ghost_of("Alice")) == "default:stone",
 	"a seek falls back to the item the join event carries")
 sessions.seek(session, 0.6)
-check(ghost_of("Alice").wielded == "default:pick_stone",
+check(held_by(ghost_of("Alice")) == "default:pick_stone",
 	"a later wield event is applied on a seek")
 sessions.seek(session, 0.8)
-local emptied = ghost_of("Alice").wielded
-check(emptied == nil or emptied == "", "an empty wield event puts the hands down")
+local emptied = held_by(ghost_of("Alice"))
+check(emptied == nil, "an empty wield event puts the hands down")
+check(held and held.removed == true, "and takes the item entity away")
 sessions.seek(session, 0.45)
-check(ghost_of("Alice").wielded == "default:stone", "before the change the join item is back")
+check(held_by(ghost_of("Alice")) == "default:stone", "before the change the join item is back")
 mock.step(0.1)
-check(ghost_of("Alice").wielded == "default:pick_stone", "forward playback crosses the change")
+check(held_by(ghost_of("Alice")) == "default:pick_stone", "forward playback crosses the change")
 mock.step(0.15)
-emptied = ghost_of("Alice").wielded
-check(emptied == nil or emptied == "", "and reaches the empty hand")
+emptied = held_by(ghost_of("Alice"))
+check(emptied == nil, "and reaches the empty hand")
+
+-- A game or a cleanup can drop the item entity out from under a ghost; the
+-- next wield must notice the stale ref and make a new item rather than leave
+-- the ghost empty-handed.
+sessions.seek(session, 0.45)
+local restored = ghost_of("Alice")
+check(restored and restored.wield_object ~= nil, "the seek brings the item back")
+restored.wield_object:remove()
+mock.step(0.05)
+check(held_by(ghost_of("Alice")) == "default:pick_stone",
+	"an item entity the engine dropped is made again")
 
 ----------------------------------------------------------------------------
 print("=== the item a returning player holds ===")
@@ -693,10 +721,10 @@ do
 	check(rejoin_session ~= nil, "a recording with a leave and a return starts")
 
 	sessions.seek(rejoin_session, 0.25)
-	check(ghost_of("Carol") ~= nil and ghost_of("Carol").wielded == "default:pick_stone",
+	check(ghost_of("Carol") ~= nil and held_by(ghost_of("Carol")) == "default:pick_stone",
 		"before the leave the ghost holds what the last wield says")
 	sessions.seek(rejoin_session, 0.6)
-	check(ghost_of("Carol") ~= nil and ghost_of("Carol").wielded == "default:torch",
+	check(ghost_of("Carol") ~= nil and held_by(ghost_of("Carol")) == "default:torch",
 		"after the return the join's item wins over the earlier wield")
 
 	recorder_replay.end_session(rejoin_session.id, "test")

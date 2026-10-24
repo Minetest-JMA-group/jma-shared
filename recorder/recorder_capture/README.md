@@ -72,8 +72,12 @@ no provider to fall back on - a recording is about a particular place, and only
 the caller knows which.
 
 ```lua
-local id = recorder.start("ctf-match")      -- an id, or nil and a message
-if not id then core.log("error", "no recording") end
+-- A recording needs its region: two corners, in any order.
+local id, err = recorder.start("ctf-match", {
+	pos1 = {x = 0, y = 0, z = 0},
+	pos2 = {x = 63, y = 31, z = 63},
+})
+if not id then core.log("error", "no recording: " .. tostring(err)) end
 
 recorder.add_meta("ctf:map", "forge", id)   -- only while a recording is in progress
 recorder.add_meta("ctf:teams", "red:blue", id)
@@ -91,11 +95,11 @@ recorder.stop(id)                           -- nil, or a message
 
 | Function | Behaviour |
 | --- | --- |
-| `recorder.start([name], [region])` | Starts a recording and returns its id, or `nil` and a message. Fails if `recorder.max_recordings` is reached, or if the region is missing or invalid. `region` is `{pos1 = , pos2 = }` and is required. Returns before the region has been read: the snapshot phase runs in the following server steps (see below). `name` is used to build the file name and defaults to `"unnamed"`. |
+| `recorder.start([name], region)` | Starts a recording and returns its id, or `nil` and a message. Fails if `recorder.max_recordings` is reached, or if the region is missing or invalid. `region` is `{pos1 = , pos2 = }`, two corners with numeric `x`, `y` and `z`, and is required. Returns before the region has been read: the snapshot phase runs in the following server steps (see below). `name` is used to build the file name and defaults to `"unnamed"`. |
 | `recorder.stop([id], [reason])` | Stops one recording. With a single recording running the id may be left out; with several it is required. Fails if the last rows could not be written (see *Stopping* below). `reason` is stored in the recording; the automatic stops use their own. |
 | `recorder.add_meta(key, value, [id])` | Stores a string pair about a recording. Works only while recording. Keys starting with `recorder.` describe the recording itself and are refused. |
 | `recorder.log_event(type, fields)` | Records an event of a mod's own making. Offered to every recording; each keeps it if its region says it belongs there. Works only while recording. Use a `modname:what` type to stay clear of the types below. |
-| `recorder.is_recording()` | `true` while any recording is in progress. |
+| `recorder.is_recording()` | `true` while at least one recording is capturing; `false` while a recording is only taking its snapshot. |
 | `recorder.list()` | What is running now: id, name, path, whether it is recording or still snapshotting, elapsed time and region. |
 | `recorder.get_recording_name([id])` / `get_recording_path([id])` | The name and the file of a recording, or `nil`. With one recording the id may be left out. |
 

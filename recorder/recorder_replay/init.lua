@@ -313,6 +313,14 @@ controls.register(function(kind, player, extra)
 			end
 		end
 		return mode
+	elseif kind == "chat_toggle" then
+		session.chat = not session.chat
+		local mode = session.chat and "on" or "off"
+		for participant in pairs(session.participants) do
+			local other = core.get_player_by_name(participant)
+			if other then controls.set_chat_item(other, mode) end
+		end
+		return mode
 	elseif kind == "leave" then
 		-- The engine writes the used stack back into its slot after this
 		-- callback returns, and leaving restores the player's own inventory.

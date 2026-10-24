@@ -58,6 +58,7 @@ hotbar:
 | back / forward | move 10 seconds |
 | seek | a window with a slider over the whole recording |
 | lighting | switch between recorded conditions (recorded light and/or recorded day) and live ones |
+| chat | switch the recording's chat lines on or off |
 | leave | stop watching |
 
 A participant's position and main inventory are saved in their own metadata
@@ -159,8 +160,8 @@ own `on_leaveplayer` business.
   clock reaches each message, prefixed with `[replay]` so it is not mistaken
   for the replay server's own chat. The line is the final one the recording
   server delivered, prefixes and colours included. Like a one-off particle it
-  is transient: a seek does not replay the backlog (`replay.chat` turns it
-  off).
+  is transient: a seek does not replay the backlog (`replay.chat` sets the
+  starting state; the chat control item toggles it while watching).
 
 ## Limits
 
@@ -201,7 +202,7 @@ including the one being written.
 | `replay.allow_unfinished` | `false` | Offer recordings that capture is still making, and let sessions start on them. Off by default: the chooser hides them and a session refuses one. |
 | `replay.max_sessions` | `4` | How many replays may run at once; `0` is no limit. |
 | `replay.model` | empty | The model name for ghost bodies, overriding the one picked from the game's registry. |
-| `replay.chat` | `true` | Show the recording's `chat` lines to the participants as chat. Read when a session starts. |
+| `replay.chat` | `true` | Show the recording's `chat` lines to the participants as chat. Read when a session starts; the chat control item toggles it while watching. |
 | `replay.wield_item` | `true` | Draw the item a ghost holds. The `wield_*` rows give `player_api` / `mcl_player` defaults; they are read when the mod loads. |
 | `replay.wield_bone` | `Arm_Right` / `Wield_Item` | The bone the held item attaches to. |
 | `replay.wield_pos` | `0,5.5,3` / `0,0,0` | Where the item sits in that bone's space. |

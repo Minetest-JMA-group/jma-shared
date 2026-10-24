@@ -879,6 +879,31 @@ sessions.seek(session, 0.1)
 sessions.seek(session, 0.6)
 check(#mock.chats == chats_before, "a seek does not replay chat from the past")
 
+-- The chat switch is always offered, and its state belongs to the session.
+check(watcher.inventory.main[8] == "recorder_replay:chat_on",
+	"the chat switch is in the hotbar")
+local hidden_chat = use("chat_on", watcher)
+check(hidden_chat and hidden_chat:to_string() == "recorder_replay:chat_off",
+	"using it swaps the item for the off state")
+check(session.chat == false, "and turns recorded chat off")
+check(watcher.inventory.main[8] == "recorder_replay:chat_off",
+	"the hotbar shows the off state")
+chats_before = #mock.chats
+sessions.seek(session, 0.1)
+mock.step(0.1)  -- T = 0.2, across the line at 0.2
+check(#mock.chats == chats_before, "with chat off, the recorded line is not shown")
+local shown_chat = use("chat_off", watcher)
+check(shown_chat and shown_chat:to_string() == "recorder_replay:chat_on",
+	"using the off item turns it back on")
+check(session.chat == true and watcher.inventory.main[8] == "recorder_replay:chat_on",
+	"with the hotbar following")
+chats_before = #mock.chats
+sessions.seek(session, 0.1)
+mock.step(0.1)  -- T = 0.2
+check(#mock.chats == chats_before + 1
+	and mock.chats[#mock.chats].message == "[replay] Alice: hello",
+	"and the line is shown again")
+
 -- The switch is read when a session starts.
 mock.settings["replay.chat"] = "false"
 local quiet = add_player("Quiet", {pos = {x = 0, y = 0, z = 0}})

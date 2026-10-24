@@ -40,9 +40,29 @@ controls.LIGHT_ITEMS = {
 	},
 }
 
+-- The chat switch: two items, one for each state; using one asks the session
+-- to switch and puts the other in the same slot. Chat belongs to the session,
+-- so every viewer gets the same setting.
+controls.CHAT_ITEMS = {
+	on = {
+		item = "recorder_replay:chat_on",
+		image = "recorder_replay_chat_on.png",
+		description = "Replay chat: shown (use to hide)",
+	},
+	off = {
+		item = "recorder_replay:chat_off",
+		image = "recorder_replay_chat_off.png",
+		description = "Replay chat: hidden (use to show)",
+	},
+}
+
+local LIGHT_SLOT = #controls.ITEMS + 1
+local CHAT_SLOT = LIGHT_SLOT + 1
+
 -- The controls replace the main list, so they sit in the hotbar. The lighting
 -- switch is offered when the file has something recorded to switch - the light
--- layer, the time of day, or both.
+-- layer, the time of day, or both. The chat switch is always offered: it can
+-- turn the session's chat back on even when replay.chat started it off.
 ---@param player ObjectRef
 ---@param session table?
 function controls.fill(player, session)
@@ -51,12 +71,14 @@ function controls.fill(player, session)
 	local size = inv:get_size("main")
 	local selectable = session and (session.reconstruct.has_light or session.rec.timeofday)
 	local light = selectable and controls.LIGHT_ITEMS[session.light]
-	local light_slot = #controls.ITEMS + 1
+	local chat = session and controls.CHAT_ITEMS[session.chat and "on" or "off"]
 	local list = {}
 	for i = 1, size do
 		local def = controls.ITEMS[i]
-		if i == light_slot and light then
+		if i == LIGHT_SLOT and light then
 			list[i] = ItemStack(light.item)
+		elseif i == CHAT_SLOT and chat then
+			list[i] = ItemStack(chat.item)
 		else
 			list[i] = ItemStack(def and def.item or "")
 		end
@@ -74,10 +96,24 @@ function controls.set_light_item(player, mode)
 	if not def then return end
 	local inv = player:get_inventory()
 	if not inv then return end
-	local slot = #controls.ITEMS + 1
-	if inv:get_size("main") < slot then return end
+	if inv:get_size("main") < LIGHT_SLOT then return end
 	local list = inv:get_list("main")
-	list[slot] = ItemStack(def.item)
+	list[LIGHT_SLOT] = ItemStack(def.item)
+	inv:set_list("main", list)
+end
+
+-- Put the item for the current chat state in the fixed chat slot. The state
+-- belongs to the session, so every participant's hotbar shows it.
+---@param player ObjectRef
+---@param mode string  -- "on" or "off"
+function controls.set_chat_item(player, mode)
+	local def = controls.CHAT_ITEMS[mode]
+	if not def then return end
+	local inv = player:get_inventory()
+	if not inv then return end
+	if inv:get_size("main") < CHAT_SLOT then return end
+	local list = inv:get_list("main")
+	list[CHAT_SLOT] = ItemStack(def.item)
 	inv:set_list("main", list)
 end
 
@@ -96,25 +132,29 @@ function controls.register(handle)
 			end,
 		})
 	end
-	for _, def in pairs(controls.LIGHT_ITEMS) do
-		core.register_craftitem(def.item, {
-			description = def.description,
-			inventory_image = def.image,
-			stack_max = 1,
-			on_drop = function() return ItemStack("") end,
-			on_use = function(itemstack, user)
-				if user and user:is_player() then
-					-- The handler returns the mode now in force; the item for
-					-- that mode goes back into the wielded slot.
-					local mode = handle("light_toggle", user)
-					if mode and controls.LIGHT_ITEMS[mode] then
-						return ItemStack(controls.LIGHT_ITEMS[mode].item)
+	-- Toggle items come in one variant per mode; the handler returns the mode
+	-- now in force and that mode's item goes back into the wielded slot.
+	local function register_toggle(items, kind)
+		for _, def in pairs(items) do
+			core.register_craftitem(def.item, {
+				description = def.description,
+				inventory_image = def.image,
+				stack_max = 1,
+				on_drop = function() return ItemStack("") end,
+				on_use = function(itemstack, user)
+					if user and user:is_player() then
+						local mode = handle(kind, user)
+						if mode and items[mode] then
+							return ItemStack(items[mode].item)
+						end
 					end
-				end
-				return itemstack
-			end,
-		})
+					return itemstack
+				end,
+			})
+		end
 	end
+	register_toggle(controls.LIGHT_ITEMS, "light_toggle")
+	register_toggle(controls.CHAT_ITEMS, "chat_toggle")
 	core.register_on_player_receive_fields(function(player, formname, fields)
 		-- A client can submit any formname it likes, including one it was never
 		-- shown, so the privilege that lets a player use these forms is checked

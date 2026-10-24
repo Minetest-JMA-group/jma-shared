@@ -1209,6 +1209,43 @@ check(watcher.pos.x == 4 and watcher.pos.y == 5, "where they were when they star
 check(watcher.day_night_ratio == nil, "and no day/night override is left behind")
 
 ----------------------------------------------------------------------------
+print("=== a disconnect with the replay still running ===")
+----------------------------------------------------------------------------
+
+-- Someone else keeps the replay going while the watcher is away, so coming
+-- back puts them in it again and the original save waits for the leave.
+watcher.inventory = {main = {"default:pick_stone", "", "default:torch 10", "", "", "", "", ""}}
+watcher.pos = {x = 4, y = 5, z = 6}
+mark(watcher, WATCHER_ARENA)
+watcher.pos = {x = 4, y = 5, z = 6}
+local still_running = sessions.start("fixture", watcher)
+check(still_running ~= nil, "a replay starts with the watcher")
+deferred_form()
+local keeper = add_player("Keeper", {pos = {x = 0, y = 0, z = 0}})
+keeper.inventory = {main = {}}
+check(sessions.join(still_running, keeper), "a second viewer keeps it running")
+mock.fire("register_on_leaveplayer", watcher, false)
+check(sessions.for_player("Watcher") == nil, "the watcher disconnects")
+check(watcher.meta["recorder_replay:stash"] ~= "", "with their things stashed")
+check(not box_is_air(WATCHER_ARENA), "the other viewer keeps the arena up")
+mock.fire("register_on_joinplayer", watcher)
+check(sessions.for_player("Watcher") == still_running,
+	"coming back returns them to the running replay")
+check(watcher.meta["recorder_replay:stash"] ~= "", "and leaves the save for the eventual leave")
+check(near(watcher.pos.x, 103.5) and watcher.pos.y == 15, "on the viewing platform again")
+sessions.leave(still_running, watcher)
+check(sessions.for_player("Watcher") == nil, "leaving the replay")
+check(watcher.meta["recorder_replay:stash"] == "", "consumes the save")
+check(watcher.inventory.main[1] == "default:pick_stone"
+	and watcher.inventory.main[3] == "default:torch 10", "and gives their things back")
+check(watcher.pos.x == 4 and watcher.pos.y == 5 and watcher.pos.z == 6,
+	"where the save put them")
+sessions.leave(still_running, keeper)
+check(box_is_air(WATCHER_ARENA) and flag_count() == 0,
+	"the last viewer ends the session and its arena")
+mock.remove_player("Keeper")
+
+----------------------------------------------------------------------------
 print("=== several arenas at once ===")
 ----------------------------------------------------------------------------
 

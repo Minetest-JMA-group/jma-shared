@@ -62,10 +62,14 @@ hotbar:
 
 A participant's position and main inventory are saved in their own metadata
 when they start watching, and restored when they leave. A disconnect keeps the
-save, so coming back returns them to the replay while it is still running and
-restores them otherwise. A game whose world is not persistent (CTF does this
-through `recorder_common.game_hooks.world_persistent = false`) keeps that job
-for itself: the game's `on_enter`/`on_leave` hooks put the player back.
+save: if the session is still running when they come back they rejoin it, and
+the same save waits for the leave that ends their stay; if it has ended in the
+meantime, the save is restored on the join. A game whose world is not
+persistent (CTF does this through
+`recorder_common.game_hooks.world_persistent = false`) keeps that job for
+itself: nothing is stashed, `on_enter`/`on_leave` do the saving and restoring,
+and the game has to rejoin a participant to a running session itself through
+`recorder_replay.sessions`: `find(id)` and `join(session, player, true)`.
 
 ## The reconstruction
 
@@ -226,11 +230,13 @@ recorder_common.register_game_hooks({
 ```
 
 `before_enter` runs on every entry, including a reconnect into a running
-session, before replay saves the participant's position and inventory. What the
-hook changes there is what replay restores when they leave, when replay keeps
-the stash. `on_enter` runs after the teleport into the arena; `on_leave` after
-replay has put the participant back, so the game's hook has the last word. A
-hook that raises is logged and does not abort the replay.
+session. On a first entry the player is still where the game left them, with
+their own inventory; replay stashes what the hook leaves behind, and restores
+that stash when they leave. On a reconnect the original stash is kept, so the
+game should rely on its own match state rather than on the player's position
+or inventory. `on_enter` runs after the teleport into the arena; `on_leave`
+after replay has put the participant back, so the game's hook has the last
+word. A hook that raises is logged and does not abort the replay.
 
 A registered `arena` provider is the only arena source consulted when the
 starting player has no marks of their own; `replay.arena` is not used next to

@@ -346,15 +346,13 @@ core.register_on_joinplayer(function(player)
 	local stash = recovery.pending(player)
 	if not stash then return end
 	local session = sessions.find(stash.session)
-	recovery.clear(player)
-	if session then
-		local joined = sessions.join(session, player, true)
-		if not joined then
-			recovery.restore(player, stash)
-		end
-	else
-		recovery.restore(player, stash)
+	if session and sessions.join(session, player, true) then
+		-- Back in the running replay: the save waits for the leave that
+		-- eventually ends their stay.
+		return
 	end
+	recovery.clear(player)
+	recovery.restore(player, stash)
 end)
 
 core.register_on_leaveplayer(function(player)

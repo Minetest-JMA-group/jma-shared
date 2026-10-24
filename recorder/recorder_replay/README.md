@@ -67,9 +67,12 @@ the same save waits for the leave that ends their stay; if it has ended in the
 meantime, the save is restored on the join. A game whose world is not
 persistent (CTF does this through
 `recorder_common.game_hooks.world_persistent = false`) keeps that job for
-itself: nothing is stashed, `on_enter`/`on_leave` do the saving and restoring,
-and the game has to rejoin a participant to a running session itself through
+itself: nothing is stashed, `before_enter` can save the player's position and
+inventory before replay fills the hotbar, and `on_leave` puts them back. The
+game also has to rejoin a participant to a running session itself through
 `recorder_replay.sessions`: `find(id)` and `join(session, player, true)`.
+`on_leave` runs only while the player is online; a disconnect is the game's
+own `on_leaveplayer` business.
 
 ## The reconstruction
 
@@ -221,8 +224,8 @@ recorder_common.register_game_hooks({
 	world_persistent = false,          -- its world is rebuilt at boot; it owns inventories
 	before_enter = function(player, session)
 		-- Still where the game left them, with their own inventory: take the
-		-- player out of a running match here. Replay stashes what this leaves
-		-- behind, fills the hotbar and then teleports.
+		-- player out of a running match here (and save what they had, on a
+		-- non-persistent world). Replay fills the hotbar and then teleports.
 	end,
 	on_enter = function(player, session) ... end,  -- after the move into the arena
 	on_leave = function(player, session) ... end,  -- after replay's own restore

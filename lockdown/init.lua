@@ -196,8 +196,10 @@ core.register_chatcommand("regcooldown", {
 			end
 			lockdown.set_reg_cooldown(time)
 			if time > 0 then
-				core.log("action", "[lockdown] Player " .. name .. " set reg_cooldown to " .. time .. "s")
-				return true, "Registration cooldown set to " .. time .. " seconds"
+				local time_str = algorithms.time_to_string(time)
+				core.log("action", "[lockdown] Player " .. name .. " set reg_cooldown to " .. time_str)
+				return true,
+				"Registration cooldown set to " .. time_str
 			else
 				core.log("action", "[lockdown] Player " .. name .. " disabled reg_cooldown")
 				return true, "Registration cooldown disabled"
@@ -205,7 +207,7 @@ core.register_chatcommand("regcooldown", {
 		elseif action == "get" then
 			local cd = reg_cooldown
 			if cd > 0 then
-				return true, "Registration cooldown is " .. algorithms.time_to_string(cd) .. " seconds"
+				return true, "Registration cooldown is " .. algorithms.time_to_string(cd)
 			else
 				return true, "Registration cooldown is disabled"
 			end

@@ -75,7 +75,7 @@ local function mute_player(name)
 	local ok = simplemod.mute_ip(
 		name,
 		"Antispam",
-		"Automatically muted by system, reason: Spamming. Please notify the server staff if you have been falsely muted.",
+		"Spamming (Auto-mute)",
 		MUTE_DURATION
 	)
 	if ok then

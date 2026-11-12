@@ -24,21 +24,19 @@ os.execute("mkdir -p " .. world)
 local sqlite = require("lsqlite3")
 
 local logs = {}
-core = {
-	get_current_modname = function() return "recorder_capture" end,
-	get_modpath = function(name)
-		if name == "recorder_common" then return commonpath end
-		return modpath
-	end,
-	get_worldpath = function() return world end,
-	log = function(level, msg)
-		if type(level) == "string" and msg ~= nil then
-			logs[#logs + 1] = level .. ": " .. tostring(msg)
-		else
-			logs[#logs + 1] = tostring(level)
-		end
-	end,
-}
+local mocklib = dofile(commonpath .. "/tests/mocklib.lua")
+local mock = mocklib.new({
+	modpaths = {recorder_common = commonpath, recorder_capture = modpath},
+	world = world,
+})
+core = mock.core
+core.log = function(level, msg)
+	if type(level) == "string" and msg ~= nil then
+		logs[#logs + 1] = level .. ": " .. tostring(msg)
+	else
+		logs[#logs + 1] = tostring(level)
+	end
+end
 
 -- The pack's shared half loads before the mod that depends on it.
 dofile(commonpath .. "/init.lua")

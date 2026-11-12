@@ -122,7 +122,11 @@ recorder.stop(id)                           -- nil, or a message
 
 ## Settings
 
-Settings are read when a recording starts, so a change applies to the next one.
+Settings use persistent world overrides over startup configuration defaults;
+see [World settings](../README.md#world-settings) for commands and reset behavior.
+Effective capture settings are copied when a recording starts, so a change
+applies to the next one. Recording retention is documented in the
+[modpack README](../README.md#recording-retention).
 
 | Setting | Default | Meaning |
 | --- | --- | --- |

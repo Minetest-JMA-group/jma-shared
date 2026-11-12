@@ -1,6 +1,8 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
+local settings = recorder_common.settings
+
 -- recorder – write down what happens on the server, in order, into SQLite.
 --
 -- One recording is one SQLite file holding the actions players perform, the
@@ -17,7 +19,6 @@
 local FLUSH_DEFAULT = 2.0         -- seconds of server time between commits
 local MAX_BUFFERED_DEFAULT = 20000
 local MAX_FAILURES = 10           -- failed commits in a row before giving up
-local MAX_RECORDINGS_DEFAULT = 4  -- 0 = no limit
 -- Everything the recorder writes about the recording itself lives under this
 -- prefix, so mods cannot overwrite it by accident and the recorder knows which
 -- keys are its own.
@@ -160,14 +161,6 @@ local CONTROL_BIT = { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512 }
 
 local function log_error(msg)
 	core.log("error", "[recorder] " .. msg)
-end
-
--- A boolean setting with a default. get_bool() on its own reads an unset
--- setting as false, and the features below default to on.
-local function enabled_setting(name, default)
-	local raw = core.settings:get(name)
-	if raw == nil or raw == "" then return default end
-	return core.settings:get_bool(name)
 end
 
 -- One report per kind of trouble per recording: a callback that fires every
@@ -1090,7 +1083,7 @@ end
 ---@param region_arg table  -- {pos1 =, pos2 =}; every recording names its region
 ---@return string|nil, string?  -- the recording's id, or an error message
 recorder.start = function(record_name, region_arg)
-	local limit = tonumber(core.settings:get("recorder.max_recordings")) or MAX_RECORDINGS_DEFAULT
+	local limit = tonumber(settings:get("recorder.max_recordings"))
 	if limit > 0 then
 		local running = 0
 		for _ in pairs(recordings) do running = running + 1 end
@@ -1122,19 +1115,19 @@ recorder.start = function(record_name, region_arg)
 		return nil, err
 	end
 
-	-- Read here rather than at load time, so that a setting changed between two
-	-- recordings applies to the next one.
-	rec.flush_interval = tonumber(core.settings:get("recorder.flush_interval")) or FLUSH_DEFAULT
-	rec.max_buffered = tonumber(core.settings:get("recorder.max_buffered")) or MAX_BUFFERED_DEFAULT
-	rec.max_duration = tonumber(core.settings:get("recorder.max_duration")) or 0
-	rec.max_size = (tonumber(core.settings:get("recorder.max_size_mb")) or 0) * 1024 * 1024
-	rec.metadata_enabled = enabled_setting("recorder.metadata", true)
+	-- Copy the effective world settings so command changes apply to new
+	-- recordings without changing one already in progress.
+	rec.flush_interval = tonumber(settings:get("recorder.flush_interval"))
+	rec.max_buffered = tonumber(settings:get("recorder.max_buffered"))
+	rec.max_duration = tonumber(settings:get("recorder.max_duration"))
+	rec.max_size = tonumber(settings:get("recorder.max_size_mb")) * 1024 * 1024
+	rec.metadata_enabled = settings:get_bool("recorder.metadata")
 	rec.metadata_known = {}
 	rec.next_metadata_poll = METADATA_INTERVAL
-	rec.light_enabled = enabled_setting("recorder.light", true)
+	rec.light_enabled = settings:get_bool("recorder.light")
 	rec.known_light = nil
 	rec.disabled = {}
-	for type_name in (core.settings:get("recorder.disabled_events") or ""):gmatch("[^,%s]+") do
+	for type_name in settings:get("recorder.disabled_events"):gmatch("[^,%s]+") do
 		-- What the recording needs in order to explain itself - where it
 		-- starts and stops, and where a gap is - is not a matter of taste.
 		if MANDATORY_EVENTS[type_name] then
@@ -1146,14 +1139,14 @@ recorder.start = function(record_name, region_arg)
 	-- Particle effects can produce a row per step (a rocket's smoke, say), so
 	-- one switch turns off all three types; disabled_events can still name
 	-- them one at a time.
-	if not enabled_setting("recorder.particles", true) then
+	if not settings:get_bool("recorder.particles") then
 		rec.disabled.particle = true
 		rec.disabled.particlespawner = true
 		rec.disabled.particlespawner_delete = true
 	end
 	-- Chat in the recording: the final line clients saw. One switch keeps it
 	-- out of a file; disabled_events can also name it.
-	if not enabled_setting("recorder.chat", true) then
+	if not settings:get_bool("recorder.chat") then
 		rec.disabled.chat = true
 	end
 
@@ -1174,18 +1167,15 @@ recorder.start = function(record_name, region_arg)
 	rec.sampled = {}
 	rec.known_ids, rec.known_param2 = nil, nil
 	rec.pending_blocks = {}
-	rec.snapshot_budget = math.max(1,
-		math.floor(tonumber(core.settings:get("recorder.snapshot_budget")) or 20000))
+	rec.snapshot_budget = tonumber(settings:get("recorder.snapshot_budget"))
 	-- Deflate level: 9 is the smallest file, 1 the fastest. The snapshot is
 	-- compressed in one step, and at level 9 a large region holds the step for
 	-- seconds; 6 is the middle the recorder starts from.
-	rec.compression_level = math.max(1, math.min(9,
-		math.floor(tonumber(core.settings:get("recorder.compression_level")) or 6)))
+	rec.compression_level = tonumber(settings:get("recorder.compression_level"))
 	-- Mapblock entries diffed per step while catching up after a snapshot; 0
 	-- processes everything at once, which is what used to make the first
 	-- recording step pause for seconds.
-	rec.diff_budget = math.max(0,
-		math.floor(tonumber(core.settings:get("recorder.diff_budget")) or 8))
+	rec.diff_budget = tonumber(settings:get("recorder.diff_budget"))
 
 	local snap, snap_err = snapshot_module.new(region.pos1, region.pos2, rec.light_enabled,
 		rec.compression_level)
@@ -1267,6 +1257,7 @@ local function stop(rec, reason)
 		log_error(string.format("recording %s could not be written out completely: %s", name, tostring(err)))
 	end
 	recordings[rec.id] = nil
+	recorder_common.retention.prune()
 	rec.name, rec.path = nil, nil
 	rec.prev, rec.written, rec.wield, rec.joined = {}, {}, {}, {}
 	rec.anim = {}
@@ -2206,12 +2197,13 @@ end
 core.register_chatcommand("recorder", {
 	description = "Control the action recorder",
 	params = "[start [name] [x1,y1,z1 x2,y2,z2] | stop [id] | status [id] | pos1 | pos2 | unset | " ..
-		"meta [id] <key> <value>]",
+		"meta [id] <key> <value> | settings [key [value] | reset key]]",
 	privs = { server = true },
 	---@param name string
 	---@param params string
 	func = function(name, params)
 		local command, rest = params:match("^(%S+)%s*(.-)%s*$")
+		if command == "settings" then return settings.command(rest, "recorder.") end
 		if command == nil or command == "" or command == "status" then
 			for _, line in ipairs(status_lines(rest ~= "" and rest or nil)) do
 				core.chat_send_player(name, line)
@@ -2288,6 +2280,6 @@ core.register_chatcommand("recorder", {
 			return true, string.format("Recorded metadata %s.", key)
 		end
 		return false, "Usage: /recorder [start [name] [x1,y1,z1 x2,y2,z2] | stop [id] | " ..
-			"status [id] | pos1 | pos2 | unset | meta [id] <key> <value>]"
+			"status [id] | pos1 | pos2 | unset | meta [id] <key> <value> | settings [key [value] | reset key]]"
 	end,
 })

@@ -26,4 +26,6 @@ run "test_snapshot (the snapshot body codec)" test_snapshot.lua
 run "test_region (the region arithmetic)" test_region.lua
 run "test_light (the light layer codec)" test_light.lua
 run "test_common (paths, names, game hooks, read-only access)" test_common.lua
+run "test_settings (persistent world overrides)" test_settings.lua
+run "test_retention (recording cleanup)" test_retention.lua
 echo "ALL TESTS PASSED"

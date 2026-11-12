@@ -19,7 +19,15 @@ os.execute("mkdir -p " .. work)
 
 local settings = {}
 local world = work .. "/world"
+local saved = {}
 core = {
+	get_mod_storage = function() return {
+		get_string = function(_, key) return saved[key] or "" end,
+		set_string = function(_, key, value) saved[key] = value end,
+	} end,
+	register_chatcommand = function() end,
+	register_globalstep = function() end,
+	log = function() end,
 	get_modpath = function(name)
 		if name == "recorder_common" then return modpath end
 	end,
@@ -61,11 +69,11 @@ check(common.sanitize_name("ctf match 1!") == "ctf_match_1_", "spaces and punctu
 print("=== where recordings live ===")
 ----------------------------------------------------------------------------
 check(common.recordings_dir() == world .. "/recordings", "the default is world/recordings")
-settings["recorder.directory"] = "recordings"
+assert(common.settings:set("recorder.directory", "recordings"))
 check(common.recordings_dir() == world .. "/recordings", "a relative directory is taken from the world")
-settings["recorder.directory"] = "/var/lib/recordings"
+assert(common.settings:set("recorder.directory", "/var/lib/recordings"))
 check(common.recordings_dir() == "/var/lib/recordings", "an absolute directory is used as it is")
-settings["recorder.directory"] = nil
+assert(common.settings:reset("recorder.directory"))
 
 ----------------------------------------------------------------------------
 print("=== unique file names ===")

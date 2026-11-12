@@ -1,6 +1,8 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
+local settings = recorder_common.settings
+
 -- recorder – play a recording back. A session reads one recording file, shows
 -- its players as ghosts to the people watching, and gives them a remote control
 -- for the clock. Anything the game has to know about - the arena, what happens
@@ -417,7 +419,7 @@ end
 ---@return table[], string
 local function available_recordings()
 	local files, dir = all_recordings()
-	if core.settings:get_bool("replay.allow_unfinished") then return files, dir end
+	if settings:get_bool("replay.allow_unfinished") then return files, dir end
 	if type(recorder) ~= "table" or not recorder.list then return files, dir end
 	local active = {}
 	for _, entry in ipairs(recorder.list()) do
@@ -432,12 +434,18 @@ end
 
 core.register_chatcommand("replay", {
 	description = "Play a recording back",
-	params = "[list | join [id] | leave | end <id> | status | pos1 | pos2 | unset]",
+	params = "[list | join [id] | leave | end <id> | status | pos1 | pos2 | unset | settings [key [value] | reset key]]",
 	privs = {replay = true},
 	---@param name string
 	---@param params string
 	func = function(name, params)
 		local command, rest = params:match("^(%S+)%s*(.-)%s*$")
+		if command == "settings" then
+			if not core.check_player_privs(name, {server = true}) then
+				return false, "The server privilege is required to manage recorder settings."
+			end
+			return settings.command(rest, "replay.")
+		end
 		local player = core.get_player_by_name(name)
 		if not player then return false, "no player" end
 

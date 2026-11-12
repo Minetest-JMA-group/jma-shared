@@ -17,6 +17,7 @@ local commonpath = modpath:gsub("/recorder_replay$", "/recorder_common")
 local mocklib = dofile(commonpath .. "/tests/mocklib.lua")
 local mock = mocklib.new({modpath = modpath})
 core = mock.core
+recorder_common = {settings = dofile(commonpath .. "/settings.lua")}
 
 mcl_player = {
 	registered_player_models = {
@@ -72,5 +73,26 @@ check(pose and pose.position.vec.y == 5.3, "a plain item gets the default pose a
 
 ghost.wield(obj, "")
 check(obj.wield_object == nil, "an empty hand takes the item away")
+
+-- New sessions take new appearance settings; existing sessions, including
+-- ghosts created after a seek, keep the settings they started with.
+local previous = ghost.configuration()
+assert(recorder_common.settings:set("replay.wield_pos", "1,2,3"))
+assert(recorder_common.settings:set("replay.wield_scale", "0.5,0.5,0.5"))
+local next_config = ghost.configuration()
+local newer = ghost.spawn("New", {x = 0, y = 0, z = 0}, nil, {Watcher = true}, next_config)
+ghost.wield(newer, "mcl_core:stone")
+check(newer.wield_object.attached.position.y == 2, "new sessions use changed wield offsets")
+check(newer.wield_object.properties.visual_size.x == 0.5, "new sessions use changed wield scale")
+local recreated = ghost.spawn("Old", {x = 0, y = 0, z = 0}, nil, {Watcher = true}, previous)
+ghost.wield(recreated, "mcl_core:stone")
+check(recreated.wield_object.attached.position.y == 0, "recreated ghosts retain their session offsets")
+check(recreated.wield_object.properties.visual_size.x == 0.21, "recreated ghosts retain their session scale")
+assert(recorder_common.settings:set("replay.wield_item", "false"))
+local disabled = ghost.spawn("Disabled", {x = 0, y = 0, z = 0}, nil, {Watcher = true})
+ghost.wield(disabled, "mcl_core:stone")
+check(disabled.wield_object == nil, "new sessions can disable held items")
+ghost.wield(recreated, "mcl_tools:pick_iron")
+check(recreated.wield_object ~= nil, "existing sessions retain enabled held items")
 
 print(("%d checks passed"):format(checks))

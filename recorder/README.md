@@ -33,3 +33,75 @@ name, so replaying it needs the recording, not the game's map files.
 
 runs all three suites; each mod also has its own `tests/run_tests.sh`. The
 suites drive the real mod code against a mocked engine and a real SQLite file.
+
+## World settings
+
+All capture, replay, and retention settings use the same precedence:
+
+1. A persistent override in this world's `recorder_common` mod storage.
+2. A default from `minetest.conf`, cached when `recorder_common` loads.
+3. The built-in default listed in the capture/replay documentation.
+
+The effective settings are kept in memory. The recorder does not read
+`core.settings` after loading; `/set` changes do not affect it during that run.
+Restart to pick up edited configuration defaults. An existing world override
+continues to take precedence until reset.
+
+The following commands require the `server` privilege:
+
+```text
+/recorder_settings
+/recorder_settings recorder.max_size_mb 500
+/recorder_settings replay.chat false
+/recorder_settings reset recorder.max_size_mb
+```
+
+With no arguments, the command lists effective values, their sources, and when
+changes take effect. A key alone reads it; a key and value saves an override;
+`reset <key>` removes the override and restores the default cached at startup.
+Use `""` as a value to save an explicit empty string (for example, to restore
+automatic model selection despite a configured model default).
+
+`/recorder settings ...` is an alias with `recorder.` as the default key prefix;
+`/replay settings ...` defaults to `replay.`. Full keys work through every alias.
+The standalone command also works when only the shared mod is enabled.
+
+Capture options are copied into each new recording. Replay appearance and chat
+options are copied into each new session, including ghosts created later by a
+seek or recorded join. Running recordings and replays keep those options.
+Concurrency limits apply to subsequent start attempts. Directory changes apply
+to subsequent directory lookups; existing captures and replays keep their paths.
+`replay.allow_unfinished` applies to subsequent lists and replay start attempts.
+
+## Recording retention
+
+Retention is disabled by default. Enable any combination of these settings:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `recorder.retention_count` | `0` | Maximum number of saved recordings. |
+| `recorder.retention_size_mb` | `0` | Combined size budget in MiB, including SQLite `-wal` and `-shm` sidecars. |
+| `recorder.retention_age` | `0` | Maximum age since recording start, in seconds or with an `s`, `m`, `h`, `d`, or `w` suffix. |
+
+`0` disables an individual limit. For example:
+
+```text
+/recorder settings retention_age 7d
+/recorder settings retention_size_mb 4096
+/recorder settings retention_count 100
+```
+
+Cleanup runs at shared-mod load, after a recording stops, and every 60 seconds.
+Changes take effect on the next cleanup. It deletes whole recordings, oldest
+first by their UTC start timestamp, until all enabled limits are met. Recordings
+currently being captured or watched are protected, but count toward the budget,
+so limits can temporarily be exceeded. Once released, they become eligible on
+the next cleanup. A single finished recording exceeding the size budget may be
+deleted as soon as it stops.
+
+Only the current recording directory is managed. A file must have the recorder's
+SQLite application identity and its generated timestamped filename to qualify.
+Renamed recordings without that filename format and unrelated files are left
+alone. Sidecars are removed together with their recording; deletion failures are
+logged. Automatic deletion does not ask for confirmation once a retention limit
+has been enabled.

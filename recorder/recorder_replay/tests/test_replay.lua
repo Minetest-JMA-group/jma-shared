@@ -33,6 +33,8 @@ local mock = mocklib.new({
 core = mock.core
 algorithms = {require = function(name) if name == "lsqlite3" then return sqlite end end}
 dofile(commonpath .. "/init.lua")
+core.settings.get = function() error("core.settings read after recorder_common boot") end
+core.settings.get_bool = core.settings.get
 local common = recorder_common
 local region = common.region
 
@@ -214,6 +216,10 @@ local function check(condition, message)
 	print("  ok - " .. message)
 end
 
+local settings_allowed = mock.chatcommands.replay.func("NoServerPrivilege", "settings chat false")
+check(not settings_allowed and recorder_common.settings:get_bool("replay.chat"),
+	"the replay alias refuses settings changes without server privilege")
+
 -- The cursor queries ask the tick indexes for the last row at or before a
 -- moment instead of scanning for MAX(id). On a file whose ids follow its
 -- ticks the answer is the same, which is what these compare against.
@@ -393,15 +399,13 @@ mock.chatcommands.replay.func("Marker", "unset")
 check(not arena.has_marks("Marker"), "/replay unset drops them")
 
 -- The setting is the fallback of last resort.
-mock.settings["replay.arena"] = "10,20,30,17,24,37"
+assert(recorder_common.settings:set("replay.arena", "10,20,30,17,24,37"))
 resolved, err = arena.resolve("Setting", RECORDED)
 check(resolved and resolved.pos1.x == 10 and resolved.pos2.z == 37,
 	"replay.arena is used when there is no provider: " .. tostring(err))
-mock.settings["replay.arena"] = "10,20,30"
-resolved, err = arena.resolve("Setting", RECORDED)
-check(resolved == nil and tostring(err):find("six numbers", 1, true) ~= nil,
-	"a malformed setting is refused")
-mock.settings["replay.arena"] = "10,20,30,16,24,37"
+local accepted = recorder_common.settings:set("replay.arena", "10,20,30")
+check(not accepted, "a malformed arena setting is refused before changing the configuration")
+assert(recorder_common.settings:set("replay.arena", "10,20,30,16,24,37"))
 resolved, err = arena.resolve("Setting", RECORDED)
 check(resolved == nil and tostring(err):find("too small", 1, true) ~= nil,
 	"a configured arena that is too small is refused")
@@ -414,7 +418,7 @@ recorder_common.game_hooks.arena = function(size, taken)
 	seen_size, seen_taken = size, taken
 	return provider_box.pos1, provider_box.pos2
 end
-mock.settings["replay.arena"] = "10,20,30,17,24,37"
+assert(recorder_common.settings:set("replay.arena", "10,20,30,17,24,37"))
 resolved, err = arena.resolve("Pilot", RECORDED)
 check(resolved and resolved.pos1.x == 400,
 	"a provider is used instead of the setting: " .. tostring(err))
@@ -441,7 +445,7 @@ resolved = arena.resolve("Both", RECORDED)
 check(resolved and resolved.pos1.x == 50, "a player's own marks win over the provider")
 arena.clear_marks("Both")
 recorder_common.game_hooks.arena = nil
-mock.settings["replay.arena"] = nil
+assert(recorder_common.settings:reset("replay.arena"))
 
 ----------------------------------------------------------------------------
 print("=== starting a replay in an arena ===")
@@ -573,11 +577,11 @@ local available, why = arena.available("Planner")
 check(available == false and tostring(why):find("in use", 1, true) ~= nil,
 	"a marked arena over a running one is refused before the chooser: " .. tostring(why))
 arena.clear_marks("Planner")
-mock.settings["replay.arena"] = "100,10,100,107,14,107"
+assert(recorder_common.settings:set("replay.arena", "100,10,100,107,14,107"))
 available, why = arena.available("Planner")
 check(available == false and tostring(why):find("in use", 1, true) ~= nil,
 	"a configured arena that is running is refused before the chooser")
-mock.settings["replay.arena"] = nil
+assert(recorder_common.settings:reset("replay.arena"))
 
 local entries = flag_entries()
 check(entries[session.id] ~= nil, "the arena is remembered in mod storage")
@@ -905,7 +909,7 @@ check(#mock.chats == chats_before + 1
 	"and the line is shown again")
 
 -- The switch is read when a session starts.
-mock.settings["replay.chat"] = "false"
+assert(recorder_common.settings:set("replay.chat", "false"))
 local quiet = add_player("Quiet", {pos = {x = 0, y = 0, z = 0}})
 quiet.inventory = {main = {}}
 mark(quiet, box(1100, 110, 1100, 1107, 114, 1107))
@@ -924,7 +928,7 @@ end
 check(quiet_chats == 0, "replay.chat = false keeps recorded chat out")
 recorder_replay.end_session(quiet_session.id, "test")
 session.paused = was_paused
-mock.settings["replay.chat"] = nil
+assert(recorder_common.settings:reset("replay.chat"))
 
 ----------------------------------------------------------------------------
 print("=== the remote control ===")
@@ -1645,7 +1649,7 @@ check(live_session == nil and tostring(live_err):find("still being made", 1, tru
 
 -- replay.allow_unfinished restores the old behaviour: offer it, and let it be
 -- watched up to the moment the replay started.
-mock.settings["replay.allow_unfinished"] = "true"
+assert(recorder_common.settings:set("replay.allow_unfinished", "true"))
 cmd.func("Planner", "")
 deferred_form()
 check(planner.formspec and planner.formspec.formspec:find("fixture-", 1, true) ~= nil,
@@ -1654,6 +1658,6 @@ live_session, live_err = sessions.start(fixture_path, planner)
 check(live_session ~= nil, "and a session can start on one: " .. tostring(live_err))
 recorder_replay.end_session(live_session.id, "test")
 recorder = nil
-mock.settings["replay.allow_unfinished"] = nil
+assert(recorder_common.settings:reset("replay.allow_unfinished"))
 
 print(("\n%d checks passed"):format(checks))

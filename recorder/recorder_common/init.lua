@@ -7,6 +7,7 @@
 -- loads on any game that has the pack.
 
 recorder_common = {}
+recorder_common.settings = dofile(core.get_modpath("recorder_common") .. "/settings.lua")
 
 -- What schema.sql writes into every recording, and what a reader checks before
 -- trusting one. A recording says this itself, so it can be recognised without
@@ -70,7 +71,7 @@ recorder_common.file_exists = file_exists
 -- of it.
 ---@return string
 function recorder_common.recordings_dir()
-	local dir = core.settings:get("recorder.directory")
+	local dir = recorder_common.settings:get("recorder.directory")
 	if not dir or dir == "" then
 		return core.get_worldpath() .. "/recordings"
 	end
@@ -173,3 +174,5 @@ end
 recorder_common.snapshot = dofile(core.get_modpath("recorder_common") .. "/snapshot.lua")
 recorder_common.region = dofile(core.get_modpath("recorder_common") .. "/region.lua")
 recorder_common.light = dofile(core.get_modpath("recorder_common") .. "/light.lua")
+
+recorder_common.retention = dofile(core.get_modpath("recorder_common") .. "/retention.lua")

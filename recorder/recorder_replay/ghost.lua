@@ -1,6 +1,8 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
+local settings = recorder_common.settings
+
 -- The recorded players as ghosts: one Lua entity each, wearing the game's
 -- player model when there is one, driven entirely by the recording. The model
 -- comes from player_api or mcl_player - their registries are public - but the
@@ -27,20 +29,12 @@ local PLAYER_BOX = {-0.3, 0.0, -0.3, 0.3, 1.8, 0.3}
 -- puts it on the arm, while the mcl_player rig has a Wield_Item bone that the
 -- game poses at the hand. Each family has its own defaults; a setting
 -- overrides them for either.
-local function vector_setting(name, default)
-	local raw = core.settings:get(name)
-	if not raw then return default end
-	local x, y, z = raw:match("^%s*(%-?[%d%.]+)%s*,%s*(%-?[%d%.]+)%s*,%s*(%-?[%d%.]+)%s*$")
-	if not x then return default end
+local function vector_setting(config, name)
+	local raw = config[name]
+	if not raw or raw == "" then return nil end
+	local x, y, z = raw:match("^([^,]+),([^,]+),([^,]+)$")
 	return {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
 end
-
-local WIELD_ENABLED = core.settings:get_bool("replay.wield_item", true)
-local WIELD_BONE = core.settings:get("replay.wield_bone")
-if not WIELD_BONE or WIELD_BONE == "" then WIELD_BONE = nil end
-local WIELD_POSITION = vector_setting("replay.wield_pos", nil)
-local WIELD_ROTATION = vector_setting("replay.wield_rot", nil)
-local WIELD_SCALE = vector_setting("replay.wield_scale", nil)
 
 local WIELD_DEFAULTS = {
 	player_api = {
@@ -77,16 +71,12 @@ local function mcl_pose(item)
 	return "default", MCL_POSES.default
 end
 
-local resolved = false
-local model_name, model_def, model_family
-
 -- The game's player model, if it has one. Looked up lazily: a game's armour or
 -- skin mods may register their model after this mod has loaded. The registry
 -- it came from also says how that rig carries a held item.
-local function resolve_model()
-	if resolved then return model_name, model_def, model_family end
-	resolved = true
-	local wanted = core.settings:get("replay.model")
+local function resolve_model(config)
+	local model_name, model_def, model_family
+	local wanted = config["replay.model"]
 	local registry
 	if player_api and player_api.registered_models then
 		registry = player_api.registered_models
@@ -112,6 +102,14 @@ local function resolve_model()
 	end
 	model_def = model_name and registry[model_name]
 	return model_name, model_def, model_family
+end
+
+-- Resolve the model once per session, after game model registries are ready.
+-- The session keeps this definition even if an administrator changes defaults.
+function ghost.configuration()
+	local config = settings:snapshot("replay.")
+	config.model_name, config.model_def, config.model_family = resolve_model(config)
+	return config
 end
 
 core.register_entity("recorder_replay:ghost", {
@@ -171,10 +169,11 @@ core.register_entity("recorder_replay:wield_item", {
 ---@param textures table?  -- the recorded textures, when the recording has them
 ---@param observers table
 ---@return ObjectRef|nil
-function ghost.spawn(name, pos, textures, observers)
+function ghost.spawn(name, pos, textures, observers, config)
+	config = config or ghost.configuration()
 	local obj = core.add_entity(pos, "recorder_replay:ghost")
 	if not obj then return nil end
-	local model, def, family = resolve_model()
+	local model, def, family = config.model_name, config.model_def, config.model_family
 	if model and def then
 		obj:set_properties({
 			visual = "mesh",
@@ -206,6 +205,8 @@ function ghost.spawn(name, pos, textures, observers)
 		ent.observers = observers
 		ent.has_model = (model and def) ~= nil
 		ent.model_family = family
+		ent.model_def = def
+		ent.config = config
 	end
 	return obj
 end
@@ -238,16 +239,18 @@ end
 ---@param itemstring string?
 ---@return boolean
 function ghost.wield(obj, itemstring)
-	if not obj or not WIELD_ENABLED or not obj:is_valid() then return false end
+	if not obj or not obj:is_valid() then return false end
 	local ent = obj:get_luaentity()
 	if not ent then return false end
 	-- A sprite fallback has no hand bone to attach to.
 	if not ent.has_model then return true end
+	local config = ent.config
+	if config["replay.wield_item"] ~= "true" then return false end
 	local defaults = WIELD_DEFAULTS[ent.model_family] or WIELD_DEFAULTS.player_api
-	local bone = WIELD_BONE or defaults.bone
-	local position = WIELD_POSITION or defaults.position
-	local rotation = WIELD_ROTATION or defaults.rotation
-	local scale = WIELD_SCALE or defaults.scale
+	local bone = (config["replay.wield_bone"] ~= "" and config["replay.wield_bone"]) or defaults.bone
+	local position = vector_setting(config, "replay.wield_pos") or defaults.position
+	local rotation = vector_setting(config, "replay.wield_rot") or defaults.rotation
+	local scale = vector_setting(config, "replay.wield_scale") or defaults.scale
 	local item = itemstring or ""
 	local child = ent.wield_object
 	-- get_pos() answers nothing for an object the engine has dropped; that
@@ -335,7 +338,8 @@ function ghost.update(obj, row, offset, keep_pose)
 	end
 	obj:move_to(pos, true)
 	obj:set_yaw(row.yaw)
-	local _, def = resolve_model()
+	local ent = obj:get_luaentity()
+	local def = ent and ent.model_def
 	if not def then return true end
 	if obj.set_bone_override then
 		-- The head bone follows the recorded pitch (radians, relative to the

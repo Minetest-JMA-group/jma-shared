@@ -196,6 +196,10 @@ including the one being written.
 
 ## Settings
 
+Settings use persistent world overrides over startup configuration defaults;
+see [World settings](../README.md#world-settings) for commands and reset behavior.
+Appearance changes apply to new replay sessions.
+
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `replay.arena` | empty | The fallback arena, `x1,y1,z1,x2,y2,z2`. Used only when the game registers no arena provider; one fixed box can serve one replay at a time. |
@@ -203,7 +207,7 @@ including the one being written.
 | `replay.max_sessions` | `4` | How many replays may run at once; `0` is no limit. |
 | `replay.model` | empty | The model name for ghost bodies, overriding the one picked from the game's registry. |
 | `replay.chat` | `true` | Show the recording's `chat` lines to the participants as chat. Read when a session starts; the chat control item toggles it while watching. |
-| `replay.wield_item` | `true` | Draw the item a ghost holds. The `wield_*` rows give `player_api` / `mcl_player` defaults; they are read when the mod loads. |
+| `replay.wield_item` | `true` | Draw the item a ghost holds. The `wield_*` rows give `player_api` / `mcl_player` defaults; they are copied when a replay session starts. |
 | `replay.wield_bone` | `Arm_Right` / `Wield_Item` | The bone the held item attaches to. |
 | `replay.wield_pos` | `0,5.5,3` / `0,0,0` | Where the item sits in that bone's space. |
 | `replay.wield_rot` | `-90,225,90` / `0,0,0` | The item's rotation at the bone, in degrees. |

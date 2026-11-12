@@ -1,6 +1,8 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
+local settings = recorder_common.settings
+
 -- The box a replay is built in: an invisible shell with the recording's region
 -- reconstructed inside it. Where the box is depends on the session, so the
 -- choice is made here, from the three sources a server can have - the player's
@@ -141,7 +143,7 @@ end
 -- x1,y1,z1,x2,y2,z2; spaces around the commas are allowed, nothing else is.
 ---@return table|nil, string?
 local function setting_box()
-	local raw = core.settings:get("replay.arena")
+	local raw = settings:get("replay.arena")
 	if not raw or raw == "" then return nil end
 	local numbers = {}
 	for token in raw:gmatch("[^,%s]+") do

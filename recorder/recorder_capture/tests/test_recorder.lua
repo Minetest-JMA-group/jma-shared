@@ -31,6 +31,8 @@ local mock = mocklib.new({
 core = mock.core
 -- The pack's shared half loads before the mod that depends on it.
 dofile(commonpath .. "/init.lua")
+core.settings.get = function() error("core.settings read after recorder_common boot") end
+core.settings.get_bool = core.settings.get
 algorithms = {
 	require = function(name)
 		if name == "lsqlite3" then return sqlite end
@@ -45,7 +47,7 @@ local TEST_REGION = {
 	pos1 = {x = -10, y = -5, z = -10},
 	pos2 = {x = 125, y = 12, z = 12},
 }
-mock.settings["recorder.snapshot_budget"] = "1000000"
+assert(recorder_common.settings:set("recorder.snapshot_budget", "1000000"))
 
 local checks = 0
 local function check(condition, message)
@@ -483,7 +485,7 @@ print("=== a recording of nothing but movement ===")
 -- The steady state: players walking and nobody doing anything, so every commit
 -- is a batch of movement rows with no event beside it. Such a batch is the
 -- ordinary shape, not a special case.
-mock.settings["recorder.flush_interval"] = "0.2"
+assert(recorder_common.settings:set("recorder.flush_interval", "0.2"))
 check(start_recording("walking") == nil, "the recording starts")
 local walking_path = recorder.get_recording_path()
 for i = 1, 20 do
@@ -548,7 +550,7 @@ print("=== when a player's row cannot be written ===")
 
 -- The database is busy for a moment while somebody joins. The join must not
 -- raise, and the player must not be struck off the recording for good.
-mock.settings["recorder.flush_interval"] = "0.01"
+assert(recorder_common.settings:set("recorder.flush_interval", "0.01"))
 check(start_recording("unwritable") == nil, "the recording starts")
 local unwritable_path = recorder.get_recording_path()
 local blocker = sqlite.open(unwritable_path)
@@ -572,7 +574,7 @@ local erin_rows = value(db, "SELECT COUNT(*) FROM Movement JOIN Players ON Playe
 	"WHERE Players.name = 'Erin'")
 check(erin_rows >= 1, "their movement is recorded too (got " .. tostring(erin_rows) .. ")")
 db:close()
-mock.settings["recorder.flush_interval"] = nil
+assert(recorder_common.settings:reset("recorder.flush_interval"))
 mock.remove_player("Erin")
 
 ----------------------------------------------------------------------------
@@ -601,7 +603,7 @@ db:close()
 print("=== a tool drawn while the write is stuck ===")
 ----------------------------------------------------------------------------
 
-mock.settings["recorder.flush_interval"] = "0.01"  -- commit on every step
+assert(recorder_common.settings:set("recorder.flush_interval", "0.01"))  -- commit on every step
 check(start_recording("wieldgap") == nil, "the recording starts")
 local wieldgap_path = recorder.get_recording_path()
 mock.step(0.1)
@@ -618,14 +620,14 @@ check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'write_error'") >= 1, 
 check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'wield' AND item LIKE 'default:pick_steel%'") >= 1,
 	"and the tool is announced again rather than lost with the rows that went missing")
 db:close()
-mock.settings["recorder.flush_interval"] = nil
+assert(recorder_common.settings:reset("recorder.flush_interval"))
 
 ----------------------------------------------------------------------------
 print("=== 0 means no early commit, not a commit every step ===")
 ----------------------------------------------------------------------------
 
-mock.settings["recorder.flush_interval"] = "100"
-mock.settings["recorder.max_buffered"] = "0"
+assert(recorder_common.settings:set("recorder.flush_interval", "100"))
+assert(recorder_common.settings:set("recorder.max_buffered", "0"))
 check(start_recording("patient") == nil, "the recording starts")
 local patient_path = recorder.get_recording_path()
 alice.pos.x = 123
@@ -638,8 +640,8 @@ check(recorder.stop() == nil, "it stops")
 db = open_recording(patient_path)
 check(value(db, "SELECT COUNT(*) FROM Movement") > 0, "stopping writes out what was still buffered")
 db:close()
-mock.settings["recorder.flush_interval"] = nil
-mock.settings["recorder.max_buffered"] = nil
+assert(recorder_common.settings:reset("recorder.flush_interval"))
+assert(recorder_common.settings:reset("recorder.max_buffered"))
 
 ----------------------------------------------------------------------------
 print("=== a player joining in the moment the recording starts ===")
@@ -714,7 +716,7 @@ print("=== when the write cannot happen ===")
 -- Someone else holding the write lock makes the next commit fail. What matters
 -- then is that the recording carries on, says so, and starts over from a known
 -- state for every player instead of pretending nothing happened.
-mock.settings["recorder.flush_interval"] = "0.01"  -- commit on every step
+assert(recorder_common.settings:set("recorder.flush_interval", "0.01"))  -- commit on every step
 check(start_recording("blocked") == nil, "the recording starts")
 local blocked_path = recorder.get_recording_path()
 mock.step(0.1)
@@ -752,7 +754,7 @@ local bob_rows = value(db, ("SELECT COUNT(*) FROM Movement JOIN Players ON Playe
 	"WHERE Players.name = 'Bob' AND Movement.tick = %d"):format(errors[1].tick + 1))
 check(bob_rows == 1, "every player is written again after a gap, so a reader is not left guessing")
 db:close()
-mock.settings["recorder.flush_interval"] = nil
+assert(recorder_common.settings:reset("recorder.flush_interval"))
 
 ----------------------------------------------------------------------------
 print("=== giving up on a recording that cannot be written ===")
@@ -762,7 +764,7 @@ print("=== giving up on a recording that cannot be written ===")
 -- server runs out of memory. Ten commits in a row that fail end the recording,
 -- and the log says so - the recording itself cannot, its rows being exactly
 -- what will not go in.
-mock.settings["recorder.flush_interval"] = "0.01"  -- commit on every step
+assert(recorder_common.settings:set("recorder.flush_interval", "0.01"))  -- commit on every step
 check(start_recording("doomed") == nil, "a recording starts")
 local doomed_path = recorder.get_recording_path()
 -- One step before the lock goes on, so that the opening state - the world time,
@@ -790,26 +792,27 @@ end
 check(gave_up, "and the log says why")
 doomed_blocker:exec("ROLLBACK")
 doomed_blocker:close()
-mock.settings["recorder.flush_interval"] = nil
+assert(recorder_common.settings:reset("recorder.flush_interval"))
 
 ----------------------------------------------------------------------------
 print("=== settings ===")
 ----------------------------------------------------------------------------
 
 -- A recording that gives itself a deadline
-mock.settings["recorder.max_duration"] = "0.25"
+assert(recorder_common.settings:set("recorder.max_duration", "0.25"))
 check(start_recording("limited") == nil, "a recording with a duration limit starts")
 local limited_path = recorder.get_recording_path()
+assert(recorder_common.settings:set("recorder.max_duration", "100"))
 mock.steps(6, 0.1)
 check(recorder.is_recording() == false, "it stops itself at the limit")
 db = open_recording(limited_path)
 check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'recording_stop' AND data LIKE '%limit_duration%'") == 1,
 	"and says why it stopped")
 db:close()
-mock.settings["recorder.max_duration"] = nil
+assert(recorder_common.settings:reset("recorder.max_duration"))
 
 -- Events an operator does not want
-mock.settings["recorder.disabled_events"] = "dig"
+assert(recorder_common.settings:set("recorder.disabled_events", "dig"))
 check(start_recording("quiet") == nil, "a recording with noisy events turned off starts")
 local quiet_path = recorder.get_recording_path()
 mock.fire("register_on_dignode", { x = 0, y = 0, z = 0 }, { name = "default:stone", param2 = 0 }, alice)
@@ -820,11 +823,11 @@ db = open_recording(quiet_path)
 check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'dig'") == 0, "the turned-off event is not there")
 check(value(db, "SELECT COUNT(*) FROM Events WHERE type = 'place'") == 1, "the others still are")
 db:close()
-mock.settings["recorder.disabled_events"] = nil
+assert(recorder_common.settings:reset("recorder.disabled_events"))
 
 -- What a recording needs in order to explain itself is not a matter of taste
-mock.settings["recorder.disabled_events"] = "write_error"
-mock.settings["recorder.flush_interval"] = "0.01"  -- commit on every step
+assert(recorder_common.settings:set("recorder.disabled_events", "write_error"))
+assert(recorder_common.settings:set("recorder.flush_interval", "0.01"))  -- commit on every step
 local logged_before = #mock.logs
 check(start_recording("markers") == nil, "a recording starts")
 local markers_path = recorder.get_recording_path()
@@ -843,8 +846,8 @@ for i = logged_before + 1, #mock.logs do
 	if mock.logs[i].message and mock.logs[i].message:find("always recorded", 1, true) then objected = true end
 end
 check(objected, "and the setting is reported as ignored")
-mock.settings["recorder.disabled_events"] = nil
-mock.settings["recorder.flush_interval"] = nil
+assert(recorder_common.settings:reset("recorder.disabled_events"))
+assert(recorder_common.settings:reset("recorder.flush_interval"))
 
 ----------------------------------------------------------------------------
 print("=== where a recording is written ===")
@@ -854,19 +857,19 @@ print("=== where a recording is written ===")
 -- directory is a property of how the server was started - a systemd unit, the
 -- shell somebody ran it from - and a recording that followed it around would
 -- land somewhere different for no reason a reader could see.
-mock.settings["recorder.directory"] = "myrecordings"
+assert(recorder_common.settings:set("recorder.directory", "myrecordings"))
 check(start_recording("relative") == nil, "a recording with a directory of its own starts")
 check(recorder.get_recording_path():find(world .. "/myrecordings/", 1, true) == 1,
 	"a relative directory is taken from the world directory: " .. tostring(recorder.get_recording_path()))
 check(recorder.stop() == nil, "it stops")
 
 local absolute_dir = tmpbase .. "/recorder_tests/absolute"
-mock.settings["recorder.directory"] = absolute_dir
+assert(recorder_common.settings:set("recorder.directory", absolute_dir))
 check(start_recording("absolute") == nil, "a recording with an absolute directory starts")
 check(recorder.get_recording_path():find(absolute_dir .. "/", 1, true) == 1,
 	"an absolute directory is used as it is: " .. tostring(recorder.get_recording_path()))
 check(recorder.stop() == nil, "it stops")
-mock.settings["recorder.directory"] = nil
+assert(recorder_common.settings:reset("recorder.directory"))
 
 ----------------------------------------------------------------------------
 print("=== a region is required ===")
@@ -1152,7 +1155,7 @@ part_db:close()
 -- One event type can be turned off on its own; recorder.particles turns off
 -- all three, which is the switch for a server where a per-step effect would
 -- cost too many rows.
-mock.settings["recorder.disabled_events"] = "particle"
+assert(recorder_common.settings:set("recorder.disabled_events", "particle"))
 check(start_recording("noparticles", PART_REGION) == nil, "a recording with one particle type off starts")
 local noparticles_path = recorder.get_recording_path()
 core.add_particle(inside_particle)
@@ -1164,9 +1167,9 @@ check(value(noparticles_db, "SELECT COUNT(*) FROM Events WHERE type = 'particle'
 check(value(noparticles_db, "SELECT COUNT(*) FROM Events WHERE type = 'particlespawner'") == 1,
 	"the spawner still is")
 noparticles_db:close()
-mock.settings["recorder.disabled_events"] = nil
+assert(recorder_common.settings:reset("recorder.disabled_events"))
 
-mock.settings["recorder.particles"] = "false"
+assert(recorder_common.settings:set("recorder.particles", "false"))
 check(start_recording("particlesoff", PART_REGION) == nil, "a recording with particles off starts")
 local particlesoff_path = recorder.get_recording_path()
 core.add_particle(inside_particle)
@@ -1178,7 +1181,7 @@ check(value(particlesoff_db,
 	"SELECT COUNT(*) FROM Events WHERE type IN ('particle', 'particlespawner', 'particlespawner_delete')") == 0,
 	"recorder.particles = false turns off all three event types")
 particlesoff_db:close()
-mock.settings["recorder.particles"] = nil
+assert(recorder_common.settings:reset("recorder.particles"))
 end
 
 ----------------------------------------------------------------------------
@@ -1239,7 +1242,7 @@ do
 	chat_db:close()
 
 	-- The setting and the per-type switch each turn the capture off.
-	mock.settings["recorder.chat"] = "false"
+	assert(recorder_common.settings:set("recorder.chat", "false"))
 	check(start_recording("nochat", TEST_REGION) == nil, "a recording with chat off starts")
 	local nochat_path = recorder.get_recording_path()
 	block_msgs.chat_send_all("Alice", "not recorded")
@@ -1248,9 +1251,9 @@ do
 	check(value(nochat_db, "SELECT COUNT(*) FROM Events WHERE type = 'chat'") == 0,
 		"recorder.chat = false keeps chat out of the file")
 	nochat_db:close()
-	mock.settings["recorder.chat"] = nil
+	assert(recorder_common.settings:reset("recorder.chat"))
 
-	mock.settings["recorder.disabled_events"] = "chat"
+	assert(recorder_common.settings:set("recorder.disabled_events", "chat"))
 	check(start_recording("nochattype", TEST_REGION) == nil, "a recording with the type off starts")
 	local nochattype_path = recorder.get_recording_path()
 	block_msgs.chat_send_all("Alice", "not recorded either")
@@ -1259,7 +1262,7 @@ do
 	check(value(nochattype_db, "SELECT COUNT(*) FROM Events WHERE type = 'chat'") == 0,
 		"disabled_events can name chat on its own")
 	nochattype_db:close()
-	mock.settings["recorder.disabled_events"] = nil
+	assert(recorder_common.settings:reset("recorder.disabled_events"))
 end
 
 ----------------------------------------------------------------------------
@@ -1367,8 +1370,8 @@ print("=== catching up after a snapshot ===")
 -- recording. The catch-up is budgeted, so a long snapshot does not become one
 -- multi-second step.
 do
-	mock.settings["recorder.flush_interval"] = "0.01"
-	mock.settings["recorder.diff_budget"] = "1"
+	assert(recorder_common.settings:set("recorder.flush_interval", "0.01"))
+	assert(recorder_common.settings:set("recorder.diff_budget", "1"))
 	check(start_recording("catchup", TEST_REGION) == nil, "a recording with a diff budget starts")
 	local catchup_path = recorder.get_recording_path()
 	mock.step(0.1)  -- tick 1
@@ -1393,8 +1396,8 @@ do
 		"and both blocks are in the file")
 	end_db:close()
 	check(recorder.stop() == nil, "it stops")
-	mock.settings["recorder.flush_interval"] = nil
-	mock.settings["recorder.diff_budget"] = nil
+	assert(recorder_common.settings:reset("recorder.flush_interval"))
+	assert(recorder_common.settings:reset("recorder.diff_budget"))
 end
 
 ----------------------------------------------------------------------------
@@ -1405,9 +1408,9 @@ print("=== reconciling the opening state before recording ===")
 -- state at tick 0. They are diffed while the recording is still inactive, so
 -- no sampled tick can inherit them.
 do
-	local old_snapshot_budget = mock.settings["recorder.snapshot_budget"]
-	mock.settings["recorder.snapshot_budget"] = "30"
-	mock.settings["recorder.diff_budget"] = "1"
+	local old_snapshot_budget = recorder_common.settings:get("recorder.snapshot_budget")
+	assert(recorder_common.settings:set("recorder.snapshot_budget", "30"))
+	assert(recorder_common.settings:set("recorder.diff_budget", "1"))
 	local region = {pos1 = {x = 620, y = 0, z = 0}, pos2 = {x = 627, y = 2, z = 3}}
 	local first = {x = 620, y = 1, z = 1}
 	local second = {x = 625, y = 1, z = 1}
@@ -1448,16 +1451,16 @@ do
 		"an ordinary event during the catch-up is not recorded")
 	check(value(db, "SELECT COUNT(*) FROM Movement") == 0, "no sample was taken before the start")
 	db:close()
-	mock.settings["recorder.snapshot_budget"] = old_snapshot_budget
-	mock.settings["recorder.diff_budget"] = nil
+	assert(recorder_common.settings:set("recorder.snapshot_budget", old_snapshot_budget))
+	assert(recorder_common.settings:reset("recorder.diff_budget"))
 end
 
 -- Stopping while the opening state is being reconciled abandons the file, the
 -- same as stopping during the snapshot.
 do
-	local old_snapshot_budget = mock.settings["recorder.snapshot_budget"]
-	mock.settings["recorder.snapshot_budget"] = "30"
-	mock.settings["recorder.diff_budget"] = "1"
+	local old_snapshot_budget = recorder_common.settings:get("recorder.snapshot_budget")
+	assert(recorder_common.settings:set("recorder.snapshot_budget", "30"))
+	assert(recorder_common.settings:set("recorder.diff_budget", "1"))
 	local region = {pos1 = {x = 636, y = 0, z = 0}, pos2 = {x = 645, y = 2, z = 3}}
 	local id, start_err = recorder.start("predrain_stop", region)
 	check(id ~= nil, "a recording for the catch-up stop starts: " .. tostring(start_err))
@@ -1477,8 +1480,8 @@ do
 	check(recorder.stop(id) == nil, "stopping during the catch-up succeeds")
 	check(#recorder.list() == 0, "the recording is gone")
 	check(not file_exists_anywhere(path), "and its file is removed")
-	mock.settings["recorder.snapshot_budget"] = old_snapshot_budget
-	mock.settings["recorder.diff_budget"] = nil
+	assert(recorder_common.settings:set("recorder.snapshot_budget", old_snapshot_budget))
+	assert(recorder_common.settings:reset("recorder.diff_budget"))
 end
 
 ----------------------------------------------------------------------------
@@ -1657,7 +1660,7 @@ meta_db:close()
 
 -- The setting turns the whole thing off for the recording (replay is not
 -- affected: it only acts on what the file holds).
-mock.settings["recorder.metadata"] = "false"
+assert(recorder_common.settings:set("recorder.metadata", "false"))
 check(start_recording("nometa", META_REGION) == nil, "a recording without metadata starts")
 local nometa_path = recorder.get_recording_path()
 check(recorder.stop() == nil, "it stops")
@@ -1665,7 +1668,7 @@ local nometa_db = open_recording(nometa_path)
 check(value(nometa_db, "SELECT COUNT(*) FROM NodeMetadata") == 0,
 	"with recorder.metadata = false the file holds no metadata rows")
 nometa_db:close()
-mock.settings["recorder.metadata"] = nil
+assert(recorder_common.settings:reset("recorder.metadata"))
 
 ----------------------------------------------------------------------------
 -- Lighting
@@ -1712,7 +1715,7 @@ check(changes and #changes == 1 and changes[1].i == dark_index and changes[1].p 
 	"holding the node that changed and its new light")
 light_db:close()
 
-mock.settings["recorder.light"] = "false"
+assert(recorder_common.settings:set("recorder.light", "false"))
 check(start_recording("nolight", LIGHT_REGION) == nil, "a recording without light starts")
 local nolight_light_path = recorder.get_recording_path()
 mock.step(0.1)  -- the opening metadata is taken at the first recording step
@@ -1724,6 +1727,34 @@ check(value(nolight_light_db, "SELECT value FROM Metadata WHERE key = 'recorder.
 	"but the time of day is still recorded")
 check(value(nolight_light_db, "SELECT COUNT(*) FROM LightChanges") == 0, "and no light changes")
 nolight_light_db:close()
-mock.settings["recorder.light"] = nil
+assert(recorder_common.settings:reset("recorder.light"))
+
+----------------------------------------------------------------------------
+print("=== retention of real capture output ===")
+----------------------------------------------------------------------------
+-- Keep this group in a function scope: the main chunk is at LuaJIT's local limit.
+do
+	(function()
+		assert(recorder_common.settings:set("recorder.directory", "retention-check"))
+		assert(recorder_common.settings:set("recorder.retention_count", "1"))
+		check(start_recording("same-match", LIGHT_REGION) == nil, "the first retained recording starts")
+		local older_path = recorder.get_recording_path()
+		check(recorder.stop() == nil and recorder_common.file_exists(older_path),
+			"one finished recording fits the count limit")
+		check(start_recording("same-match", LIGHT_REGION) == nil, "the next retained recording starts")
+		local newer_path = recorder.get_recording_path()
+		recorder_common.retention.prune()
+		check(recorder_common.file_exists(newer_path), "an active real capture is protected during cleanup")
+		check(recorder.stop() == nil, "the newer recording stops")
+		check(not recorder_common.file_exists(older_path) and recorder_common.file_exists(newer_path),
+			"cleanup recognizes actual capture files and retains the newer recording")
+		assert(recorder_common.settings:set("recorder.retention_size_mb", "0.000001"))
+		recorder_common.retention.prune()
+		check(not recorder_common.file_exists(newer_path), "a finished file exceeding the storage budget is eligible")
+		assert(recorder_common.settings:reset("recorder.retention_count"))
+		assert(recorder_common.settings:reset("recorder.retention_size_mb"))
+		assert(recorder_common.settings:reset("recorder.directory"))
+	end)()
+end
 
 print(("\n%d checks passed"):format(checks))

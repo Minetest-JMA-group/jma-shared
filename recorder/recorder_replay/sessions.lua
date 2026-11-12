@@ -1,6 +1,8 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
+local settings = recorder_common.settings
+
 -- Replay sessions: who is watching what, the clock, and the cursors that walk
 -- the recording in step with it. A session owns a read-only connection, an
 -- arena with the recording rebuilt inside it, a set of ghosts and a list of
@@ -16,14 +18,6 @@ local counter = 0
 -- A recorded chat line is shown with this in front, so a watcher can tell it
 -- from the replay server's own chat.
 local CHAT_PREFIX = "[replay] "
-
--- A boolean setting whose default is on; get_bool() alone reads an unset
--- setting as off, which is the wrong default for these switches.
-local function setting_on(name, default)
-	local raw = core.settings:get(name)
-	if raw == nil or raw == "" then return default end
-	return core.settings:get_bool(name)
-end
 
 ---@param dependencies table
 function sessions.init(dependencies)
@@ -319,7 +313,7 @@ function sessions.seek(session, T)
 		local name = session.rec.players[pid]
 		if pos and name then
 			local obj = deps.ghost.spawn(name, deps.arena.translate(pos, offset),
-				textures_of(presence.data), observers)
+				textures_of(presence.data), observers, session.ghost_config)
 			if obj then
 				session.ghosts[pid] = obj
 				session.joined[pid] = true
@@ -384,7 +378,7 @@ local function apply_event(session, ev)
 		local name = session.rec.players[ev.subject_player]
 		if name and ev.pos then
 			local obj = deps.ghost.spawn(name, deps.arena.translate(ev.pos, session.offset),
-				textures_of(ev.data), observer_set(session))
+				textures_of(ev.data), observer_set(session), session.ghost_config)
 			if obj then
 				session.ghosts[ev.subject_player] = obj
 				session.joined[ev.subject_player] = true
@@ -635,7 +629,7 @@ end
 function sessions.start(arg, player)
 	local allowed, refusal = can_enter(player, nil)
 	if not allowed then return nil, refusal end
-	local limit = tonumber(core.settings:get("replay.max_sessions")) or 4
+	local limit = tonumber(settings:get("replay.max_sessions"))
 	if limit > 0 then
 		local running = 0
 		for _ in pairs(by_id) do running = running + 1 end
@@ -650,7 +644,7 @@ function sessions.start(arg, player)
 
 	local path, path_err = deps.reader.resolve(arg)
 	if not path then return nil, path_err end
-	if unfinished(path) and not core.settings:get_bool("replay.allow_unfinished") then
+	if unfinished(path) and not settings:get_bool("replay.allow_unfinished") then
 		return nil, "that recording is still being made; wait until it is finished"
 	end
 	local rec, rec_err = deps.reader.open(path, deps.sqlite)
@@ -690,7 +684,8 @@ function sessions.start(arg, player)
 		T = 0,
 		speed = 1,
 		paused = true,
-		chat = setting_on("replay.chat", true),  -- show recorded chat lines
+		ghost_config = deps.ghost.configuration(),
+		chat = settings:get_bool("replay.chat"),  -- show recorded chat lines
 		arena = box,
 		offset = deps.arena.offset(box, state.region),
 		reconstruct = state,

@@ -3,6 +3,7 @@
 
 local storage = shareddb.get_mod_storage()
 local mode = 1
+local filter_check = false
 
 local function make_logger(level)
 	return function(text, ...)
@@ -46,13 +47,16 @@ if not whitelist then
 end
 
 local function load_data(key)
-	if key == "mode" or not key then
+	if key == "mode" or key == "filter_check" or not key then
 		local ctx = storage:get_context()
 		if ctx then
 			local mode_str, err = ctx:get_string("mode")
+			local filter_check_str
+			filter_check_str, err = ctx:get_string("filter_check")
 			ctx:finalize()
 			if err then return end
 			if mode_str == "0" then mode = 0 else mode = 1 end
+			filter_check = filter_check_str == "1"
 		end
 	end
 	if key == "blacklist" then
@@ -64,6 +68,7 @@ local function load_data(key)
 end
 
 load_data("mode")
+load_data("filter_check")
 shareddb.register_listener(load_data)
 
 local function check_username(name)
@@ -83,6 +88,23 @@ local function check_username(name)
 			ACTION("User %s would have been denied via blacklist [PERMISSIVE]", name)
 			relays.send_action_report("nameban: User %s would have been denied via blacklist [PERMISSIVE]", name)
 			return nil
+		end
+	end
+
+	if filter_check then
+		local is_valid = filter.check_message(name)
+		if not is_valid then
+			local msg = "Your username is not allowed. Please change it and reconnect."
+
+			if mode == 1 then
+				ACTION("User %s denied via filter [ENFORCING] (matched regex: %s)", name, filter.get_lastreg())
+				relays.send_action_report("nameban: User %s denied via filter [ENFORCING] (matched regex: %s)", name, filter.get_lastreg())
+				return msg
+			else
+				ACTION("User %s would have been denied via filter [PERMISSIVE] (matched regex: %s)", name, filter.get_lastreg())
+				relays.send_action_report("nameban: User %s would have been denied via filter [PERMISSIVE] (matched regex: %s)", name, filter.get_lastreg())
+				return nil
+			end
 		end
 	end
 
@@ -116,6 +138,8 @@ Subcommands:
   whitelist <command> [args] - Manage whitelist patterns
   getenforce                 - Get current enforcement mode
   setenforce <mode>          - Set enforcement mode (enforcing/permissive/1/0)
+  getfilter                  - Get current filter-check mode (on/off)
+  setfilter <0|1|on|off>     - Enable or disable checking usernames with filter.check_message
   reload                     - Reload both lists from files
   export                     - Export both lists to files
   check <username>           - Check if a username would be allowed
@@ -191,6 +215,47 @@ Use /nameban blacklist help or /nameban whitelist help for more info.
 				return true, "Mode is already set to: " .. mode_text
 			end
 
+		elseif subcommand == "getfilter" then
+			local filter_text = filter_check and "on" or "off"
+			return true, "Current filter-check mode: " .. filter_text
+
+		elseif subcommand == "setfilter" then
+			rest = rest:lower()
+
+			local new_filter_check
+			if rest == "1" or rest == "on" then
+				new_filter_check = true
+			elseif rest == "0" or rest == "off" then
+				new_filter_check = false
+			else
+				return false, "Usage: /nameban setfilter <0|1|on|off>"
+			end
+
+			if new_filter_check ~= filter_check then
+				filter_check = new_filter_check
+
+				local ctx, err = storage:get_context()
+				err = err or ctx:set_string("filter_check", filter_check and "1" or "0")
+				err = err or ctx:finalize()
+				if err then
+					return false, "Failed to save filter-check mode: " .. tostring(err)
+				end
+
+				local filter_text = filter_check and "on" or "off"
+				ACTION("%s set filter-check mode to %s", name, filter_text)
+				relays.send_action_report("nameban: %s set filter-check mode to %s", name, filter_text)
+
+				-- In enforcing mode, check all online players
+				if filter_check and mode == 1 then
+					check_online_players()
+				end
+
+				return true, "New filter-check mode: " .. filter_text
+			else
+				local filter_text = filter_check and "on" or "off"
+				return true, "Filter-check mode is already set to: " .. filter_text
+			end
+
 		elseif subcommand == "reload" then
 			blacklist:load_file()
 			whitelist:load_file()
@@ -244,4 +309,4 @@ core.register_on_prejoinplayer(function(name)
 	return check_username(name)
 end)
 
-ACTION("Nameban mod loaded successfully (mode: %s)", mode == 1 and "enforcing" or "permissive")
+ACTION("Nameban mod loaded successfully (mode: %s, filter-check: %s)", mode == 1 and "enforcing" or "permissive", filter_check and "on" or "off")

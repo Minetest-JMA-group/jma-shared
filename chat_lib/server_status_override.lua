@@ -53,7 +53,7 @@ function core.get_server_status(name, joined)
     local plist = "Players"
 
     if #players == 0 then
-        plist = plist .. "No connected players."
+        plist = "No connected players."
     else
         plist = plist .. " (" .. #players .. "): "
         for i, p in ipairs(players) do

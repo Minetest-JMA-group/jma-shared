@@ -78,9 +78,7 @@ local function remove_ghost(session, pid)
 	session.animations[pid] = nil
 end
 
--- Everyone watching sees every ghost; anyone else sees none of them. A ghost
--- whose object has been invalidated (the arena's blocks unloaded, the game
--- cleared objects) is dropped here rather than raising.
+-- Ghosts are visible only to participants; discard invalidated objects.
 ---@param session table
 function sessions.update_observers(session)
 	local set = observer_set(session)
@@ -102,9 +100,7 @@ local function textures_of(json)
 	return nil
 end
 
--- A recorded event's data, or nil when the row holds none or malformed JSON.
--- Recordings are files: a damaged row is skipped, not allowed to take the
--- replay loop down.
+-- Decode event JSON; absent/malformed data returns nil without aborting playback.
 local function event_data(json)
 	if not json then return nil end
 	local data = core.parse_json(json)
@@ -287,9 +283,7 @@ function sessions.seek(session, T)
 	session.light_last_id = deps.reader.last_light_id(session.rec, tick)
 	session.light_events = {rows = {}, next = 1}
 
-	-- Metadata is not part of the node write: the arena is wiped of it and
-	-- then told everything the recording had up to this moment, so a seek
-	-- backwards also undoes a container's later contents.
+	-- Clear/rebuild metadata separately from nodes so backwards seeks undo changes.
 	deps.arena.clear_metadata(session.arena)
 	for _, row in ipairs(deps.reader.node_metadata_until(session.rec, tick)) do
 		deps.reconstruct.apply_metadata(session.offset, row)
@@ -329,11 +323,8 @@ function sessions.seek(session, T)
 				if row then
 					deps.ghost.update(obj, row, offset, animation ~= nil)
 				end
-				-- What the player held at T: the last wield event since they
-				-- joined, or the join's own item before they switched. A fresh
-				-- ghost holds nothing, so an empty hand needs no call. The id
-				-- decides when there is a wield from before a leave: the join
-				-- that brought the player back already says what they hold.
+				-- Use the last wield since joining, otherwise the join's item.
+				-- Ignore pre-rejoin wields; a fresh ghost already has an empty hand.
 				local wielded = deps.reader.last_wield(session.rec, pid, tick)
 				local item
 				if wielded and wielded.id > (presence.id or 0) then
@@ -346,12 +337,8 @@ function sessions.seek(session, T)
 		end
 	end
 
-	-- Particle spawners are engine objects whose definitions cannot be read
-	-- back, so the recording's spawner events up to T are replayed: creates
-	-- that were not deleted, and not those whose own (finite) lifetime ended
-	-- before T. Their timers restart, which is all a seek can do to an engine
-	-- spawner; a one-off particle from before T was over long ago and is not
-	-- replayed.
+	-- Recreate spawners active at T, excluding deleted/expired ones. Engine
+	-- spawner timers restart; past one-off particles are not replayed.
 	clear_spawners(session)
 	for _, ev in ipairs(deps.reader.spawner_events_until(session.rec, tick)) do
 		local data = event_data(ev.data)
@@ -588,12 +575,9 @@ local function unfinished(path)
 	return false
 end
 
--- The game's veto: a dead, attached or otherwise busy player must be refused
--- before a recording is opened or an arena built. The hook is a predicate and
--- should have no side effects. start() calls it before opening anything;
--- join() calls it before registering the participant. A failing hook refuses
--- rather than letting the player through.
--- `session` is nil before a start and the session itself on a join.
+-- Check the game's pure can_enter predicate before opening a recording or
+-- registering a participant. Errors refuse entry. session is nil for starts
+-- and the target session for joins.
 ---@param player ObjectRef
 ---@param session table?
 ---@return boolean allowed, string? reason

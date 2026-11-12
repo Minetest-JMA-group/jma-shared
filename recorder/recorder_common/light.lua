@@ -1,14 +1,9 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
--- The lighting of a region, one byte per node in the same flat-array order the
--- snapshot uses (x fastest, then y, then z). A byte is the engine's own format:
--- the low 4 bits are skylight and the high 4 bits are artificial light.
---
--- Air is part of the layer and is the reason it cannot be sparse: the client
--- shades each face of a node with the light of the node in front of it, and
--- entities with the light of the node they stand in. A layer of non-air nodes
--- only would hold almost none of the values that make up the visible light.
+-- Dense light bytes in snapshot order (x, then y, then z): low 4 bits skylight,
+-- high 4 artificial light. Include air: faces sample the adjacent node's light
+-- and entities sample the node containing them.
 
 local light = {}
 

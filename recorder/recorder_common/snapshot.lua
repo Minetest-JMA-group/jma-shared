@@ -1,18 +1,11 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
--- The body of a region snapshot: one entry per non-air node, in increasing
--- flat-array order (the order a VoxelManip numbers the nodes of a region). Per
--- entry:
---
---   LEB128  flat index delta from the previous entry (the first counts from 0)
---   u16 LE  index into the snapshot's name table, 1-based
+-- Sparse non-air nodes in increasing VoxelManip flat-index order:
+--   LEB128  index delta (first relative to 0)
+--   u16 LE  1-based name-table index
 --   u8      param2
---
--- Air is not stored at all - it is usually most of a region, and a replay area
--- starts as air, so there is nothing to say about it. The name table and the
--- compression are the caller's business; this file only turns entries into
--- bytes and back.
+-- The caller owns the name table and compression; replay starts from air.
 
 local snapshot = {}
 
@@ -21,9 +14,7 @@ local snapshot = {}
 ---@field n integer  -- 1-based index into the snapshot's name table
 ---@field p integer? -- param2, 0 when absent
 
--- An encoder fed one entry at a time. The capture walk builds its body while
--- it walks, so a large region is not encoded in a single step at the end.
----
+-- Incremental encoding keeps the capture walk's final step bounded.
 ---@return table  -- {add = fun(index, name, param2): boolean|nil, string?, finish = fun(): string}
 function snapshot.encoder()
 	local parts = {}

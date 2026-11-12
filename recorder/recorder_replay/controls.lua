@@ -1,10 +1,7 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
--- The remote control: one item per action, put in the main list so they show in
--- the hotbar while watching. Actions are separate items rather than a formspec
--- so a moderator can click without opening a window; the seek slider is the one
--- thing that needs a formspec.
+-- Hotbar items provide replay actions; seeking uses a formspec slider.
 
 local controls = {}
 
@@ -206,11 +203,8 @@ local CHAR_W = 0.15
 -- The label spans from x = 0.3 to the right edge of a 10-unit form.
 local LABEL_WIDTH = 9.4
 
--- Split prose into lines that fit `width` form units, on word boundaries
--- where possible and inside a word when a single token is too long (a long
--- recording name has nothing else to break on). Each returned line is drawn
--- as its own label, so the vertical layout does not depend on how a client
--- centres a multi-line label.
+-- Wrap at word boundaries, splitting oversized tokens. Separate labels avoid
+-- client-dependent multiline-label centering.
 ---@param text string
 ---@param width number
 ---@param max_lines integer?
@@ -252,12 +246,8 @@ local function wrap(text, width, max_lines)
 	return lines
 end
 
--- The recording chooser shown by a bare /replay. `files` is the list the
--- session will be started from, so the selection is an index into a list the
--- server already holds; a submission that names anything else is ignored.
--- `error` is shown under the list in red, and the form grows to make room.
--- `can_delete` adds the delete control, for a player the server trusts with
--- its files.
+-- Chooser selections index a server-held file list; ignore arbitrary paths.
+-- Grow the form for errors; can_delete enables the privileged delete control.
 ---@param files table[]  -- {name = <file name>, path = <full path>}, newest first
 ---@param selected integer?
 ---@param error string?   -- why the last choice could not be started

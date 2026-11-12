@@ -3,17 +3,12 @@
 
 local settings = recorder_common.settings
 
--- recorder – play a recording back. A session reads one recording file, shows
--- its players as ghosts to the people watching, and gives them a remote control
--- for the clock. Anything the game has to know about - the arena, what happens
--- to a participant's inventory, whether the world persists - arrives through
--- recorder_common.game_hooks, so nothing here names a game.
+-- Read-only replay sessions with reconstructed arenas, ghosts and controls.
+-- recorder_common.game_hooks supplies game-specific arena and player lifecycle.
 
 recorder_replay = {}
 
--- The recording reader needs lsqlite3, the same library capture uses. Without
--- it there is nothing to play, and the command says so rather than being
--- unknown.
+-- Keep /replay available with a diagnostic if lsqlite3 cannot load.
 local sqlite = algorithms.require("lsqlite3")
 if not sqlite then
 	local message = "[replay] lsqlite3 needed for operation. Make sure that the library is" ..
@@ -139,11 +134,8 @@ local function delete_recording_files(path)
 	return true
 end
 
--- A formspec shown from inside an input callback - a chat command, an item use
--- - can be delivered the very keypress or click that triggered it, and the
--- client then treats that as a click on the new form. That is how a bare
--- /replay used to go straight through the list and start the first recording.
--- Showing the form a moment later lets the input finish first.
+-- Defer forms shown by input callbacks so the triggering key/click cannot also
+-- select an entry in the newly opened form.
 local function show_formspec_later(name, formname, build)
 	core.after(0.2, function()
 		if not core.get_player_by_name(name) then return end
@@ -410,12 +402,8 @@ local function list_recordings()
 	return out, dir
 end
 
--- Recordings still being written are not offered for watching by default: a
--- recording is something to watch when it is finished, and one that is still
--- taking its snapshot has no snapshot row to rebuild from yet. Capture knows
--- which files those are; when it is not loaded there is nothing to ask, and
--- the file list is what it is. `replay.allow_unfinished` restores the older
--- behaviour and offers them too.
+-- Hide active captures unless replay.allow_unfinished is set. Snapshot-phase
+-- files cannot be replayed yet; capture's registry identifies active paths.
 ---@return table[], string
 local function available_recordings()
 	local files, dir = all_recordings()

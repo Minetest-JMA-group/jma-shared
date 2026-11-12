@@ -3,12 +3,8 @@
 
 local settings = recorder_common.settings
 
--- The box a replay is built in: an invisible shell with the recording's region
--- reconstructed inside it. Where the box is depends on the session, so the
--- choice is made here, from the three sources a server can have - the player's
--- own marks, the game's provider, or the one static box in replay.arena - and
--- remembered in mod storage before the first node is placed, because after a
--- crash the arena's bounds are the only thing that can clean it up.
+-- Resolve replay arenas from player marks, a game provider or replay.arena.
+-- Persist bounds before placing nodes so the next boot can clear crash leftovers.
 
 local arena = {}
 
@@ -26,12 +22,8 @@ function arena.init(dependencies)
 	deps = dependencies
 end
 
--- The shell is invisible and see-through - the viewers look through it at the
--- reconstruction - but solid, so nobody walks or falls out of the arena. Its
--- top face doubles as the viewing platform. It also has to be transparent to
--- light: a shell that blocked sunlight would turn the whole arena pitch black
--- and cast a shadow on the world around it, which is very visible from
--- outside where the shell itself is not.
+-- The invisible solid shell confines viewers and provides the viewing platform.
+-- It must transmit sunlight to avoid darkening the arena and surrounding world.
 core.register_node(BARRIER, {
 	description = "Replay arena barrier",
 	drawtype = "airlike",
@@ -209,12 +201,8 @@ function arena.available(player_name)
 	return true
 end
 
--- The arena for a session, from the highest-priority source that has one.
---
--- The setting is consulted only when the game registers no provider: a
--- provider always has an answer, so a setting next to it would never be used.
--- It is one fixed box, so it can serve one session at a time; waiting for it
--- to be free or marking another arena are the ways out.
+-- Arena precedence: player marks, game provider, setting. A registered provider
+-- excludes the setting fallback; the fixed setting box serves one session at a time.
 ---@param player_name string
 ---@param recorded table  -- the recording's region
 ---@return table|nil, string?
@@ -292,12 +280,8 @@ local function write_box(box, fill)
 	return true
 end
 
--- write_to_map() recalculates the light of the blocks it writes, but the
--- engine's incremental update is known to leave artefacts around large
--- writes (the same thing WorldEdit runs into), and a dark arena is not
--- something the viewer can see past. A full recalculation over the arena is
--- cheap at the few moments a session builds or clears its world; during
--- forward playback the per-step write is left to write_to_map().
+-- Fully relight after large arena writes to avoid incremental-lighting artefacts.
+-- Forward playback uses write_to_map()'s incremental updates.
 ---@param box table
 function arena.relight(box)
 	if not core.fix_light then return end

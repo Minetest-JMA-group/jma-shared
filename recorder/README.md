@@ -1,107 +1,75 @@
-# recorder – record what happens on a server, and play it back
+# recorder – capture and replay regional gameplay
 
-`recorder` is a modpack of three mods:
+- **`recorder_capture`** saves regional world state, player actions and movement
+  in one self-contained SQLite file per recording.
+- **`recorder_replay`** reconstructs that region in an arena and displays players
+  as ghosts visible only to viewers, with playback and lighting controls.
+- **`recorder_common`** provides settings, retention, paths and file-format codecs.
 
-- **`recorder_capture`** writes a recording: one SQLite file per recording,
-  holding the world inside a region, the players who were in it, their actions
-  and their movement, tick by tick and in order.
-- **`recorder_replay`** plays a recording back inside an arena it builds: the
-  recorded region is reconstructed from the recording's snapshot, node changes,
-  light and node metadata, the recorded players appear as ghosts, and the
-  watchers stand on the arena's top face with a remote control for the clock
-  and the lighting.
-- **`recorder_common`** holds what the two halves have to agree on: the file's
-  identity and paths, the region arithmetic, and the snapshot format.
-
-A recording is self-contained: it carries the world it started from, by node
-name, so replaying it needs the recording, not the game's map files.
+See [capture](recorder_capture/README.md) for its API and file format, and
+[replay](recorder_replay/README.md) for controls and game integration.
 
 ## Requirements
 
-- `lsqlite3`, installed, with `recorder_capture` and `recorder_replay` added to
-  `secure.trusted_mods` or `secure.c_mods`.
-- `algorithms`, for loading the library.
-- A player model for the ghosts: `recorder_replay` reads the model registry of
-  `player_api` or `mcl_player`, and falls back to a sprite without either. The
-  held item attaches to that model's hand bone; a sprite has none.
-
-## Tests
-
-```sh
-./run-tests.sh
-```
-
-runs all three suites; each mod also has its own `tests/run_tests.sh`. The
-suites drive the real mod code against a mocked engine and a real SQLite file.
+`algorithms` and `lsqlite3`; add the enabled capture/replay mods to
+`secure.trusted_mods` or `secure.c_mods`. Ghost models use `player_api` or
+`mcl_player`, falling back to sprites without either.
 
 ## World settings
 
-All capture, replay, and retention settings use the same precedence:
+Precedence: **world override → startup `minetest.conf` default → built-in default**.
+Overrides persist in `recorder_common` mod storage. Defaults are cached at load;
+editing configuration requires a restart, and `/set` has no runtime effect on
+recorder settings. Overrides remain until reset.
 
-1. A persistent override in this world's `recorder_common` mod storage.
-2. A default from `minetest.conf`, cached when `recorder_common` loads.
-3. The built-in default listed in the capture/replay documentation.
-
-The effective settings are kept in memory. The recorder does not read
-`core.settings` after loading; `/set` changes do not affect it during that run.
-Restart to pick up edited configuration defaults. An existing world override
-continues to take precedence until reset.
-
-The following commands require the `server` privilege:
+Commands require `server` privilege:
 
 ```text
-/recorder_settings
-/recorder_settings recorder.max_size_mb 500
-/recorder_settings replay.chat false
-/recorder_settings reset recorder.max_size_mb
+/recorder_settings [key [value] | reset key]
+/recorder settings max_size_mb 500
+/replay settings chat false
+/recorder settings reset max_size_mb
 ```
 
-With no arguments, the command lists effective values, their sources, and when
-changes take effect. A key alone reads it; a key and value saves an override;
-`reset <key>` removes the override and restores the default cached at startup.
-Use `""` as a value to save an explicit empty string (for example, to restore
-automatic model selection despite a configured model default).
+No arguments lists effective values, sources and activation times; a key reads
+one, a value saves an override, and `reset` restores its cached default. Use `""`
+for an explicit empty value. Full `recorder.*`/`replay.*` keys work everywhere;
+short keys default to `recorder.` except under `/replay settings`. The standalone
+command also works with only `recorder_common` enabled.
 
-`/recorder settings ...` is an alias with `recorder.` as the default key prefix;
-`/replay settings ...` defaults to `replay.`. Full keys work through every alias.
-The standalone command also works when only the shared mod is enabled.
-
-Capture options are copied into each new recording. Replay appearance and chat
-options are copied into each new session, including ghosts created later by a
-seek or recorded join. Running recordings and replays keep those options.
-Concurrency limits apply to subsequent start attempts. Directory changes apply
-to subsequent directory lookups; existing captures and replays keep their paths.
-`replay.allow_unfinished` applies to subsequent lists and replay start attempts.
+| Setting group | Changes apply to |
+| --- | --- |
+| Capture options; replay appearance/chat | New recordings/sessions, including ghosts recreated later. Existing ones keep their options. |
+| Concurrency limits | Subsequent start attempts. |
+| `recorder.directory` | Subsequent directory lookups; active captures/replays keep their paths. |
+| `replay.allow_unfinished` | Subsequent file lists and replay starts. |
+| Retention limits | Next cleanup. |
 
 ## Recording retention
 
-Retention is disabled by default. Enable any combination of these settings:
+**Recordings are kept indefinitely by default.** Configure any combination of
+limits to enable automatic deletion; all default to `0` (no limit).
 
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `recorder.retention_count` | `0` | Maximum number of saved recordings. |
-| `recorder.retention_size_mb` | `0` | Combined size budget in MiB, including SQLite `-wal` and `-shm` sidecars. |
-| `recorder.retention_age` | `0` | Maximum age since recording start, in seconds or with an `s`, `m`, `h`, `d`, or `w` suffix. |
+| Setting | Meaning |
+| --- | --- |
+| `recorder.retention_count` | Maximum saved recordings. |
+| `recorder.retention_size_mb` | Combined MiB budget, including SQLite `-wal`/`-shm` sidecars. |
+| `recorder.retention_age` | Maximum age since recording start: seconds or an `s`, `m`, `h`, `d`, `w` suffix. |
 
-`0` disables an individual limit. For example:
+For example, `/recorder settings retention_age 7d` and
+`/recorder settings retention_size_mb 4096` keep up to seven days within 4 GiB.
 
-```text
-/recorder settings retention_age 7d
-/recorder settings retention_size_mb 4096
-/recorder settings retention_count 100
-```
+Cleanup runs at shared-mod load, after recordings stop, and every 60 seconds.
+It deletes whole recordings and sidecars, oldest UTC start first, until all
+enabled limits fit. Captured/watched recordings count toward the budget but are
+protected until released, so limits may temporarily be exceeded. A finished
+recording larger than the budget can be deleted immediately on stopping.
 
-Cleanup runs at shared-mod load, after a recording stops, and every 60 seconds.
-Changes take effect on the next cleanup. It deletes whole recordings, oldest
-first by their UTC start timestamp, until all enabled limits are met. Recordings
-currently being captured or watched are protected, but count toward the budget,
-so limits can temporarily be exceeded. Once released, they become eligible on
-the next cleanup. A single finished recording exceeding the size budget may be
-deleted as soon as it stops.
+Only the current recording directory is managed. Files need the recorder SQLite
+identity and generated timestamped name; unrelated files and recordings renamed
+outside that format are untouched. Deletion failures are logged.
 
-Only the current recording directory is managed. A file must have the recorder's
-SQLite application identity and its generated timestamped filename to qualify.
-Renamed recordings without that filename format and unrelated files are left
-alone. Sidecars are removed together with their recording; deletion failures are
-logged. Automatic deletion does not ask for confirmation once a retention limit
-has been enabled.
+## Tests
+
+Run `./run-tests.sh` for all suites, or a mod's `tests/run_tests.sh`. Tests use a
+mocked engine and real SQLite; LuaJIT with `lsqlite3` is preferred.

@@ -1,15 +1,8 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
--- The baseline a replay starts from: the region as it was when the recording
--- began. The work happens in steps, because it must not stall a server step:
--- the region is emerged first, then read with one VoxelManip, then walked in
--- slices and encoded.
---
--- The walk also leaves the region's content ids and param2 values in memory, in
--- the region's flat-array order. That is what the mapblock-changed callback
--- diffs against later: a changed block is read back and compared with what the
--- recording last knew, and only the nodes that differ become rows.
+-- Emerge the region, read it with one VoxelManip, then encode it in bounded
+-- slices. Retain content ids and param2 in flat-array order for later diffs.
 
 local snapshot = {}
 

@@ -1,44 +1,26 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
--- The part of the recorder modpack that its halves have to agree on: what a
--- recording file is, where recordings live, how they are named, and the shape
--- of a region snapshot inside one. Nothing here needs a running world, so it
--- loads on any game that has the pack.
+-- Shared settings, retention, file identity, paths and snapshot codecs.
 
 recorder_common = {}
 recorder_common.settings = dofile(core.get_modpath("recorder_common") .. "/settings.lua")
 
--- What schema.sql writes into every recording, and what a reader checks before
--- trusting one. A recording says this itself, so it can be recognised without
--- knowing which mod wrote it or which world it belongs to.
+-- SQLite identity and schema version checked when opening recordings.
 recorder_common.APPLICATION_ID = 0x4A4D4152  -- 'JMAR'
 recorder_common.SCHEMA_VERSION = 1
 
 recorder_common.DEFAULT_NAME = "unnamed"
 recorder_common.NAME_MAX = 64
 
--- What the game (rather than the pack) knows about its own world. A game that
--- wants to provide the arena a replay is built in, or say how a participant
--- gets back from one, registers that here - so no code in the pack has to name
--- a game. A recording's region is deliberately not here: it is a choice about
--- what to record, and the caller of recorder.start() makes it.
---
---   arena                      -> function(size, taken) -> pos1, pos2; `size`
---                                 is the volume needed (the region plus its
---                                 shell), `taken` a list of boxes already in use
---   world_persistent           -> false on a game whose world is rebuilt from
---                                 scratch at boot (nothing to clean up or save)
---   can_enter(player, session) -> false and a reason to refuse a player before
---                                 a replay is opened or prepared; nil or true
---                                 allows. `session` is nil before a start and
---                                 the session itself on a join. It is a
---                                 predicate and should have no side effects.
---   before_enter(player, session) -> the player is about to be taken into a
---                                 replay, still where the game left them and
---                                 with their own inventory
---   on_enter(player, session)  -> a participant entered a replay
---   on_leave(player, session)  -> a participant left one
+-- Game-specific replay hooks; capture regions belong to recorder.start().
+--   arena(size, taken) -> pos1, pos2: fit the region plus shell; avoid taken boxes
+--   world_persistent: false if the game rebuilds the world and owns inventories
+--   can_enter(player, session): pure predicate; false + reason refuses entry;
+--                               nil/true allows; session is nil before a start
+--   before_enter(player, session): before replacing inventory and teleporting
+--   on_enter(player, session): after entering the arena
+--   on_leave(player, session): after restoring the player (online players only)
 recorder_common.game_hooks = {
 	arena = nil,
 	world_persistent = true,
@@ -64,11 +46,7 @@ end
 
 recorder_common.file_exists = file_exists
 
--- Where recordings are written. A directory named in the setting is taken
--- relative to the world unless it is an absolute path: the working directory is
--- a property of how the server was started - a systemd unit, the shell somebody
--- ran it from - and a recording has no business landing somewhere else because
--- of it.
+-- Resolve recorder.directory relative to the world, unless absolute.
 ---@return string
 function recorder_common.recordings_dir()
 	local dir = recorder_common.settings:get("recorder.directory")
@@ -81,9 +59,8 @@ function recorder_common.recordings_dir()
 	return core.get_worldpath() .. "/" .. dir
 end
 
--- A recording name ends up in a file name, so anything that is not plainly a
--- word character is replaced, and leading dots (which would walk out of the
--- recordings directory) are dropped.
+-- Keep filenames within the recordings directory: replace unsafe characters
+-- and strip leading dots.
 ---@param name string?
 ---@return string
 function recorder_common.sanitize_name(name)
@@ -93,8 +70,7 @@ function recorder_common.sanitize_name(name)
 	return clean
 end
 
--- Never write into a file that is already there: opening an existing recording
--- would append to it, and a name is not worth that.
+-- Choose an unused path; never append to or overwrite an existing recording.
 ---@param dir string
 ---@param base string
 ---@return string?  -- nil when a thousand recordings already carry this name
@@ -108,10 +84,8 @@ function recorder_common.unique_path(dir, base)
 	return nil
 end
 
--- Open a recording to read, and refuse anything that is not one. The connection
--- is read-only, so a bug in a reader can never append to a recording; a
--- recording that is still being written is read as of its last commit, which is
--- what WAL is for.
+-- Validate identity/version and enable query_only. WAL exposes committed rows
+-- of active recordings without blocking capture.
 ---@param path string
 ---@param sqlite table  -- the lsqlite3 library, loaded by the calling mod
 ---@return userdata|nil, string?
@@ -129,9 +103,7 @@ function recorder_common.open_read_only(path, sqlite)
 		return nil, message
 	end
 
-	-- A recording may be written to while it is being read. Readers never block
-	-- a writer in WAL, so this only makes a brief checkpoint or schema lock wait
-	-- instead of failing outright.
+	-- Briefly wait for checkpoint/schema locks; WAL readers do not block writers.
 	handle:busy_timeout(250)
 	if handle:exec("PRAGMA query_only = ON") ~= sqlite.OK then
 		return fail(string.format("cannot open %s read-only: %s", path, tostring(handle:errmsg())))

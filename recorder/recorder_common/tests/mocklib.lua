@@ -345,13 +345,8 @@ function M.new(opts)
 		mock.privs[name] = definition
 	end
 
-	-- A tiny world behind the engine stand-in: nodes by position, content ids,
-	-- emerge and a VoxelManip, so the snapshot and reconstruction paths can be
-	-- driven without a server.
-	--
-	-- The numbering follows the engine: a registered node gets an id from 0
-	-- upwards, and the three special ids sit above them. That matters because
-	-- 0 is a perfectly valid id for the first node registered.
+	-- Mock world/VM for capture and reconstruction. Registered content ids start
+	-- at 0, which is valid; special ids follow the engine's numbering.
 	local node_names = {[125] = "unknown", [126] = "air", [127] = "ignore"}
 	local node_ids = {unknown = 125, air = 126, ignore = 127}
 	local next_node_id = 0

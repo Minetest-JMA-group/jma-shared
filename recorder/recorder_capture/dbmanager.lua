@@ -1,21 +1,9 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
--- Database layer of one recording: it owns the SQLite connection, the schema,
--- and the rows waiting to be written. One instance per recording, so several
--- recordings can be written at once - they are separate files, and therefore
--- separate connections.
---
--- Recording has to stay off the server's critical path: the callbacks that feed
--- it have to return at once, so nothing here may commit per action, and a
--- commit is a disk synchronization. Callbacks only append rows to the buffers
--- here; a globalstep hands the whole batch to SQLite in one transaction a few
--- times a second.
---
--- Rows of both tables take their id from one shared sequence (next_id), which
--- is what makes the order of events and movement samples recoverable from the
--- two tables together - see the Timeline view in schema.sql. Ids are therefore
--- assigned when a row is buffered, not when it is written.
+-- One SQLite connection and row buffer per recording. Callbacks buffer rows;
+-- globalstep commits batches in one transaction, avoiding per-action disk sync.
+-- Assign shared timeline ids when buffering to preserve cross-table order.
 
 local dbmanager = {}
 
@@ -31,9 +19,7 @@ local MOVEMENT_COLUMNS = 20
 local METADATA_COLUMNS = 7
 local LIGHT_COLUMNS = 5
 
--- What schema.sql puts in PRAGMA application_id ('JMAR'), and what tells a
--- recorder file apart from any other database. The same value is in
--- recorder_common, which is what a reader checks before trusting a file.
+-- Match schema.sql and recorder_common's JMAR application_id.
 local APPLICATION_ID = recorder_common.APPLICATION_ID
 
 -- How long a statement waits for a lock before it gives up. See open().
@@ -117,11 +103,8 @@ function DB:open(path)
 		return nil, string.format("cannot open %s: %s", path, tostring(err2 or err1))
 	end
 
-	-- Everything below, and every statement run later, waits for a lock instead
-	-- of failing outright - but not for long: this runs inside a server step,
-	-- and a step that stops for a second is worse for the players than a batch
-	-- of rows given up on. Readers never hold us up (WAL), so this is only
-	-- about another writer.
+	-- Bound lock waits to protect the server step. WAL readers do not block us;
+	-- contention is with another writer or a checkpoint/schema operation.
 	handle:busy_timeout(BUSY_TIMEOUT_MS)
 	self.db = handle
 
@@ -209,11 +192,8 @@ function DB:is_open()
 	return self.db ~= nil
 end
 
--- Fold the write-ahead log back into the main file, so a finished recording is
--- the single .sqlite file it looks like. A connection that is still reading the
--- recording holds that back (WAL is what lets it read while the recorder
--- writes, so this is a normal thing to meet): the pages stay in the -wal, and
--- whoever takes the file away has to take that with it.
+-- Checkpoint WAL into the main file on close. An active reader may prevent
+-- this; in that case the -wal must accompany the .sqlite file.
 local function checkpoint(self)
 	local stmt = self.db:prepare("PRAGMA wal_checkpoint(TRUNCATE)")
 	if not stmt then
@@ -268,12 +248,8 @@ function DB:next_id()
 	return self.seq
 end
 
--- Id of the player with this name, creating their row on first sight.
---
--- A row that cannot be written is retried the next time the player is seen
--- rather than remembered as a lost cause: a database that was busy for a
--- moment must not cost the recording a player for the rest of its length. The
--- caller is told about each failure and decides how often to say so.
+-- Find or create a player id. Failed inserts are retried on the next sighting;
+-- report each failure to the caller, which controls logging.
 ---@param name string
 ---@return integer|nil, string?
 function DB:player_id(name)
@@ -361,9 +337,7 @@ end
 
 local function insert_rows(self, stmt, rows, count, columns)
 	for i = 1, count do
-		-- Bind and step under pcall: lsqlite3 raises rather than returning a
-		-- code for a value it cannot bind, and that raise would unwind out of
-		-- the caller's transaction, leaving it open forever.
+		-- lsqlite3 bind errors raise; catch them here so the caller can roll back.
 		local raised, done, err = pcall(insert_row, self, stmt, rows[i], columns)
 		stmt:reset()
 		if not raised then
@@ -406,12 +380,8 @@ local function insert_light_rows(self, rows, count)
 	return true
 end
 
--- Write everything buffered so far in one transaction.
---
--- A batch that cannot be written is dropped: keeping it for a retry would grow
--- the buffer without bound for as long as the disk stays full. The caller is
--- told how many rows were lost so it can put a marker in the recording; the
--- counters here let it report the total at the end.
+-- Commit the buffered batch in one transaction. Drop failed batches to bound
+-- memory during persistent write failures; return lost-row counts for gap markers.
 ---@return boolean|nil, string?, integer?  -- ok, error, rows dropped
 function DB:flush()
 	if not self.db then

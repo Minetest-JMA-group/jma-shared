@@ -3,32 +3,18 @@
 
 local settings = recorder_common.settings
 
--- The recorded players as ghosts: one Lua entity each, wearing the game's
--- player model when there is one, driven entirely by the recording. The model
--- comes from player_api or mcl_player - their registries are public - but the
--- entity is ours, so no player-only API is called and nothing else on the
--- server treats it as a player.
+-- Recorded players as Lua entities using player_api/mcl_player models, with
+-- sprite fallback. Ghosts are entities, so player-only APIs do not apply.
 
 local ghost = {}
 
--- The client lights an entity from the light at its bounding-box centre. With
--- a zero box that sample is the entity's feet - on a slab, a stair or a block
--- boundary that can be a solid, unlit node, and the whole model turns black
--- while the world around it is bright. A player-sized box samples the body
--- instead. The ghost is physical=false, so the box never collides with
--- anything; it only gives the renderer the right shape to light.
+-- Entity lighting samples the collision-box centre. A body-sized box avoids
+-- sampling dark feet/slabs; physical=false prevents collisions.
 local PLAYER_BOX = {-0.3, 0.0, -0.3, 0.3, 1.8, 0.3}
 
--- Held items. `set_wielded_item` is player-only (the base ServerActiveObject
--- returns false, only PlayerSAO overrides it), and an object property
--- `wield_item` is only rendered for the `wielditem` visual, not for a mesh.
--- The item is therefore a separate `wielditem` entity attached to the model's
--- hand bone; it follows the pose animations with the arm.
---
--- The two model registries carry the item differently: the player_api rig
--- puts it on the arm, while the mcl_player rig has a Wield_Item bone that the
--- game poses at the hand. Each family has its own defaults; a setting
--- overrides them for either.
+-- Held items require a separate wielditem entity: mesh entities cannot render
+-- wield_item, and set_wielded_item is player-only. Attach to player_api's arm
+-- or mcl_player's Wield_Item bone, using family defaults or world overrides.
 local function vector_setting(config, name)
 	local raw = config[name]
 	if not raw or raw == "" then return nil end
@@ -53,10 +39,8 @@ local WIELD_DEFAULTS = {
 	},
 }
 
--- The mcl_player rig's Wield_Item bone is posed for what is held: these are
--- the rig's own values (model units, radians). The bow poses are left out
--- because their arm pose depends on drawing, which a held-item event does not
--- say.
+-- mcl_player hand poses use model units and radians. Bow poses require draw
+-- state absent from wield events, so they are omitted.
 local MCL_POSES = {
 	default = {position = {x = 0, y = 5.3, z = 2}, rotation = {x = 1.57, y = 0, z = 0}},
 	tool = {position = {x = 0, y = 4.7, z = 3.1}, rotation = {x = -1.57, y = 3.93, z = 1.57}},
@@ -71,9 +55,7 @@ local function mcl_pose(item)
 	return "default", MCL_POSES.default
 end
 
--- The game's player model, if it has one. Looked up lazily: a game's armour or
--- skin mods may register their model after this mod has loaded. The registry
--- it came from also says how that rig carries a held item.
+-- Resolve after mods register their models; the registry also identifies the rig.
 local function resolve_model(config)
 	local model_name, model_def, model_family
 	local wanted = config["replay.model"]
@@ -104,8 +86,7 @@ local function resolve_model(config)
 	return model_name, model_def, model_family
 end
 
--- Resolve the model once per session, after game model registries are ready.
--- The session keeps this definition even if an administrator changes defaults.
+-- Freeze the model and appearance settings for each session.
 function ghost.configuration()
 	local config = settings:snapshot("replay.")
 	config.model_name, config.model_def, config.model_family = resolve_model(config)
@@ -113,8 +94,7 @@ function ghost.configuration()
 end
 
 core.register_entity("recorder_replay:ghost", {
-	-- A ghost belongs to a session, and sessions do not survive a restart; an
-	-- entity left on disk would be an orphan nobody could remove.
+	-- Sessions do not survive restarts; neither should their entities.
 	static_save = false,
 	initial_properties = {
 		visual = "mesh",
@@ -131,10 +111,7 @@ core.register_entity("recorder_replay:ghost", {
 		self.object:set_velocity({x = 0, y = 0, z = 0})
 	end,
 	on_deactivate = function(self)
-		-- The item is attached to this object, but it is a separate engine
-		-- object; it must not outlive its ghost if the engine removes us on its
-		-- own (an unloaded mapblock, a game clearing objects). The engine only
-		-- detaches children.
+		-- The engine only detaches children on removal; remove the held item too.
 		local child = self.wield_object
 		if child then
 			self.wield_object = nil
@@ -146,10 +123,7 @@ core.register_entity("recorder_replay:ghost", {
 	on_blast = function() end,
 })
 
--- The item a ghost wears. The `wielditem` visual is the only one that draws an
--- item; set_attach() puts it on the ghost's hand bone and keeps it there as
--- the arm animates. It has no on_step: it is attached and still, so stepping
--- it every server tick would only call into Lua for nothing.
+-- Attached wielditem entities follow the hand animation without an on_step.
 core.register_entity("recorder_replay:wield_item", {
 	static_save = false,
 	initial_properties = {
@@ -200,8 +174,7 @@ function ghost.spawn(name, pos, textures, observers, config)
 	obj:set_observers(observers)
 	local ent = obj:get_luaentity()
 	if ent then
-		-- The item entity is separate from the ghost and needs the same
-		-- observers; the ghost remembers them for an item it creates later.
+		-- Keep observers for held items created later.
 		ent.observers = observers
 		ent.has_model = (model and def) ~= nil
 		ent.model_family = family
@@ -216,13 +189,9 @@ end
 ---@return boolean  -- false when the object has been invalidated in the meantime
 function ghost.set_observers(obj, observers)
 	if not obj or not obj:is_valid() then return false end
-	-- An entity can vanish from under a session: its mapblocks may be unloaded
-	-- once the viewers leave (the arena can be far from where they go back to),
-	-- or the game may clear objects. The session is told instead and drops it.
+	-- Unloaded mapblocks or external clear-objects calls may invalidate ghosts.
 	obj:set_observers(observers)
-	-- The attached item is a separate object. A dropped one is not a reason to
-	-- drop the ghost; the ghost's own on_deactivate handles the common case and
-	-- a later wield() sees the stale ref and makes a new one.
+	-- A missing held item is recreated by wield(); it does not invalidate the ghost.
 	local ent = obj:get_luaentity()
 	if ent then
 		ent.observers = observers
@@ -232,9 +201,8 @@ function ghost.set_observers(obj, observers)
 	return true
 end
 
--- Show what a recorded player was holding: a `wielditem` entity attached to
--- the model's hand bone. An empty itemstring takes it away. Returns false
--- when the object is no longer usable or the item is disabled.
+-- Update the attached held item; an empty itemstring clears it.
+-- Return false for invalid ghosts or disabled held items.
 ---@param obj ObjectRef
 ---@param itemstring string?
 ---@return boolean
@@ -253,8 +221,7 @@ function ghost.wield(obj, itemstring)
 	local scale = vector_setting(config, "replay.wield_scale") or defaults.scale
 	local item = itemstring or ""
 	local child = ent.wield_object
-	-- get_pos() answers nothing for an object the engine has dropped; that
-	-- child is replaced below.
+	-- Replace a held item removed by the engine.
 	if child and not child:get_pos() then child = nil end
 	if item == "" then
 		if child then child:remove() end
@@ -290,8 +257,7 @@ function ghost.wield(obj, itemstring)
 	return true
 end
 
--- Remove a ghost and the item attached to it. The engine may already have
--- removed either of them; both removals therefore tolerate a stale ref.
+-- Remove both objects, tolerating engine-invalidated references.
 ---@param obj ObjectRef
 function ghost.remove(obj)
 	if not obj or not obj:is_valid() then return end
@@ -304,11 +270,8 @@ function ghost.remove(obj)
 	obj:remove()
 end
 
--- Put a recorded animation on a ghost: the engine's four animation values,
--- taken from the recording rather than guessed from the movement sample. A
--- pose a game sets itself (lying down while dead) has no other description.
--- Returns false when the object is no longer usable or the data is not an
--- animation.
+-- Apply recorded frames, speed, blend and loop. Return false for invalid
+-- objects or animation data.
 ---@param obj ObjectRef
 ---@param data table  -- {frames = {x =, y =}, speed =, blend =, loop =}
 ---@return boolean
@@ -319,12 +282,9 @@ function ghost.animate(obj, data)
 	return true
 end
 
--- Put a ghost where a movement sample says its player was, and pick the pose
--- the sample describes. `offset` moves the recorded position into the arena
--- the session was given. `keep_pose` says the recording itself has a pose
--- event for this player: the speed-and-dig guess must not overwrite it, and
--- re-setting the same animation on every sample would restart it anyway.
--- Returns false when the object is no longer usable.
+-- Apply movement in arena coordinates. keep_pose preserves recorded animation;
+-- otherwise infer stand/walk/mine without restarting an unchanged animation.
+-- Return false for invalid objects.
 ---@param obj ObjectRef
 ---@param row table
 ---@param offset table?

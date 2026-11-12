@@ -1,9 +1,5 @@
--- Integration test: runs the REAL init.lua with a mocked Minetest core and
--- checks the API contract, what ends up in the recording file, and the rules
--- the schema promises a reader (ordering, omitted no-op ticks, derived
--- acceleration, metadata).
---
--- Usage: luajit test_recorder.lua  (from the tests directory or anywhere)
+-- Capture integration with mocked core: API, ordering, sparse samples,
+-- acceleration and metadata. Run with luajit from any directory.
 
 local function script_dir()
 	local src = debug.getinfo(1, "S").source:sub(2)  -- strip the leading "@"
@@ -377,11 +373,8 @@ check(joins[1].data:find('"textures":%["character.png"%]') ~= nil,
 local stops = events_of("recording_stop")
 check(#stops == 1 and stops[1].data:find('"reason":"api"') ~= nil, "the recording closes with its reason")
 
--- Movement: written when something changes, not otherwise
--- Alice and Bob get one sample each on the first tick, then one more when
--- their acceleration turns out to be zero rather than unknown; Carol's two
--- land on the ticks she arrived and the one after; Alice's five moving ticks
--- follow; the last tick says nothing about anyone and is left out.
+-- Initial samples have unknown acceleration; the next reports zero.
+-- Moving ticks are stored; the final unchanged tick is omitted.
 local total_movement = value(db, "SELECT COUNT(*) FROM Movement")
 check(total_movement == 10, "quiet ticks are not written (got " .. tostring(total_movement) .. ")")
 local alice_movement = movement_of("Alice")
@@ -767,11 +760,8 @@ print("=== giving up on a recording that cannot be written ===")
 assert(recorder_common.settings:set("recorder.flush_interval", "0.01"))  -- commit on every step
 check(start_recording("doomed") == nil, "a recording starts")
 local doomed_path = recorder.get_recording_path()
--- One step before the lock goes on, so that the opening state - the world time,
--- the joins, a Players row each - is written while the database still accepts
--- writes. Otherwise every later step pays the busy timeout again for the player
--- row it cannot write, and this test spends half a minute saying what it could
--- say in four seconds.
+-- Flush opening player rows before locking, avoiding repeated player-insert
+-- busy timeouts while testing batch-write failure.
 mock.step(0.1)
 local doomed_blocker = sqlite.open(doomed_path)
 check(doomed_blocker:exec("BEGIN IMMEDIATE") == sqlite.OK, "another connection takes the write lock")

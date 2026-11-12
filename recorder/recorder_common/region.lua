@@ -1,11 +1,8 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
--- The cuboid a recording covers, and the rules that keep everything in the
--- file inside it. Recording uses this to decide who is sampled, which events
--- are kept and which mapblocks are watched; replay uses it to size an arena and
--- to place the recording's region inside one. The flat-array order is the one
--- VoxelManip uses, so a snapshot's indexes and a replay's arrays agree.
+-- Regional capture filters, replay placement and VoxelManip-compatible flat
+-- indexing shared by snapshot encoders and readers.
 
 local region = {}
 

@@ -1,8 +1,5 @@
--- Integration test: runs the REAL dbmanager.lua against a real SQLite file
--- with a mocked Minetest core. Covers the schema, the shared id sequence, the
--- NULL semantics, foreign keys, dropped batches, metadata and closing.
---
--- Usage: luajit test_dbmanager.lua  (from the tests directory or anywhere)
+-- Real SQLite with mocked core: schema, shared ids, NULLs, foreign keys,
+-- failed batches, metadata and closing. Run with luajit from any directory.
 
 local function script_dir()
 	local src = debug.getinfo(1, "S").source:sub(2)  -- strip the leading "@"

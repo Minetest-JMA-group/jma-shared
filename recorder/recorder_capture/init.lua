@@ -3,18 +3,9 @@
 
 local settings = recorder_common.settings
 
--- recorder – write down what happens on the server, in order, into SQLite.
---
--- One recording is one SQLite file holding the actions players perform, the
--- per-tick kinematics that go with them, and whatever metadata other mods
--- attach. The file is meant to be read back later: replaying it, analysing it
--- or just reading it with the sqlite3 shell. See README.md for the schema, the
--- recorded event types and the API.
---
--- Several recordings can run at once, each over its own region and into its own
--- file: a game may record a match while someone records a practice area. Every
--- recording has an id; events are offered to all of them and each one keeps
--- what its own region says belongs to it.
+-- Record regional world changes, player actions and per-tick kinematics in
+-- separate SQLite files. Events are offered to every active recording and
+-- filtered by its region. See README.md for the format and API.
 
 local FLUSH_DEFAULT = 2.0         -- seconds of server time between commits
 local MAX_BUFFERED_DEFAULT = 20000
@@ -33,9 +24,7 @@ local MANDATORY_EVENTS = {
 	node_change = true,
 }
 
--- Events that describe the recording rather than the region, and that must not
--- be judged by a position: a leave has no position left to judge when the
--- player has already gone, and global chat is not about a place at all.
+-- Lifecycle/gap events and global chat bypass position-based filtering.
 local REGION_EXEMPT = {
 	recording_start = true,
 	recording_stop = true,
@@ -175,11 +164,8 @@ end
 -- of their own, while the event writer needs the players those helpers resolve.
 local record_event
 
--- Players whose row could not be written: the recording would otherwise hold
--- events with no subject and nothing to explain them. This goes into the
--- metadata rather than into the event buffer, so that it does not share the
--- fate of a batch that fails later, and it is attempted again after every
--- commit that goes through in case the trouble stopped the note too.
+-- Explain missing player subjects in metadata, independently of event batches.
+-- Retry this metadata after successful commits in case its write also failed.
 local function write_troubles(rec)
 	if not rec.troubles_dirty then return end
 	local ok = rec.db:set_meta(META_PREFIX .. "player_errors", table.concat(rec.troubles, "; "))
@@ -213,9 +199,7 @@ local function player_name(obj)
 	return nil
 end
 
--- Id of whoever this is, and a report the first time their row cannot be
--- written. It is asked again the next time they are seen, so a database that
--- was busy for a moment does not cost the recording a player for good.
+-- Resolve player ids, reporting the first failure and retrying on later sightings.
 ---@return integer|nil
 local function player_id(rec, obj)
 	local name = player_name(obj)
@@ -274,10 +258,8 @@ local function position_of_object(obj)
 	return obj:get_pos()
 end
 
--- Does this event belong inside the region? The subject, and the object when
--- there is one, must be inside; an event with no player in it (a mob's dig, an
--- explosion) is judged by the position it is about. An event whose subject
--- cannot be read any more is left out rather than guessed at.
+-- Require subject/object players inside, or use the position for non-player
+-- events. Skip events whose subject can no longer be read.
 ---@param ev table
 ---@return boolean
 local function event_in_region(rec, ev)
@@ -334,17 +316,9 @@ local function wielded(obj)
 	return obj:get_wielded_item():to_string()
 end
 
--- The animation a player is wearing, in the four values the engine's old
--- animation interface owns. A pose like "lying down while dead" is not
--- derivable from speed and controls, so the recording keeps the engine's own
--- numbers instead of guessing at replay time. An engine with nothing to say
--- about a player answers nothing; that only means the recording has no pose
--- for them and replay falls back to its guess.
---
--- An animation the engine has never been given is reported as frames 1..1 at
--- 15 fps, no blend, looping. That is not a pose a game chose: recording it
--- would freeze the replay's own guess for the whole file, so it means "no
--- pose" here too.
+-- Record the engine's frame range, speed, blend and loop for game-specific
+-- poses. No animation, or the engine default (frames 1..1, 15 fps, no blend,
+-- looping), leaves replay free to infer a pose from movement.
 ---@param player ObjectRef
 ---@return table|nil  -- {frames = {x =, y =}, speed =, blend =, loop =}
 local function animation_of(player)
@@ -388,9 +362,7 @@ local function control_bits(controls)
 	return bits
 end
 
--- Event data is a JSON object. A value that cannot be serialized must not cost
--- us the callback (and certainly not the action it describes), so the rest of
--- the fields are dropped rather than the whole event.
+-- If event data cannot be encoded as JSON, keep the event without those fields.
 local function encode_data(data)
 	if not next(data) then
 		-- The engine writes an empty table as JSON null, which is not the
@@ -449,20 +421,15 @@ end
 -- Node metadata
 ----------------------------------------------------------------------------
 
--- How often the region is scanned for metadata changes. Metadata has no engine
--- callback, and most changes happen where players are, so a second of
--- granularity is a good trade against scanning the region every step.
+-- Metadata has no change callback; scan once per second.
 local METADATA_INTERVAL = 1.0
 
 local function position_key(pos)
 	return string.format("%d,%d,%d", math.floor(pos.x), math.floor(pos.y), math.floor(pos.z))
 end
 
--- NodeMetaRef:to_table() is not quite storable: inventory slots are ItemStack
--- userdata, and an empty inventory is still a list of empty slots that says
--- how large the node's inventory is. Fields stay strings, stacks become the
--- itemstrings from_table() accepts, and a table with nothing in it is nil -
--- "this node has no metadata worth recording".
+-- Convert inventory ItemStacks to itemstrings, preserving empty slots and
+-- list sizes. Return nil when neither fields nor inventories contain metadata.
 ---@param table_ table?
 ---@return string|nil  -- serialized metadata, or nil when there is nothing to store
 local function metadata_blob(table_)
@@ -566,11 +533,8 @@ end
 -- not just this event but every row buffered beside it.
 ---@param ev table
 record_event = function(rec, ev)
-	-- `reconciling` is the narrow window in which the snapshot's opening-state
-	-- changes are written before the recording is active. It is only set
-	-- around process_block_changes(), not for the whole catch-up phase, so an
-	-- engine callback during that phase is still dropped like any pre-start
-	-- event.
+	-- Permit opening-state changes only during process_block_changes(). Other
+	-- callbacks remain pre-start events and are dropped throughout catch-up.
 	if not rec.recording and not rec.reconciling then return end
 	if type(ev.type) ~= "string" or ev.type == "" then
 		complain(rec, "event without a type", "cannot record an event whose type is not a name")
@@ -635,10 +599,8 @@ local function same_state(a, b)
 	return true
 end
 
--- One player's sample for this tick. Samples identical to the last written one
--- are left out - a reader carries the previous row forward, and acceleration
--- is part of the comparison, so a sample only disappears when it says nothing
--- new. That is what keeps a recording from growing while players stand still.
+-- Omit samples identical to the last written state, including acceleration;
+-- readers carry the previous row forward.
 local function record_player(rec, player, dtime)
 	local name = player_name(player)
 	if not name then return end
@@ -761,9 +723,7 @@ local function on_leave(rec, player, timed_out)
 	rec.joined[pid] = nil
 end
 
--- One pass through the region: sample the players in it, and note who walked
--- in or out since the last pass. Everything in a recording is inside the
--- region, so a player who leaves it leaves the recording until they return.
+-- Sample regional players and emit join/leave events for boundary crossings.
 local function observe_region(rec, dtime)
 	local reg = rec.region
 	local seen = {}
@@ -880,9 +840,7 @@ local function maybe_flush(rec)
 		type = "write_error",
 		data = { dropped_rows = lost, message = err },
 	})
-	-- The database counts the failed commits itself, and clears the count on the
-	-- first one that goes through, so there is one answer to "is this recording
-	-- in trouble" rather than two that can drift apart.
+	-- DB statistics own the consecutive-failure count and reset it on success.
 	if rec.db:stats().failed >= MAX_FAILURES then
 		log_error("giving up on the recording after repeated write failures")
 		stop_recording(rec, "write_error")
@@ -893,11 +851,8 @@ end
 -- API
 ----------------------------------------------------------------------------
 
--- Resolve the region a recording covers. It is the caller's choice: a region
--- handed to start() (a game starting a recording knows exactly where), or the
--- marks the chat command resolves for the player who asked. There is no
--- provider to fall back on: a recording is about a particular place, and a
--- stateless source has no way to know which recording is being started.
+-- The caller supplies the region directly or through chat-command marks.
+-- Capture has no region provider.
 ---@param region_arg table?  -- {pos1 =, pos2 =}
 ---@return table|nil, string?
 local function resolve_region(region_arg)
@@ -1002,13 +957,9 @@ end
 local function begin_recording(rec)
 	rec.catching_up = false
 	rec.recording = true
-	-- The baseline rows go in now, so a reader has the state of every container
-	-- as it is at the first sampled tick, including any change made during the
-	-- catch-up.
+	-- Baseline metadata must include catch-up changes before the first sample.
 	record_metadata_baseline(rec)
-	-- Who is online and what the world time is has to wait for the first server
-	-- step: a mod is allowed to start a recording while it loads, and the
-	-- engine refuses those questions before the server is running.
+	-- Load-time starts must defer player/time-of-day reads to the first server step.
 	rec.pending_start = true
 	local flushed, flush_err = rec.db:flush()
 	if not flushed then
@@ -1172,9 +1123,7 @@ recorder.start = function(record_name, region_arg)
 	-- compressed in one step, and at level 9 a large region holds the step for
 	-- seconds; 6 is the middle the recorder starts from.
 	rec.compression_level = tonumber(settings:get("recorder.compression_level"))
-	-- Mapblock entries diffed per step while catching up after a snapshot; 0
-	-- processes everything at once, which is what used to make the first
-	-- recording step pause for seconds.
+	-- Bound post-snapshot catch-up work; 0 processes all entries in one step.
 	rec.diff_budget = tonumber(settings:get("recorder.diff_budget"))
 
 	local snap, snap_err = snapshot_module.new(region.pos1, region.pos2, rec.light_enabled,
@@ -1621,12 +1570,8 @@ end)
 -- Particles
 ----------------------------------------------------------------------------
 
--- The particle APIs have no callback, so the only way to know what a mod asked
--- for is to stand in front of the three engine functions. Every wrapper calls
--- the original with the caller's own arguments and returns exactly its result:
--- the recorder is watching, not substituting. A definition is stored in the
--- event's data as JSON, and a spawner's engine id is stored with it so that a
--- later delete can be replayed against the id the replay engine hands back.
+-- Wrap particle APIs without changing arguments or results; no callbacks exist.
+-- Store definitions as JSON and spawner ids for matching later deletes.
 
 local unpack = table.unpack or unpack
 
@@ -1638,10 +1583,8 @@ local function unpack_all(packed)
 	return unpack(packed, 1, packed.n)
 end
 
--- Add every point a particle position value describes. A number is the
--- engine's shorthand for a uniform vector, a vector is one point, and a range
--- is its two ends. Anything else is not a position and is ignored rather than
--- guessed at.
+-- Particle positions accept scalars (uniform vectors), vectors, or range
+-- endpoints. Ignore other values.
 local function add_point(points, value)
 	if type(value) == "number" then
 		points[#points + 1] = {x = value, y = value, z = value}
@@ -1704,11 +1647,8 @@ local function particle_position(definition)
 	return {x = 0, y = 0, z = 0}
 end
 
--- A definition is stored as JSON, so it must hold only numbers, strings,
--- booleans and tables of them. The one common exception is an effect attached
--- to an object: it follows that object (position and yaw), which a recording
--- cannot reproduce without the object, so it is left out - said once - rather
--- than replayed at a wrong, fixed position.
+-- Definitions must be JSON-compatible. Skip object-attached effects and warn
+-- once: replay cannot reproduce their position/yaw without the attached entity.
 local particle_complaints = {}
 local function recordable_definition(definition)
 	if type(definition) ~= "table" then
@@ -1833,12 +1773,8 @@ end
 -- Chat
 ----------------------------------------------------------------------------
 
--- Global chat reaches clients through two funnels that do not call each other:
--- normal player chat is delivered line by line by block_msgs, and mod
--- broadcasts go through chat_lib's send-all callbacks. Both are watched into
--- one event, so a replay can show the line clients actually saw - prefixes,
--- colors and caps handling already applied. A server without that plumbing
--- gets the engine's formatter instead; see chathooks.lua.
+-- Capture final global chat, including formatting, from the independent player
+-- and broadcast paths. chathooks.lua installs the hooks and formatter fallback.
 local chathooks = dofile(modpath .. "/chathooks.lua")
 
 local chat_complaints = {}
@@ -1878,12 +1814,8 @@ end)
 -- Changes to the region's nodes
 ----------------------------------------------------------------------------
 
--- The engine calls this at most once per server step, with the mapblocks in
--- which anything changed. The changes are collected per recording, with the
--- tick that recording was on, and diffed against its known state in the next
--- step: a node that differs becomes a node_change row. This is what catches
--- changes no callback announces - an explosion, flowing water, an ABM, a mod's
--- set_node - because it watches the world instead of asking mods to report.
+-- Queue changed mapblocks at each recording's current tick; diff them next
+-- step to capture all world changes, including changes without action callbacks.
 core.register_on_mapblocks_changed(function(modified_blocks, count)
 	if not modified_blocks or not count or count == 0 then return end
 	for _, rec in pairs(recordings) do
@@ -1897,11 +1829,8 @@ core.register_on_mapblocks_changed(function(modified_blocks, count)
 	end
 end)
 
--- Read one mapblock back and compare it with what the recording last knew. Only
--- nodes that differ become rows; the block's nodes are addressed by arithmetic
--- rather than by building a position table for each of the 4096 of them. Light
--- is compared the same way: the callback reports blocks whose light changed
--- even when no node did, so a torch's glow is caught too.
+-- Diff nodes and light against known state, using flat-array arithmetic to avoid
+-- per-node position tables. Mapblock notifications also cover light-only changes.
 local function diff_block(rec, block, tick, t, light_changes)
 	local reg = rec.region
 	local size = region_module.size(reg)
@@ -1976,12 +1905,9 @@ local function diff_block(rec, block, tick, t, light_changes)
 	end
 end
 
--- The mapblock callback's hashes use the hash_node_position encoding, but the
--- position they encode is a mapblock position in mapblock units - not the
--- node-space base corner the documentation's wording suggests. The node-space
--- base is 16 times that. Both readings are tried and the region's bounds
--- discard the wrong one, so an engine that hands out node positions instead
--- keeps working as well.
+-- Callback hashes normally encode mapblock positions; multiply by 16 for node
+-- coordinates. Also try node-space hashes for engine compatibility, rejecting
+-- candidates outside the recording's region.
 ---@param block table
 ---@return table[]
 local function block_candidates(block)
@@ -1994,10 +1920,7 @@ end
 local function process_block_changes(rec)
 	local pending = rec.pending_blocks
 	if #pending == 0 then return end
-	-- A snapshot queues every changed mapblock for its whole length. Diffing
-	-- all of them in the first recording step is a multi-second pause, so a
-	-- few entries are processed per step instead. The rows keep the tick the
-	-- entry was queued with, so the timeline is the same either way.
+	-- Diff queued blocks in bounded batches, preserving each entry's original tick.
 	local budget = rec.diff_budget or 8
 	local processed = 0
 	local block_min, block_max = region_module.blocks(rec.region)

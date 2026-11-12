@@ -19,8 +19,7 @@ local function size(path)
 	return total
 end
 
--- The generated name contains UTC start time. Convert civil dates directly,
--- without os.time's local timezone or daylight-saving interpretation.
+-- Convert filename UTC start time directly, independent of local time/DST.
 local function started_at(name)
 	local stamp = name:match("%-(%d%d%d%d%d%d%d%dT%d%d%d%d%d%dZ)%.sqlite$")
 		or name:match("%-(%d%d%d%d%d%d%d%dT%d%d%d%d%d%dZ)%-%d+%.sqlite$")
@@ -43,8 +42,7 @@ local function identity(path)
 	if not file then return false end
 	local header = file:read(72)
 	file:close()
-	-- SQLite stores application_id big-endian at byte 69. Only recordings of
-	-- this pack are eligible; unrelated databases in the directory are ignored.
+	-- SQLite's big-endian application_id at byte 69 identifies recorder files.
 	return header and #header == 72 and header:sub(1, 16) == "SQLite format 3\0"
 		and header:sub(69, 72) == "JMAR"
 end
@@ -131,8 +129,7 @@ function retention.prune(now)
 	return removed
 end
 
--- Load-time cleanup also runs on worlds which only load the replay half.
--- Both active registries are consulted afresh before every cleanup.
+-- Cleanup also works with replay alone; each pass rechecks active paths.
 retention.prune()
 local elapsed = 0
 core.register_globalstep(function(dtime)

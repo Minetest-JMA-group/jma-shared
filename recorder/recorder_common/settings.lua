@@ -1,8 +1,7 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
--- Configuration is resolved once at boot. Commands change the effective table
--- and persist world overrides; core.settings supplies only startup defaults.
+-- Cache startup defaults; commands update memory and persist world overrides.
 local settings = {}
 local storage = core.get_mod_storage()
 local definitions, defaults, values, sources, default_sources = {}, {}, {}, {}, {}
@@ -123,7 +122,7 @@ function settings:reset(key)
 	if not definitions[key] then return false, "Unknown recorder setting: " .. tostring(key) end
 	storage:set_string("setting:" .. key, "")
 	values[key] = defaults[key]
-	-- Configuration presence is cached separately from the override source.
+	-- Reset restores both the cached default and its source.
 	sources[key] = default_sources[key]
 	return true
 end

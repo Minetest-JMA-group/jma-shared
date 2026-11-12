@@ -1,27 +1,11 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
--- Where global chat becomes visible to clients, and how to watch it without
--- standing in its way.
---
--- Chat reaches the clients through two funnels that do not call each other:
---
---   * normal player chat is formatted and then handed to block_msgs, which
---     delivers the same final line to every player who has not blocked the
---     sender;
---   * everything a mod broadcasts - spectator chat, /g, /me, announcements,
---     messages relayed in from Discord or XMPP - goes through chat_lib's
---     send-all callbacks.
---
--- A recorder needs to see both, because neither funnel calls the other. When
--- block_msgs is absent (or its backend failed, in which case it registers no
--- chat callback), the engine formats and broadcasts player chat itself and
--- the formatter is the last Lua code in that path, so that is the fallback.
---
--- The module takes the chat objects as arguments instead of reading globals,
--- so a test can drive it with stand-ins. Installation belongs after
--- core.register_on_mods_loaded: the chat mods replace these functions while
--- they load, and a wrapper put in place earlier would be dropped.
+-- Observe final global chat through two independent paths: formatted player
+-- lines via block_msgs and mod broadcasts via chat_lib send-all callbacks.
+-- Without a working block_msgs backend, core.format_chat_message is the last
+-- Lua hook for player chat. Install after mods load, once chat overrides are
+-- in place. Chat objects are injected for testing.
 
 local chathooks = {}
 
@@ -53,11 +37,8 @@ function chathooks.install(env)
 	local core, chat_lib, block_msgs = env.core, env.chat_lib, env.block_msgs
 	local installed = {}
 
-	-- In the formatter fallback a mod may format a line and then broadcast it
-	-- (CTF's /g does). Both funnels are installed in that configuration, so the
-	-- broadcast must not store the same line a second time. The pending entry
-	-- is only consumed by a broadcast carrying that exact string; `now` keeps a
-	-- same-text broadcast from a later step from being mistaken for it.
+	-- A mod may format and then broadcast the same line. Suppress that duplicate
+	-- only for an exact string match in the same step.
 	local pending_format
 	local function now()
 		return env.now and env.now() or nil

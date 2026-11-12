@@ -1,26 +1,17 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
--- The recording's region, as nodes in an arena: the snapshot the recording
--- started from, then every node_change up to the moment being shown. The
--- arrays live on the session and are changed in place during forward playback;
--- a seek rebuilds them from the snapshot and writes the result once.
---
--- The recorded positions and the arena's positions differ by a constant
--- offset, and the two regions have the same size. The snapshot's own indexes
--- are relative to the recorded region, so those are what index the arrays; the
--- offset is only applied when the arrays are written, or a ghost is placed.
+-- Reconstruct snapshot plus changes at a replay tick. Reuse session arrays:
+-- forward playback mutates them; seeks rebuild them. Indexes remain relative
+-- to the recorded region; apply the arena offset only when writing/placing.
 
 local reconstruct = {}
 
 local codec = recorder_common.snapshot
 local region = recorder_common.region
 
--- Content ids belong to this run of this server, so the recording only names
--- nodes and every name is resolved again here. The engine raises for a name it
--- does not know - a node from a mod the server no longer has - and that node
--- becomes CONTENT_UNKNOWN. Id 0 is a valid id (the first registered node), so
--- it must not be mistaken for a missing one.
+-- Resolve recorded node names for this server run; unknown names raise and map
+-- to CONTENT_UNKNOWN. Content id 0 is valid.
 ---@param name string
 ---@return integer
 local function content_id(name)
@@ -87,9 +78,7 @@ function reconstruct.load(rec)
 
 	local volume = size.x * size.y * size.z
 
-	-- The light layer is optional: a recording made with recorder.light off
-	-- has none, and replay then recalculates the light instead. A layer that
-	-- cannot be read is treated the same way rather than costing the session.
+	-- Recalculate lighting if the optional recorded layer is absent or unreadable.
 	local light_base
 	if row.light ~= nil and #row.light > 0 then
 		local light_body = row.light
@@ -192,15 +181,9 @@ function reconstruct.add_light_blocks(blocks, state, entries, offset)
 	end
 end
 
--- Rebuild the state at a tick: the snapshot first, then every node change up
--- to that tick in the order it happened. Changes beyond the tick are not read,
--- which is what seeking backwards undoes them.
---
--- When `since_tick` is given, the mapblocks touched by the rows between that
--- tick and this one are collected and returned: they are the only blocks whose
--- content can differ between the state last written and this one, so a seek
--- only has to write those. The arrays themselves are reused rather than
--- allocated again - at millions of nodes, the allocation alone is a pause.
+-- Rebuild snapshot plus changes through tick, reusing arrays to avoid large
+-- allocations. With since_tick, return blocks touched between the two ticks
+-- so seeking writes only potentially changed blocks.
 ---@param state table
 ---@param rec table
 ---@param tick integer
@@ -315,10 +298,7 @@ function reconstruct.apply_light(state, body, encoding)
 	return true, entries
 end
 
--- Put one recorded metadata row into the arena. An empty data string is a
--- deliberate clearing; the position is translated like every other recorded
--- position. A row that cannot be read is reported and skipped rather than
--- taking the session down.
+-- Translate and apply metadata; empty data clears it. Log/skip unreadable rows.
 ---@param offset table
 ---@param row table
 function reconstruct.apply_metadata(offset, row)
@@ -346,13 +326,9 @@ function reconstruct.apply_metadata(offset, row)
 	end
 end
 
--- Write the whole region into the arena in one VoxelManip operation. The VM
--- pre-loads a mapblock-aligned area that can be larger than the region, so the
--- cells are addressed through the emerged area's origin.
---
--- `mode` is "recorded" to write the light the recording holds (with the engine
--- told not to recalculate it) or "live" to let the engine work it out. Without
--- recorded light the mode falls back to live.
+-- Write the region using the emerged VM area's origin (mapblock-aligned).
+-- mode selects recorded light without recalculation or live lighting;
+-- missing recorded light falls back to live.
 ---@param state table
 ---@param offset table
 ---@param mode string?  -- "recorded" or "live"
@@ -404,21 +380,15 @@ function reconstruct.write(state, offset, mode)
 	if light then
 		vm:set_light_data(light)
 	end
-	-- update_liquids() is deliberately never called: it is what makes the
-	-- engine start flowing whatever liquids were written, while a replay has to
-	-- hold still when paused and show exactly the recorded moment when seeking.
-	-- The light is not recalculated here either: recorded lighting was just put
-	-- in, and live lighting is recalculated in one pass by the caller.
+	-- Do not start liquid flow. Preserve recorded light; the caller relights live
+	-- mode in one pass.
 	vm:write_to_map(false)
 	vm:close()
 	return true
 end
 
--- Write only some mapblocks of the region: the cells inside the region come
--- from the state, the rest of each block is left as the map had it. This is
--- how forward playback and seeks touch what changed rather than the whole
--- region, which on a large recording is the difference between a step and a
--- multi-second pause.
+-- Write selected mapblocks, preserving cells outside the region. Both forward
+-- playback and seeks avoid rewriting the entire arena.
 ---@param state table
 ---@param offset table
 ---@param blocks table  -- key -> block base, in arena/world coordinates

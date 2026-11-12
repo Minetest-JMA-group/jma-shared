@@ -1,10 +1,5 @@
--- Schema of one recording file. Every recording starts as an empty database
--- created from this file, so a reader can always tell what it is looking at:
---
---   PRAGMA application_id = 0x4A4D4152  ('JMAR' - a JMA recorder database)
---   PRAGMA user_version   = schema version, bumped whenever this file changes
---
--- See README.md for the meaning of every column and the list of event types.
+-- Recording schema: application_id identifies JMAR; user_version identifies
+-- the schema version. README.md documents columns and event types.
 
 PRAGMA application_id = 0x4A4D4152;
 PRAGMA user_version = 1;
@@ -17,26 +12,12 @@ CREATE TABLE Metadata (
 	value TEXT NOT NULL
 ) STRICT;
 
--- The world the recording starts from: one snapshot of the region, taken before
--- the first recorded action, so a replay needs nothing but this file.
---
--- pos1_* and size_* are the region's low corner and its dimensions; names is
--- the newline-separated list of node names the body refers to by index (node
--- names never contain a newline). data is the deflated sparse body built by
--- recorder_common.snapshot: one entry per non-air node, in the region's
--- flat-array order (x fastest, then y, then z - the order VoxelManip numbers
--- nodes). Air is not stored. encoding is "deflate" or "raw", so a reader knows
--- whether to decompress the body.
---
--- Node names are stored, not Content IDs: an id is only stable for one run of
--- one server, and this file has to be readable anywhere, later.
---
--- light is the region's lighting at that moment: one byte per node in the same
--- flat order, encoded by recorder_common.light (low 4 bits skylight, high 4
--- bits artificial light), compressed as light_encoding says. It covers air too,
--- because that is where most of the light that shades faces is stored. Both
--- columns are NULL when light recording was off; a replay then recalculates
--- the light instead.
+-- Initial regional snapshot: low corner, dimensions, newline-separated node
+-- names and sparse non-air data (recorder_common.snapshot, x/y/z order).
+-- encoding is deflate or raw. Names replace run-specific content ids.
+-- light uses the same order, densely including air: low 4 bits skylight,
+-- high 4 artificial light. light_encoding controls compression; both light
+-- columns are NULL when disabled, so replay recalculates lighting.
 CREATE TABLE Snapshot (
 	tick INTEGER PRIMARY KEY,
 	t REAL NOT NULL,
@@ -53,16 +34,10 @@ CREATE TABLE Snapshot (
 	light_encoding TEXT
 ) STRICT;
 
--- Node metadata and inventories, as they were and as they changed. The row
--- holds what NodeMetaRef:to_table() describes: an inventory list is a list of
--- itemstrings, slot for slot (an empty string is an empty slot). data is that
--- table serialized with core.serialize; an empty string is a deliberate
--- clearing (the node stopped having metadata, or the node went away).
---
--- Rows share the id sequence with Events and Movement, so their order relative
--- to the rest of the timeline is recoverable. The first rows are the baseline
--- at tick 0; later rows are what the recorder's periodic scan found, so a
--- metadata change carries the tick and time of the scan that saw it.
+-- core.serialize(NodeMetaRef:to_table()), with inventory slots converted to
+-- itemstrings (including empty slots). Empty data clears metadata.
+-- Shared timeline ids; tick 0 holds the baseline, later ticks/times identify
+-- the periodic scan that observed a change.
 CREATE TABLE NodeMetadata (
 	id INTEGER PRIMARY KEY,
 	tick INTEGER NOT NULL,
@@ -73,11 +48,9 @@ CREATE TABLE NodeMetadata (
 	data TEXT NOT NULL
 ) STRICT;
 
--- Changes to the region's lighting, one row per diff round. data is a body of
--- recorder_common.snapshot entries - a flat region index and the light byte it
--- became - compressed as encoding says. Light changes without any node change
--- (a torch lighting a room) are reported by the mapblock callback too, so this
--- rides the same diff that produces node_change rows; there is no polling.
+-- One row per mapblock diff round, including light-only changes. data uses
+-- recorder_common.snapshot entries: region index and new light byte;
+-- encoding controls compression.
 CREATE TABLE LightChanges (
 	id INTEGER PRIMARY KEY,
 	tick INTEGER NOT NULL,
@@ -94,25 +67,12 @@ CREATE TABLE Players (
 	name TEXT NOT NULL UNIQUE
 ) STRICT;
 
--- Player kinematics, one sample per player per server step in which anything
--- about that player changed (unchanged samples are not written; a reader holds
--- the previous row forward - see README.md).
---
--- id is taken from the same sequence as Events.id, so a single ORDER BY id
--- over both tables (see the Timeline view) reproduces the order in which
--- things happened. tick counts server steps since the recording started; t is
--- the amount of server time since then, in seconds, and dtime the length of
--- this particular step - the server step is not a fixed length, so t is not
--- simply tick * dtime.
---
--- pitch (look up/down) and yaw (look around) are radians, as returned by
--- ObjectRef:get_look_vertical()/get_look_horizontal(). speed is |vel|, kept
--- because filtering by speed is the common query. acc_* is derived from the
--- difference between this sample and the previous one of the same player, and
--- is NULL for the first sample of a player (there is nothing to derive from).
--- controls is the bitmask documented for ObjectRef:get_player_control_bits();
--- move_x/move_y are the analog movement axes of the same call, which carry
--- joystick input that the buttons alone do not describe.
+-- Sparse per-player movement; readers carry unchanged samples forward.
+-- id shares the timeline sequence. tick counts steps; t is elapsed server
+-- seconds and dtime is this step's length (step lengths vary).
+-- pitch/yaw are radians, speed is |vel|, acc_* is velocity delta / dtime
+-- (NULL for the first sample). controls is get_player_control_bits(); move_x/y
+-- are analog axes from get_player_control().
 CREATE TABLE Movement (
 	id INTEGER PRIMARY KEY,
 	tick INTEGER NOT NULL,
@@ -136,22 +96,10 @@ CREATE TABLE Movement (
 	move_y REAL NOT NULL
 ) STRICT;
 
--- Everything that happened, one row per event.
---
--- subject_player is who performed the action, object_player is the player it
--- was performed on. Both are NULL when the event has no such participant: an
--- actor that is not a player (a mob, an explosion) is described by
--- data.actor instead, and an action on a node or an item leaves
--- object_player NULL and fills pos_*/node/param2/item.
---
--- pos_* is the position the event is about (the dug or placed node, the player
--- that was hit, where someone spoke, ...) - not the actor's own position,
--- which is in Movement for the same tick. node is a node name with its param2
--- (param1 is derived by the engine from lighting and flow, so it is not
--- stored). item is an itemstring: the tool used to dig, the stack placed, the
--- stack crafted, the wielded stack of a join. data is a JSON object holding
--- the fields that only apply to one kind of event - see README.md. SQLite's
--- JSON functions can dig into it: json_extract(data, '$.reason.type').
+-- Event participants are nullable Players ids; non-player actors use data.actor.
+-- pos_* describes the action target; the actor's position is in Movement.
+-- node/param2 describes the node (param1 is engine-derived); item is an
+-- itemstring. data is event-specific JSON; see README.md for fields.
 CREATE TABLE Events (
 	id INTEGER PRIMARY KEY,
 	tick INTEGER NOT NULL,

@@ -234,11 +234,8 @@ function reader.join_leave_until(rec, tick)
 	return rows
 end
 
--- The last wield event of a player at or before a tick, as {id =, item =
--- itemstring or nil}. The id lets a caller tell a wield from before a leave
--- apart from the item on the later join that brought the player back. The row
--- is returned even when its item is NULL (the player put everything away), so
--- an empty hand can be told apart from no event yet.
+-- Last wield at/before a tick, including NULL for an empty hand. Its id
+-- distinguishes an earlier wield from the item supplied by a later rejoin.
 ---@param rec table
 ---@param player_id integer
 ---@param tick integer
@@ -253,10 +250,8 @@ function reader.last_wield(rec, player_id, tick)
 	return nil
 end
 
--- The data of a player's last animation event at or before a tick, still as the
--- JSON string the file holds; the session parses it. There is no animation
--- event in a recording made before poses were captured, which is what keeps
--- those readable by the speed-and-dig fallback.
+-- Last animation JSON at/before a tick. The session parses it; absence leaves
+-- movement-based pose inference enabled.
 ---@param rec table
 ---@param player_id integer
 ---@param tick integer

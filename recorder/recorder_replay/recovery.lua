@@ -1,12 +1,8 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (c) 2026 Marko Petrović
 
--- What a participant had before they started watching, and how they get it
--- back. The stash lives in the player's own metadata, so it travels with the
--- player: a disconnect, a crash or a restart leaves a record that the next join
--- can act on. On a game whose world is not persistent the game owns inventories
--- and the return to the match, so nothing is stashed; its hooks put the player
--- back instead.
+-- Persist the pre-replay position/inventory in player metadata for recovery
+-- after disconnects or crashes. Non-persistent worlds delegate this to game hooks.
 
 local recovery = {}
 
